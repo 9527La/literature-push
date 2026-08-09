@@ -22,7 +22,7 @@
     "express": "^5.2.1",
     "lucide-react": "^0.561.0",
     "node-cron": "^4.2.1",
-    "nodemailer": "^8.0.10",
+    "nodemailer": "^9.0.5",
     "pdf-lib": "^1.17.1",
     "pdfmake": "^0.3.11",
     "react": "^19.2.3",
@@ -30,5 +30,8 @@
   },
   "devDependencies": {
     "vite": "^7.2.7"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
   }
 }
