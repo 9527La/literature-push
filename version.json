@@ -1,0 +1,14 @@
+﻿{
+    "version":  "2026.06.15",
+    "date":  "2026-06-15",
+    "notes":  [
+                  "新增关键词统计页，支持按期刊和时间筛选关键词频次",
+                  "新增内容显示开关：可自由控制作者、关键词、摘要的显示",
+                  "新增关键词和期刊多选筛选，支持按相关性排序",
+                  "搜索词和选中关键词在文献中高亮显示",
+                  "新增用户周报邮箱和意见反馈功能",
+                  "页面导航移至顶部，筛选面板移至左侧",
+                  "支持局域网内其他设备访问"
+              ],
+    "changelog":  "## 新功能\n\n- 新增使用说明页面，介绍系统所有功能和使用方式\n- 周报邮箱新增已保存状态显示，方便查看是否已填写\n- 测试周报改为近一个月文献范围\n- **文献推送功能全面升级**：\n  - 周报递送更名为\"文献推送\"\n  - 新增推送期刊范围选择，可指定特定期刊进行推送\n  - 支持三种推送频率：每天、每周、每月\n  - 邮件内容可自定义：附件文件、摘要、关键词、翻译\n  - 新增\"立即发送\"按钮，可手动触发推送\n- 新增 5 本 Elsevier 期刊订阅：**Applied Energy**、**Energy**、**IJEPES**、**Renewable Energy**、**Journal of Modern Power Systems and Clean Energy**\n  - Applied Energy、Energy、Renewable Energy 为能源类综合期刊，系统自动筛选电气领域相关文献（含 power grid、electric、microgrid、renewable energy、energy storage、smart grid 等关键词）\n  - IJEPES 和 Journal of Modern Power Systems and Clean Energy 为电气电力专业期刊，无需筛选\n\n## 优化\n\n- 部署脚本自动读取 CHANGELOG.md 作为版本更新通知\n- 版本弹窗支持 Markdown 格式渲染\n- 增强 Elsevier 期刊元数据提取：\n  - 新增 Elsevier 专用解析器，支持 JSON-LD 结构化数据和 Elsevier meta 标签\n  - OpenAlex 数据源增强：使用 `primary_topic` 和高分 `concepts` 作为关键词补充\n  - 改进爬虫 User-Agent 和请求头，提高 Elsevier 页面访问成功率"
+}

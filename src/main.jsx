@@ -1,0 +1,1615 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import {
+  ArrowDownUp,
+  BarChart3,
+  Bell,
+  BookOpen,
+  Check,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Filter,
+  Heart,
+  HelpCircle,
+  Mail,
+  MessageSquare,
+  RefreshCw,
+  Save,
+  ScrollText,
+  Search,
+  Send,
+  Settings,
+  Star,
+  Languages,
+  X
+} from "lucide-react";
+import "./styles.css";
+
+const api = {
+  async get(path) {
+    const response = await fetch(path);
+    if (!response.ok) {
+      const text = await response.text();
+      try { throw new Error(JSON.parse(text).error || text); } catch { throw new Error(text); }
+    }
+    return response.json();
+  },
+  async post(path, body) {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      try { throw new Error(JSON.parse(text).error || text); } catch { throw new Error(text); }
+    }
+    return response.json();
+  },
+  async put(path, body) {
+    const response = await fetch(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      try { throw new Error(JSON.parse(text).error || text); } catch { throw new Error(text); }
+    }
+    return response.json();
+  }
+};
+
+function formatDate(value) {
+  if (!value) return "未知日期";
+  if (/^\d{8}$/.test(value)) return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}`;
+  return String(value).slice(0, 10);
+}
+
+function Highlight({ text, terms }) {
+  if (!text || !terms || !terms.length) return <>{text}</>;
+  const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).filter(Boolean);
+  if (!escaped.length) return <>{text}</>;
+  const regex = new RegExp(`(${escaped.join("|")})`, "gi");
+  const parts = String(text).split(regex);
+  return (
+    <>
+      {parts.map((part, i) =>
+        regex.test(part) ? (
+          <mark key={i}>{part}</mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
+}
+
+function renderInlineMarkdown(text) {
+  const parts = [];
+  const re = /(\*\*.*?\*\*)|(\*.*?\*)|(`[^`]+`)|(\[([^\]]+)\]\(([^)]+)\))/g;
+  let lastIdx = 0, m, key = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > lastIdx) parts.push(text.slice(lastIdx, m.index));
+    if (m[1]) parts.push(<strong key={key++}>{m[1].slice(2, -2)}</strong>);
+    else if (m[2]) parts.push(<em key={key++}>{m[2].slice(1, -1)}</em>);
+    else if (m[3]) parts.push(<code key={key++}>{m[3].slice(1, -1)}</code>);
+    else if (m[4]) parts.push(<a key={key++} href={m[6]} target="_blank" rel="noopener noreferrer">{m[5]}</a>);
+    lastIdx = m.index + m[0].length;
+  }
+  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+  return parts.length ? parts : text;
+}
+
+function renderMarkdown(md) {
+  if (!md) return null;
+  const lines = md.split("\n");
+  const blocks = [];
+  let listItems = [], bKey = 0;
+  function flushList() {
+    if (listItems.length) {
+      blocks.push(<ul key={bKey++}>{listItems.map((item, i) => <li key={i}>{renderInlineMarkdown(item)}</li>)}</ul>);
+      listItems = [];
+    }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed.startsWith("### ")) {
+      flushList();
+      blocks.push(<h5 key={bKey++}>{renderInlineMarkdown(trimmed.slice(4))}</h5>);
+    } else if (trimmed.startsWith("## ")) {
+      flushList();
+      blocks.push(<h4 key={bKey++}>{renderInlineMarkdown(trimmed.slice(3))}</h4>);
+    } else if (trimmed.startsWith("# ")) {
+      flushList();
+      blocks.push(<h3 key={bKey++}>{renderInlineMarkdown(trimmed.slice(2))}</h3>);
+    } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      listItems.push(trimmed.slice(2));
+    } else if (trimmed === "") {
+      flushList();
+    } else {
+      flushList();
+      blocks.push(<p key={bKey++}>{renderInlineMarkdown(trimmed)}</p>);
+    }
+  }
+  flushList();
+  return blocks;
+}
+
+function UpdateModal({ versionInfo, onClose }) {
+  const hasChangelog = versionInfo.changelog && versionInfo.changelog.trim();
+  const hasNotes = versionInfo.notes && versionInfo.notes.length > 0;
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section className="update-dialog" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        <header className="update-dialog-header">
+          <div>
+            <h3>版本更新</h3>
+            <span className="update-version">v{versionInfo.version} · {versionInfo.date}</span>
+          </div>
+          <button className="icon-button" onClick={onClose}><X size={20} /></button>
+        </header>
+        <div className="update-notes">
+          {hasChangelog ? (
+            <div className="update-markdown">{renderMarkdown(versionInfo.changelog)}</div>
+          ) : hasNotes ? (
+            <ul>{versionInfo.notes.map((note, i) => <li key={i}>{note}</li>)}</ul>
+          ) : (
+            <p className="update-empty">本次为常规更新，包含问题修复和性能优化。</p>
+          )}
+        </div>
+        <footer className="update-actions">
+          <button className="primary" onClick={onClose}>知道了</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function HelpView() {
+  return (
+    <div className="help-view">
+      <section className="help-section">
+        <h3><BookOpen size={18} /> 系统简介</h3>
+        <p>本系统自动订阅电力系统领域期刊的最新文献，提供文献浏览、关键词统计、周报邮件推送等功能。所有数据在本地运行，无需注册账号。</p>
+      </section>
+
+      <section className="help-section">
+        <h3><Bell size={18} /> 最新文献</h3>
+        <p>展示所有已订阅期刊的最新论文，支持以下操作：</p>
+        <ul>
+          <li><strong>搜索</strong>：在顶部搜索框输入关键词，可搜索标题、作者、摘要和关键词内容。匹配的文本会高亮显示。</li>
+          <li><strong>筛选</strong>：左侧面板提供多维度筛选条件，包括期刊（多选）、关键词频次（多选）、时间范围、仅未读、仅收藏。不同筛选条件之间为"且"关系，同一条件内多选为"或"关系。</li>
+          <li><strong>排序</strong>：支持按发布时间（升序/降序）和按相关性排序。相关性排序根据搜索词在标题（权重 3）、关键词（权重 2）、摘要（权重 1）中出现的次数计算。</li>
+          <li><strong>收藏与阅读</strong>：点击心形图标收藏文献，点击文献卡片可展开查看详情，同时自动标记为已读。</li>
+          <li><strong>显示控制</strong>：可通过顶部的显示开关控制作者、关键词、摘要的可见性。</li>
+        </ul>
+      </section>
+
+      <section className="help-section">
+        <h3><BarChart3 size={18} /> 关键词统计</h3>
+        <p>汇总所有文献中出现的关键词及其频次，帮助了解研究热点趋势。</p>
+        <ul>
+          <li>可按期刊和时间范围筛选关键词统计结果。</li>
+          <li>点击某个关键词下方的文献卡片可展开查看论文详情。</li>
+        </ul>
+      </section>
+
+      <section className="help-section">
+        <h3><Mail size={18} /> 文献推送</h3>
+        <p>管理邮件订阅和系统设置：</p>
+        <ul>
+          <li><strong>周报邮箱</strong>：填写您的邮箱地址并保存，系统将按设定频率推送最新文献。每台设备（基于 IP）独立保存邮箱，互不影响。点击"发送测试邮箱"可收到一封测试邮件。</li>
+          <li><strong>意见反馈</strong>：填写邮箱后可提交意见反馈，反馈内容会直接发送至管理员邮箱。每小时限提交一次。</li>
+          <li><strong>订阅期刊</strong>：勾选需要关注的期刊，只有已订阅期刊的文献会出现在最新文献页和推送中。</li>
+          <li><strong>补全关键词</strong>：对缺失关键词的文献自动补全，提升关键词统计的完整性。</li>
+          <li><strong>推送设置</strong>：可选择每天、每周或每月推送，设置发送时间（时:分），自定义邮件内容（附件、摘要、关键词、翻译），指定推送期刊范围。</li>
+        </ul>
+      </section>
+
+      <section className="help-section">
+        <h3><RefreshCw size={18} /> 数据刷新</h3>
+        <p>系统支持两种刷新方式：</p>
+        <ul>
+          <li><strong>手动刷新</strong>：点击页面右上角"立即刷新"按钮，即时拉取最新文献。</li>
+          <li><strong>定时刷新</strong>：在周报递送页面中设置 Cron 表达式，系统将按计划自动获取新文献。默认每天凌晨执行一次。</li>
+        </ul>
+      </section>
+
+      <section className="help-section">
+        <h3><HelpCircle size={18} /> 常见问题</h3>
+        <ul>
+          <li><strong>局域网访问</strong>：同一 Wi-Fi 下的其他设备可通过浏览器输入本机显示的局域网地址访问本系统。</li>
+          <li><strong>版本更新</strong>：系统更新后会弹出更新说明，可选择"知道了"关闭，下次更新前不再重复提示。</li>
+          <li><strong>数据同步</strong>：管理员执行一键部署后，所有用户刷新页面即可获取最新版本和数据。</li>
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+function App() {
+  const [articles, setArticles] = useState([]);
+  const [settings, setSettings] = useState({ journals: [], refreshCron: "", emailEnabled: false, emailRecipients: [] });
+  const [status, setStatus] = useState(null);
+  const [availableJournals, setAvailableJournals] = useState([]);
+  const [filters, setFilters] = useState({ journal: [], q: "", keyword: [], unread: false, favorite: false, from: "", to: "", sort: "desc" });
+  const [activeView, setActiveView] = useState("feed");
+  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [versionInfo, setVersionInfo] = useState(null);
+  
+  // Debounced search
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [debouncedFilters, setDebouncedFilters] = useState(filters);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedFilters(filters), 300);
+    return () => clearTimeout(timer);
+  }, [filters]);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    Object.entries(debouncedFilters).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        if (value.length) params.set(key, value.join(","));
+      } else if (value) {
+        params.set(key, String(value));
+      }
+    });
+    setDebouncedQuery(params.toString());
+  }, [debouncedFilters]);
+
+  useEffect(() => {
+    fetch("/version.json")
+      .then((r) => r.json())
+      .then((data) => {
+        const dismissed = localStorage.getItem("dismissedVersion");
+        if (data.version && dismissed !== data.version) {
+          setVersionInfo(data);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  function dismissVersion() {
+    if (versionInfo) localStorage.setItem("dismissedVersion", versionInfo.version);
+    setVersionInfo(null);
+  }
+
+  const query = useMemo(() => {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        if (value.length) params.set(key, value.join(","));
+      } else if (value) {
+        params.set(key, String(value));
+      }
+    });
+    return params.toString();
+  }, [filters]);
+
+  async function loadAll() {
+    const [nextSettings, nextStatus, nextArticles, journals] = await Promise.all([
+      api.get("/api/settings"),
+      api.get("/api/status"),
+      api.get(`/api/articles${debouncedQuery ? `?${debouncedQuery}` : ""}`),
+      availableJournals.length ? Promise.resolve(availableJournals) : api.get("/api/journals")
+    ]);
+    setSettings(nextSettings);
+    setStatus(nextStatus);
+    setArticles(nextArticles);
+    if (!availableJournals.length) setAvailableJournals(journals);
+    setInitialLoading(false);
+  }
+
+  useEffect(() => {
+    loadAll().catch((error) => setMessage(error.message));
+  }, [debouncedQuery]);
+
+  async function refresh() {
+    setLoading(true);
+    setMessage("");
+    try {
+      const result = await api.post("/api/refresh");
+      setMessage(result.status === "success" ? `刷新完成，新增 ${result.addedCount} 篇文献。` : result.message);
+      setTimeout(() => setMessage(""), 3000);
+      await loadAll();
+    } catch (error) {
+      setMessage(error.message);
+      setTimeout(() => setMessage(""), 5000);
+      await api.get("/api/status").then(setStatus).catch(() => {});
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function markRead(id) {
+    await api.post(`/api/articles/${id}/read`);
+    await loadAll();
+  }
+
+  async function toggleFavorite(id) {
+    await api.post(`/api/articles/${id}/favorite`);
+    await loadAll();
+  }
+
+  async function saveSettings(nextSettings) {
+    const saved = await api.put("/api/settings", nextSettings);
+    setSettings(saved);
+    setMessage("设置已保存。");
+  }
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="topbar-left">
+          <div className="brand">
+            <BookOpen size={22} />
+            <span>电力文献</span>
+          </div>
+          <nav className="nav">
+            <button className={activeView === "feed" ? "active" : ""} onClick={() => setActiveView("feed")}>
+              <Bell size={16} /> 最新文献
+              {status?.unreadCount > 0 && <span className="nav-badge" aria-label={`${status.unreadCount} 篇未读`}>{status.unreadCount}</span>}
+            </button>
+            <button className={activeView === "stats" ? "active" : ""} onClick={() => setActiveView("stats")}>
+              <BarChart3 size={16} /> 关键词统计
+            </button>
+            <button className={activeView === "settings" ? "active" : ""} onClick={() => setActiveView("settings")}>
+              <Settings size={16} /> 文献推送
+            </button>
+            <button className={activeView === "help" ? "active" : ""} onClick={() => setActiveView("help")}>
+              <HelpCircle size={16} /> 使用说明
+            </button>
+          </nav>
+        </div>
+        <div className="topbar-right">
+          <div className="topbar-stats">
+            <span>总文献 <strong>{status?.articleCount ?? 0}</strong></span>
+            {status?.unreadCount > 0 && (
+              <span className="stat-badge stat-badge-unread">未读 <strong>{status.unreadCount}</strong></span>
+            )}
+            {status?.readCount > 0 && (
+              <span>已读 <strong>{status.readCount}</strong></span>
+            )}
+            {status?.favoriteCount > 0 && (
+              <span className="stat-badge stat-badge-fav">收藏 <strong>{status.favoriteCount}</strong></span>
+            )}
+          </div>
+          <button className="primary" onClick={refresh} disabled={loading}>
+            <RefreshCw size={16} className={loading ? "spin" : ""} />
+            {loading ? "刷新中" : "立即刷新"}
+          </button>
+        </div>
+      </header>
+
+      {message && <div className="message">{message}</div>}
+
+      <main className="main">
+        {initialLoading ? (
+          <div className="loading-skeleton">
+            <div className="skeleton" style={{ height: 40, marginBottom: 16 }} />
+            <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
+            <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
+            <div className="skeleton" style={{ height: 120 }} />
+          </div>
+        ) : activeView === "feed" ? (
+          <Feed
+            articles={articles}
+            subscribedJournals={settings.journals.map((j) => j.name)}
+            journals={settings.journals}
+            filters={filters}
+            setFilters={setFilters}
+            markRead={markRead}
+            toggleFavorite={toggleFavorite}
+          />
+        ) : activeView === "settings" ? (
+          <SettingsView
+            settings={settings}
+            availableJournals={availableJournals}
+            status={status}
+            onSave={saveSettings}
+          />
+        ) : activeView === "help" ? (
+          <HelpView />
+        ) : (
+          <StatsView journals={settings.journals} markRead={markRead} toggleFavorite={toggleFavorite} />
+        )}
+      </main>
+
+      {versionInfo && (
+        <UpdateModal versionInfo={versionInfo} onClose={dismissVersion} />
+      )}
+    </div>
+  );
+}
+
+function formatEmailRecipients(recipients = []) {
+  return recipients.join("\n");
+}
+
+function parseEmailRecipients(text) {
+  return text
+    .split(/[\n,;]+/)
+    .map((email) => email.trim())
+    .filter(Boolean);
+}
+
+function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite }) {
+  const [selectedArticle, setSelectedArticle] = useState(null);
+  const [display, setDisplay] = useState({ authors: true, keywords: true, abstract: true });
+  const [topKeywords, setTopKeywords] = useState([]);
+
+  useEffect(() => {
+    api.get("/api/keyword-stats").then((data) => {
+      setTopKeywords(data.keywords || []);
+    }).catch(() => {});
+  }, []);
+
+  function toggleDisplay(field) {
+    setDisplay((prev) => ({ ...prev, [field]: !prev[field] }));
+  }
+
+  // Only show articles from subscribed journals
+  const filteredArticles = articles.filter((article) =>
+    subscribedJournals.length === 0 || subscribedJournals.includes(article.journal)
+  );
+
+  const highlightTerms = useMemo(() => {
+    const terms = [];
+    if (filters.q && filters.q.trim()) terms.push(filters.q.trim());
+    if (filters.keyword && filters.keyword.length) terms.push(...filters.keyword);
+    return terms;
+  }, [filters.q, filters.keyword]);
+
+  const sortedArticles = useMemo(() => {
+    if (filters.sort !== "relevance" || !highlightTerms.length) return filteredArticles;
+    const countMatches = (text, terms) => {
+      if (!text) return 0;
+      const lower = text.toLowerCase();
+      let count = 0;
+      for (const t of terms) {
+        const tl = t.toLowerCase();
+        let pos = 0;
+        while ((pos = lower.indexOf(tl, pos)) !== -1) { count++; pos += tl.length; }
+      }
+      return count;
+    };
+    return [...filteredArticles].map((a) => {
+      const titleCount = countMatches(a.title, highlightTerms);
+      const keywordCount = countMatches(a.keywords, highlightTerms);
+      const abstractCount = countMatches(a.abstract, highlightTerms);
+      const score = titleCount * 3 + keywordCount * 2 + abstractCount;
+      return { ...a, _score: score, _total: titleCount + keywordCount + abstractCount };
+    }).sort((a, b) => b._score - a._score || b._total - a._total);
+  }, [filteredArticles, filters.sort, highlightTerms]);
+
+  return (
+    <div className="content-layout">
+      <aside className="filter-panel">
+        <div className="filter-group">
+          <h4><Search size={14} /> 搜索</h4>
+          <input
+            className="search-input"
+            value={filters.q}
+            onChange={(event) => setFilters({ ...filters, q: event.target.value })}
+            placeholder="搜索标题、摘要、作者或关键词"
+          />
+        </div>
+        <div className="filter-group">
+          <h4>期刊</h4>
+          <div className="keyword-filter-list">
+            {journals.map((j) => (
+              <button
+                key={j.name}
+                className={`keyword-filter-chip ${filters.journal.includes(j.name) ? "active" : ""}`}
+                onClick={() => {
+                  const next = filters.journal.includes(j.name)
+                    ? filters.journal.filter((k) => k !== j.name)
+                    : [...filters.journal, j.name];
+                  setFilters({ ...filters, journal: next });
+                }}
+                title={j.name}
+              >
+                <span className="kw-name">{j.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="filter-group">
+          <h4>时间范围</h4>
+          <input
+            type="date"
+            value={filters.from}
+            onChange={(event) => setFilters({ ...filters, from: event.target.value })}
+            aria-label="开始日期"
+          />
+          <input
+            type="date"
+            value={filters.to}
+            onChange={(event) => setFilters({ ...filters, to: event.target.value })}
+            aria-label="结束日期"
+          />
+        </div>
+        <div className="filter-group">
+          <h4>筛选</h4>
+          <div className="filter-row">
+            <label className="checkline">
+              <input
+                type="checkbox"
+                checked={filters.unread}
+                onChange={(event) => setFilters({ ...filters, unread: event.target.checked })}
+              />
+              仅未读
+            </label>
+            <label className="checkline">
+              <input
+                type="checkbox"
+                checked={filters.favorite}
+                onChange={(event) => setFilters({ ...filters, favorite: event.target.checked })}
+              />
+              仅收藏
+            </label>
+          </div>
+        </div>
+        <div className="filter-group">
+          <h4>关键词</h4>
+          <div className="keyword-filter-list">
+            {topKeywords.map((item) => (
+              <button
+                key={item.keyword}
+                className={`keyword-filter-chip ${filters.keyword.includes(item.keyword) ? "active" : ""}`}
+                onClick={() => {
+                  const next = filters.keyword.includes(item.keyword)
+                    ? filters.keyword.filter((k) => k !== item.keyword)
+                    : [...filters.keyword, item.keyword];
+                  setFilters({ ...filters, keyword: next });
+                }}
+                title={item.keyword}
+              >
+                <span className="kw-name">{item.keyword}</span>
+                <span className="kw-count">{item.count}</span>
+              </button>
+            ))}
+            {topKeywords.length === 0 && <span style={{ fontSize: 12, color: "var(--text-muted)" }}>暂无数据</span>}
+          </div>
+        </div>
+        <div className="filter-group">
+          <h4>排序</h4>
+          <label className="sort-select">
+            <ArrowDownUp size={14} />
+            <select
+              value={filters.sort}
+              onChange={(event) => setFilters({ ...filters, sort: event.target.value })}
+            >
+              <option value="desc">最新优先</option>
+              <option value="asc">最早优先</option>
+              <option value="relevance">按相关性</option>
+            </select>
+          </label>
+        </div>
+      </aside>
+      <section className="content-main">
+        <div className="display-toggles">
+          <span className="display-toggles-label">显示内容</span>
+          <button type="button" className={`display-toggle ${display.authors ? "active" : ""}`} onClick={() => toggleDisplay("authors")}>
+            {display.authors ? <Eye size={14} /> : <EyeOff size={14} />} 作者
+          </button>
+          <button type="button" className={`display-toggle ${display.keywords ? "active" : ""}`} onClick={() => toggleDisplay("keywords")}>
+            {display.keywords ? <Eye size={14} /> : <EyeOff size={14} />} 关键词
+          </button>
+          <button type="button" className={`display-toggle ${display.abstract ? "active" : ""}`} onClick={() => toggleDisplay("abstract")}>
+            {display.abstract ? <Eye size={14} /> : <EyeOff size={14} />} 摘要
+          </button>
+        </div>
+
+        <div className="article-count">
+          共 <strong>{sortedArticles.length}</strong> 篇文献
+          {sortedArticles.filter(a => a.is_read).length > 0 && <>，已读 <strong>{sortedArticles.filter(a => a.is_read).length}</strong> 篇</>}
+          {sortedArticles.filter(a => a.is_favorite).length > 0 && <>，收藏 <strong>{sortedArticles.filter(a => a.is_favorite).length}</strong> 篇</>}
+        </div>
+
+        <div className="article-list">
+          {sortedArticles.length === 0 ? (
+            <div className="empty">暂无文献。点击刷新从公开数据源获取，或调整筛选条件。</div>
+          ) : (
+            sortedArticles.map((article) => (
+              <article className={`article ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}`} key={article.id}>
+                <div className="article-main">
+                  <div className="article-meta">
+                    <span>{article.journal || "未知期刊"}</span>
+                    <span>{formatDate(article.published_at)}</span>
+                    {article.year && <span>{article.year}</span>}
+                    {article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : <span className="article-status-badge unread-badge">未读</span>}
+                    {article.is_favorite ? <span className="article-status-badge fav-badge"><Star size={11} /> 收藏</span> : null}
+                  </div>
+                  <button className="title-button" onClick={() => setSelectedArticle(article)}>
+                    <Highlight text={article.title} terms={highlightTerms} />
+                  </button>
+                  {display.authors && article.authors && <p className="authors"><Highlight text={article.authors} terms={highlightTerms} /></p>}
+                  {display.keywords && article.keywords && (
+                    <div className="keywords">
+                      {article.keywords.split(/[;；]/).map((kw, i) => kw.trim()).filter(Boolean).map((kw, i) => (
+                        <span className={`keyword-tag ${highlightTerms.some((t) => kw.toLowerCase().includes(t.toLowerCase())) ? "keyword-tag-highlight" : ""}`} key={i}>
+                          <Highlight text={kw} terms={highlightTerms} />
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {display.abstract && article.abstract && <p className="abstract"><Highlight text={article.abstract} terms={highlightTerms} /></p>}
+                </div>
+                <div className="article-actions">
+                  <button title="查看摘要" onClick={() => setSelectedArticle(article)}>
+                    <ScrollText size={18} />
+                  </button>
+                  <button title={article.is_read ? "取消已读" : "标记已读"} className={`action-read ${article.is_read ? "action-done" : ""}`} onClick={() => markRead(article.id)}>
+                    <Check size={18} />
+                  </button>
+                  <button
+                    title={article.is_favorite ? "取消收藏" : "收藏"}
+                    className={article.is_favorite ? "selected" : ""}
+                    onClick={() => toggleFavorite(article.id)}
+                  >
+                    {article.is_favorite ? <Star size={18} /> : <Heart size={18} />}
+                  </button>
+                  {article.url && (
+                    <a title="打开原文" href={article.url} target="_blank" rel="noreferrer">
+                      <ExternalLink size={18} />
+                    </a>
+                  )}
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+      </section>
+      {selectedArticle && (
+        <ArticleDialog
+          article={selectedArticle}
+          close={() => setSelectedArticle(null)}
+          markRead={markRead}
+          toggleFavorite={toggleFavorite}
+        />
+      )}
+    </div>
+  );
+}
+
+function ArticleDialog({ article, close, markRead, toggleFavorite }) {
+  const [detail, setDetail] = useState(article);
+  const [enriching, setEnriching] = useState(!article.abstract);
+  const [enrichError, setEnrichError] = useState("");
+  const [translation, setTranslation] = useState(null);
+  const [translating, setTranslating] = useState("");
+  const [translationError, setTranslationError] = useState("");
+
+  useEffect(() => {
+    let ignore = false;
+    setDetail(article);
+    setEnrichError("");
+    setTranslation(null);
+    setTranslationError("");
+    if (article.abstract) {
+      setEnriching(false);
+      return () => {
+        ignore = true;
+      };
+    }
+
+    setEnriching(true);
+    api.get(`/api/articles/${article.id}/enrich`)
+      .then((nextArticle) => {
+        if (!ignore) setDetail(nextArticle);
+      })
+      .catch((error) => {
+        if (!ignore) setEnrichError(error.message);
+      })
+      .finally(() => {
+        if (!ignore) setEnriching(false);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [article]);
+
+  async function translate(targetLanguage) {
+    setTranslating(targetLanguage);
+    setTranslationError("");
+    try {
+      const nextTranslation = await api.post(`/api/articles/${detail.id}/translate`, { targetLanguage });
+      setTranslation(nextTranslation);
+    } catch (error) {
+      setTranslationError(error.message);
+    } finally {
+      setTranslating("");
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={close}>
+      <section className="article-dialog" role="dialog" aria-modal="true" aria-label="文献摘要" onClick={(event) => event.stopPropagation()}>
+        <header className="dialog-header">
+          <div>
+            <div className="article-meta">
+              <span>{detail.journal || "未知期刊"}</span>
+              <span>{formatDate(detail.published_at)}</span>
+              {detail.year && <span>{detail.year}</span>}
+            </div>
+            <h3>{detail.title}</h3>
+          </div>
+          <button className="icon-button" title="关闭" onClick={close}>
+            <X size={20} />
+          </button>
+        </header>
+        {detail.authors && <p className="dialog-authors">{detail.authors}</p>}
+        <dl className="paper-fields">
+          {detail.doi && (
+            <>
+              <dt>DOI</dt>
+              <dd>{detail.doi}</dd>
+            </>
+          )}
+          {(detail.volume || detail.issue) && (
+            <>
+              <dt>卷期</dt>
+              <dd>{[detail.volume && `Vol. ${detail.volume}`, detail.issue && `No. ${detail.issue}`].filter(Boolean).join(" · ")}</dd>
+            </>
+          )}
+        </dl>
+        {detail.keywords && (
+          <div className="keywords-panel">
+            <h4>关键词 / Keywords</h4>
+            <div className="keywords">
+              {detail.keywords.split(/[;；]/).map((kw, i) => kw.trim()).filter(Boolean).map((kw, i) => (
+                <span className="keyword-tag" key={i}>{kw}</span>
+              ))}
+            </div>
+            {translation?.keywords && (
+              <>
+                <h4 style={{ marginTop: "12px" }}>{translation.target_language === "en" ? "English Keywords" : "中文关键词"}</h4>
+                <div className="keywords">
+                  {translation.keywords.split(/[;；]/).map((kw, i) => kw.trim()).filter(Boolean).map((kw, i) => (
+                    <span className="keyword-tag keyword-tag-translated" key={i}>{kw}</span>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        <div className="abstract-panel">
+          <h4>摘要</h4>
+          {enriching ? (
+            <p>正在从公开页面补全摘要...</p>
+          ) : (
+            <p>{detail.abstract || "公开数据源和页面爬取都暂未提供该文献摘要，可通过原文链接查看。"}</p>
+          )}
+          {enrichError && <p className="crawl-note">爬取补全未成功：{enrichError}</p>}
+        </div>
+        <div className="translation-tools">
+          <button className="secondary" onClick={() => translate("zh")} disabled={Boolean(translating)}>
+            <Languages size={18} /> {translating === "zh" ? "翻译中" : "译为中文"}
+          </button>
+          <button className="secondary" onClick={() => translate("en")} disabled={Boolean(translating)}>
+            <Languages size={18} /> {translating === "en" ? "Translating" : "译为英文"}
+          </button>
+        </div>
+        {translationError && <p className="crawl-note">翻译未成功：{translationError}</p>}
+        {translation && (
+          <div className="translation-panel">
+            <h4>{translation.target_language === "zh" ? "中文翻译" : "English Translation"}</h4>
+            {translation.title && <strong>{translation.title}</strong>}
+            {translation.abstract && <p>{translation.abstract}</p>}
+          </div>
+        )}
+        <footer className="dialog-actions">
+          <button className="secondary" onClick={() => markRead(detail.id)}>
+            <Check size={18} /> 标记已读
+          </button>
+          <button className="secondary" onClick={() => toggleFavorite(detail.id)}>
+            {detail.is_favorite ? <Star size={18} /> : <Heart size={18} />} 收藏
+          </button>
+          {detail.url && (
+            <a className="primary" href={detail.url} target="_blank" rel="noreferrer">
+              <ExternalLink size={18} /> 打开原文
+            </a>
+          )}
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function WordCloud({ keywords, maxCount, onSelect, selectedKeyword }) {
+  if (!keywords || keywords.length === 0) {
+    return <div className="empty">没有关键词数据。</div>;
+  }
+
+  const minSize = 12;
+  const maxSize = 48;
+  
+  const getColor = (count, max) => {
+    const ratio = count / max;
+    if (ratio > 0.7) return "#0d9488";
+    if (ratio > 0.4) return "#d97706";
+    if (ratio > 0.2) return "#5a6070";
+    return "#8b919e";
+  };
+
+  return (
+    <div className="wordcloud-container">
+      <div className="wordcloud">
+        {keywords.slice(0, 50).map((item, i) => {
+          const ratio = item.count / maxCount;
+          const fontSize = minSize + (maxSize - minSize) * ratio;
+          const color = getColor(item.count, maxCount);
+          const isSelected = selectedKeyword === item.keyword;
+          
+          return (
+            <span
+              key={item.keyword}
+              className={`wordcloud-word ${isSelected ? "selected" : ""}`}
+              style={{
+                fontSize: `${fontSize}px`,
+                color: isSelected ? "#0d9488" : color,
+                fontWeight: ratio > 0.5 ? 700 : ratio > 0.2 ? 600 : 400,
+                opacity: 0.6 + ratio * 0.4
+              }}
+              onClick={() => onSelect(item.keyword)}
+              title={`${item.keyword}: ${item.count} 篇`}
+            >
+              {item.keyword}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CooccurrenceView({ data, loading }) {
+  if (loading) {
+    return <div className="empty">加载中...</div>;
+  }
+  
+  if (!data || !data.cooccurrences || data.cooccurrences.length === 0) {
+    return <div className="empty">没有共现数据。</div>;
+  }
+
+  const maxCoCount = data.cooccurrences[0]?.count || 1;
+
+  return (
+    <div className="cooccurrence-container">
+      <div className="cooccurrence-header">
+        <h4>关键词共现分析</h4>
+        <span className="cooccurrence-hint">显示频率最高的 {data.cooccurrences.length} 个关键词对</span>
+      </div>
+      <div className="cooccurrence-list">
+        {data.cooccurrences.slice(0, 30).map((item, i) => (
+          <div key={`${item.keyword1}-${item.keyword2}`} className="cooccurrence-item">
+            <span className="cooccurrence-rank">{i + 1}</span>
+            <div className="cooccurrence-keywords">
+              <span className="cooccurrence-keyword">{item.keyword1}</span>
+              <span className="cooccurrence-link">↔</span>
+              <span className="cooccurrence-keyword">{item.keyword2}</span>
+            </div>
+            <div className="cooccurrence-bar-wrap">
+              <div 
+                className="cooccurrence-bar" 
+                style={{ width: `${(item.count / maxCoCount) * 100}%` }}
+              />
+            </div>
+            <span className="cooccurrence-count">{item.count}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StatsView({ journals, markRead, toggleFavorite }) {
+  const [filters, setFilters] = useState({ journal: "", from: "", to: "" });
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [selectedKeyword, setSelectedKeyword] = useState(null);
+  const [selectedArticle, setSelectedArticle] = useState(null);
+  const [keywordSearch, setKeywordSearch] = useState("");
+  const [viewMode, setViewMode] = useState("list");
+  const [cooccurrenceData, setCooccurrenceData] = useState(null);
+
+  async function fetchStats() {
+    setLoading(true);
+    setSelectedKeyword(null);
+    try {
+      const params = new URLSearchParams();
+      if (filters.journal) params.set("journal", filters.journal);
+      if (filters.from) params.set("from", filters.from);
+      if (filters.to) params.set("to", filters.to);
+      const result = await api.get(`/api/keyword-stats?${params}`);
+      setStats(result);
+      
+      const coResult = await api.get(`/api/keyword-cooccurrence?${params}`);
+      setCooccurrenceData(coResult);
+    } catch {
+      setStats(null);
+      setCooccurrenceData(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function openArticle(article) {
+    try {
+      const full = await api.get(`/api/articles/${article.id}/enrich`);
+      setSelectedArticle(full);
+    } catch {
+      setSelectedArticle(article);
+    }
+  }
+
+  useEffect(() => {
+    fetchStats();
+  }, []);
+
+  const maxCount = stats?.keywords?.[0]?.count || 1;
+  
+  const filteredKeywords = useMemo(() => {
+    if (!stats?.keywords) return [];
+    if (!keywordSearch.trim()) return stats.keywords;
+    const search = keywordSearch.toLowerCase();
+    return stats.keywords.filter((item) => item.keyword.toLowerCase().includes(search));
+  }, [stats?.keywords, keywordSearch]);
+
+  return (
+    <div className="stats-view">
+      <section className="stats-filters">
+        <label>
+          <Filter size={16} />
+          <select
+            value={filters.journal}
+            onChange={(e) => setFilters({ ...filters, journal: e.target.value })}
+          >
+            <option value="">全部期刊</option>
+            {journals.map((j) => (
+              <option value={j.name} key={j.name}>{j.name}</option>
+            ))}
+          </select>
+        </label>
+        <input
+          type="date"
+          value={filters.from}
+          onChange={(e) => setFilters({ ...filters, from: e.target.value })}
+          aria-label="开始日期"
+        />
+        <input
+          type="date"
+          value={filters.to}
+          onChange={(e) => setFilters({ ...filters, to: e.target.value })}
+          aria-label="结束日期"
+        />
+        <button className="primary" onClick={fetchStats} disabled={loading}>
+          <BarChart3 size={16} /> {loading ? "统计中..." : "统计"}
+        </button>
+      </section>
+
+      {stats && (
+        <>
+          <div className="stats-summary">
+            共 <strong>{stats.totalArticles}</strong> 篇文献，提取出 <strong>{stats.keywords.length}</strong> 个不重复关键词
+            {keywordSearch && <>，匹配 <strong>{filteredKeywords.length}</strong> 个</>}
+          </div>
+
+          <div className="stats-view-toggle">
+            <button 
+              className={`stats-view-btn ${viewMode === "list" ? "active" : ""}`}
+              onClick={() => setViewMode("list")}
+            >
+              <BarChart3 size={14} /> 列表
+            </button>
+            <button 
+              className={`stats-view-btn ${viewMode === "wordcloud" ? "active" : ""}`}
+              onClick={() => setViewMode("wordcloud")}
+            >
+              <span style={{fontSize: '14px'}}>☁</span> 词云
+            </button>
+            <button 
+              className={`stats-view-btn ${viewMode === "cooccurrence" ? "active" : ""}`}
+              onClick={() => setViewMode("cooccurrence")}
+            >
+              <span style={{fontSize: '14px'}}>🔗</span> 共现
+            </button>
+          </div>
+
+          <div className="stats-layout">
+            <div className="keyword-freq-list">
+              <div className="keyword-search-box">
+                <Search size={14} />
+                <input
+                  type="text"
+                  placeholder="搜索关键词..."
+                  value={keywordSearch}
+                  onChange={(e) => setKeywordSearch(e.target.value)}
+                />
+                {keywordSearch && (
+                  <button className="keyword-search-clear" onClick={() => setKeywordSearch("")}>
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+              
+              {viewMode === "wordcloud" ? (
+                <WordCloud 
+                  keywords={filteredKeywords} 
+                  maxCount={maxCount}
+                  onSelect={setSelectedKeyword}
+                  selectedKeyword={selectedKeyword}
+                />
+              ) : viewMode === "cooccurrence" ? (
+                <CooccurrenceView data={cooccurrenceData} loading={loading} />
+              ) : (
+                filteredKeywords.length === 0 ? (
+                  <div className="empty">所选条件下没有关键词数据。</div>
+                ) : (
+                  filteredKeywords.map((item, i) => (
+                    <button
+                      key={item.keyword}
+                      className={`keyword-freq-item ${selectedKeyword === item.keyword ? "selected" : ""}`}
+                      onClick={() => setSelectedKeyword(selectedKeyword === item.keyword ? null : item.keyword)}
+                    >
+                      <span className="keyword-freq-rank">{i + 1}</span>
+                      <span className="keyword-freq-name">{item.keyword}</span>
+                      <div className="keyword-freq-bar-wrap">
+                        <div
+                          className="keyword-freq-bar"
+                          style={{ width: `${(item.count / maxCount) * 100}%` }}
+                        />
+                      </div>
+                      <span className="keyword-freq-count">{item.count}</span>
+                    </button>
+                  ))
+                )
+              )}
+            </div>
+
+            {selectedKeyword && (
+              <div className="keyword-articles-panel">
+                <div className="keyword-articles-header">
+                  <h3>{selectedKeyword}</h3>
+                  <span className="keyword-articles-count">
+                    {(stats.keywords.find((k) => k.keyword === selectedKeyword)?.articles || []).length} 篇文献
+                  </span>
+                  <button className="icon-button" onClick={() => setSelectedKeyword(null)}>
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="keyword-articles-list">
+                  {(stats.keywords.find((k) => k.keyword === selectedKeyword)?.articles || []).map((article) => (
+                    <button className="keyword-article-card" key={article.id} onClick={() => openArticle(article)}>
+                      <div className="keyword-article-meta">
+                        <span>{article.journal}</span>
+                        <span>{formatDate(article.published_at)}</span>
+                      </div>
+                      <div className="keyword-article-title">{article.title}</div>
+                      {article.url && (
+                        <a
+                          href={article.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="keyword-article-link"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <ExternalLink size={12} /> 原文链接
+                        </a>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {selectedArticle && (
+        <ArticleDialog
+          article={selectedArticle}
+          close={() => setSelectedArticle(null)}
+          markRead={markRead}
+          toggleFavorite={toggleFavorite}
+        />
+      )}
+    </div>
+  );
+}
+
+function SettingsView({ settings, availableJournals, status, onSave }) {
+  const [selectedJournalNames, setSelectedJournalNames] = useState(
+    new Set(settings.journals.map((j) => j.name))
+  );
+  const [refreshCron, setRefreshCron] = useState(settings.refreshCron);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichMessage, setEnrichMessage] = useState("");
+
+  const [userEmail, setUserEmail] = useState("");
+  const [savedEmail, setSavedEmail] = useState("");
+  const [emailMsg, setEmailMsg] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState("");
+
+  const [fbContent, setFbContent] = useState("");
+  const [fbMsg, setFbMsg] = useState("");
+  const [fbSending, setFbSending] = useState(false);
+
+  // Push settings
+  const [pushEnabled, setPushEnabled] = useState(settings.pushEnabled || false);
+  const [pushFrequency, setPushFrequency] = useState(settings.pushFrequency || "weekly");
+  const [pushCron, setPushCron] = useState(settings.pushCron || "0 8 * * 1");
+  const [pushDays, setPushDays] = useState(settings.pushDays || 7);
+  const [pushIncludeFile, setPushIncludeFile] = useState(settings.pushIncludeFile !== false);
+  const [pushIncludeAbstract, setPushIncludeAbstract] = useState(settings.pushIncludeAbstract !== false);
+  const [pushIncludeKeywords, setPushIncludeKeywords] = useState(settings.pushIncludeKeywords !== false);
+  const [pushIncludeTranslation, setPushIncludeTranslation] = useState(settings.pushIncludeTranslation !== false);
+  const [pushJournalFilter, setPushJournalFilter] = useState(settings.pushJournalFilter || "");
+  const [pushSelectedJournals, setPushSelectedJournals] = useState(new Set());
+  const [sending, setSending] = useState(false);
+  const [pushMsg, setPushMsg] = useState("");
+  const [pushEditing, setPushEditing] = useState(false);
+  
+  // Cron time selection state
+  const [pushHour, setPushHour] = useState("8");
+  const [pushMinute, setPushMinute] = useState("0");
+  const [pushWeekday, setPushWeekday] = useState("1");
+  const [pushMonthDay, setPushMonthDay] = useState("1");
+  
+  // Generate Cron expression from selections
+  function generateCron() {
+    const minute = pushMinute || "0";
+    const hour = pushHour || "8";
+    if (pushFrequency === "daily") return `${minute} hour * * *`.replace("hour", hour);
+    if (pushFrequency === "weekly") return `${minute} hour * * ${pushWeekday}`.replace("hour", hour);
+    if (pushFrequency === "monthly") return `${minute} hour ${pushMonthDay} * *`.replace("hour", hour);
+    return `${minute} hour * * 1`.replace("hour", hour);
+  }
+  
+  // Parse Cron expression to populate selections
+  function parseCron(cronStr) {
+    const parts = (cronStr || "0 8 * * 1").split(" ");
+    if (parts.length >= 5) {
+      setPushMinute(parts[0] === "*" ? "0" : parts[0]);
+      setPushHour(parts[1] === "*" ? "8" : parts[1]);
+      setPushWeekday(parts[4] === "*" ? "1" : parts[4]);
+      setPushMonthDay(parts[2] === "*" ? "1" : parts[2]);
+    }
+  }
+  
+  // Initialize from settings
+  useEffect(() => {
+    if (settings.pushCron) parseCron(settings.pushCron);
+  }, [settings.pushCron]);
+
+  useEffect(() => {
+    setSelectedJournalNames(new Set(settings.journals.map((j) => j.name)));
+    setRefreshCron(settings.refreshCron);
+    setPushEnabled(settings.pushEnabled || false);
+    setPushFrequency(settings.pushFrequency || "weekly");
+    setPushCron(settings.pushCron || "0 8 * * 1");
+    setPushDays(settings.pushDays || 7);
+    setPushIncludeFile(settings.pushIncludeFile !== false);
+    setPushIncludeAbstract(settings.pushIncludeAbstract !== false);
+    setPushIncludeKeywords(settings.pushIncludeKeywords !== false);
+    setPushIncludeTranslation(settings.pushIncludeTranslation !== false);
+    setPushJournalFilter(settings.pushJournalFilter || "");
+    // Parse pushJournalFilter to Set for checkbox selection
+    if (settings.pushJournalFilter) {
+      setPushSelectedJournals(new Set(settings.pushJournalFilter.split(",").map((s) => s.trim()).filter(Boolean)));
+    } else {
+      setPushSelectedJournals(new Set());
+    }
+    if (settings.pushCron) parseCron(settings.pushCron);
+    // If push is already enabled, start in view mode (not editing)
+    if (settings.pushEnabled) {
+      setPushEditing(false);
+    }
+  }, [settings]);
+
+  useEffect(() => {
+    api.get("/api/user-email").then((data) => {
+      setUserEmail(data.email || "");
+      setSavedEmail(data.email || "");
+    }).catch(() => {});
+  }, []);
+
+  function toggleJournal(name) {
+    const next = new Set(selectedJournalNames);
+    next.has(name) ? next.delete(name) : next.add(name);
+    setSelectedJournalNames(next);
+  }
+
+  function togglePushJournal(name) {
+    const next = new Set(pushSelectedJournals);
+    next.has(name) ? next.delete(name) : next.add(name);
+    setPushSelectedJournals(next);
+    setPushJournalFilter([...next].join(", "));
+  }
+
+  async function saveEmail() {
+    setEmailMsg("");
+    try {
+      await api.post("/api/user-email", { email: userEmail });
+      setSavedEmail(userEmail);
+      setEmailMsg("邮箱已保存");
+    } catch (e) { setEmailMsg(e.message); }
+  }
+
+  async function testEmail() {
+    setTesting(true); setTestMsg("");
+    try {
+      const res = await api.post("/api/test-email");
+      setTestMsg(res.sent ? `测试邮件已发送至 ${res.email}` : "发送失败，请检查 SMTP 配置");
+    } catch (e) { setTestMsg(e.message); }
+    finally { setTesting(false); }
+  }
+
+  async function submitFeedback() {
+    if (!userEmail) { setFbMsg("请先填写并保存邮箱"); return; }
+    if (!fbContent.trim()) { setFbMsg("反馈内容不能为空"); return; }
+    setFbSending(true); setFbMsg("");
+    try {
+      await api.post("/api/feedback", { content: fbContent });
+      setFbMsg("反馈已提交，感谢！");
+      setFbContent("");
+    } catch (e) { setFbMsg(e.message); }
+    finally { setFbSending(false); }
+  }
+
+  async function enrichKeywords() {
+    setEnriching(true); setEnrichMessage("正在批量补全关键词...");
+    try {
+      const res = await api.post("/api/enrich-keywords");
+      setEnrichMessage(`补全完成：成功 ${res.enriched} 篇${res.failed ? `，失败 ${res.failed} 篇` : ""}`);
+    } catch (e) { setEnrichMessage(`补全失败：${e.message}`); }
+    finally { setEnriching(false); }
+  }
+
+  async function sendPush() {
+    setSending(true); setPushMsg("");
+    try {
+      const res = await api.post("/api/push/send");
+      setPushMsg(res.sent ? `推送成功，共 ${res.count} 篇文献` : "推送失败，请检查 SMTP 配置");
+    } catch (e) { setPushMsg(e.message); }
+    finally { setSending(false); }
+  }
+
+  function submit(event) {
+    event.preventDefault();
+    const journals = availableJournals.filter((j) => selectedJournalNames.has(j.name));
+    const generatedCron = generateCron();
+    onSave({ 
+      journals, 
+      refreshCron, 
+      emailEnabled: settings.emailEnabled, 
+      emailRecipients: settings.emailRecipients,
+      pushEnabled,
+      pushFrequency,
+      pushCron: generatedCron,
+      pushDays,
+      pushIncludeFile,
+      pushIncludeAbstract,
+      pushIncludeKeywords,
+      pushIncludeTranslation,
+      pushJournalFilter
+    });
+    setPushCron(generatedCron);
+    setPushEditing(false);
+  }
+
+  return (
+    <div className="settings-view">
+      <div className="settings-columns">
+        {/* Left Column: Email + Push Settings */}
+        <div className="settings-left">
+          <section className="settings-section">
+            <h4><Mail size={15} /> 我的周报邮箱</h4>
+            <p className="section-hint">填写后系统将每周推送最新文献到此邮箱。</p>
+            <div className="saved-email-status">
+              {savedEmail ? (
+                <span>已保存：<strong>{savedEmail}</strong>{userEmail !== savedEmail && <span className="unsaved-hint">（已修改，未保存）</span>}</span>
+              ) : (
+                <span className="no-email-hint">尚未保存邮箱</span>
+              )}
+            </div>
+            <div className="email-row">
+              <input
+                type="email"
+                value={userEmail}
+                onChange={(e) => setUserEmail(e.target.value)}
+                placeholder="your@email.com"
+              />
+              <button className="primary" type="button" onClick={saveEmail}><Save size={14} /> 保存</button>
+            </div>
+            {emailMsg && <div className="inline-msg">{emailMsg}</div>}
+            <button className="secondary" type="button" onClick={testEmail} disabled={testing || !savedEmail} style={{ marginTop: 8 }}>
+              <Send size={14} /> {testing ? "发送中..." : "发送测试邮箱"}
+            </button>
+            {testMsg && <div className="inline-msg">{testMsg}</div>}
+          </section>
+
+          <form className="settings-section" onSubmit={submit}>
+            <h4><Send size={15} /> 文献推送</h4>
+            <p className="section-hint">配置自动推送文献到邮箱的设置。</p>
+            
+            <div className="push-settings">
+              <label className="checkline">
+                <input
+                  type="checkbox"
+                  checked={pushEnabled}
+                  onChange={(e) => {
+                    setPushEnabled(e.target.checked);
+                    if (e.target.checked) setPushEditing(true);
+                  }}
+                />
+                启用自动推送
+              </label>
+
+              {pushEnabled && !pushEditing && (
+                <div className="push-summary">
+                  <div className="push-summary-grid">
+                    <div className="push-summary-item">
+                      <span className="push-summary-label">推送频率</span>
+                      <span className="push-summary-value">
+                        {pushFrequency === "daily" ? "每天" : pushFrequency === "weekly" ? "每周" : "每月"}
+                      </span>
+                    </div>
+                    <div className="push-summary-item">
+                      <span className="push-summary-label">发送时间</span>
+                      <span className="push-summary-value">
+                        {pushHour.padStart(2, '0')}:{pushMinute}
+                        {pushFrequency === "weekly" && ` 周${["日","一","二","三","四","五","六"][pushWeekday]}`}
+                        {pushFrequency === "monthly" && ` 每月${pushMonthDay}日`}
+                      </span>
+                    </div>
+                    <div className="push-summary-item">
+                      <span className="push-summary-label">邮件内容</span>
+                      <span className="push-summary-value">
+                        {[pushIncludeFile && "附件", pushIncludeAbstract && "摘要", pushIncludeKeywords && "关键词", pushIncludeTranslation && "翻译"].filter(Boolean).join("、")}
+                      </span>
+                    </div>
+                    <div className="push-summary-item">
+                      <span className="push-summary-label">推送期刊</span>
+                      <span className="push-summary-value">
+                        {pushJournalFilter ? pushSelectedJournals.size + " 本期刊" : "全部已订阅"}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="push-actions">
+                    <button className="secondary" type="button" onClick={() => setPushEditing(true)}>
+                      <Settings size={16} /> 修改推送设置
+                    </button>
+                    <button className="secondary" type="button" onClick={sendPush} disabled={sending || !savedEmail}>
+                      <Send size={16} /> {sending ? "发送中..." : "立即发送"}
+                    </button>
+                  </div>
+                  {pushMsg && <div className="inline-msg">{pushMsg}</div>}
+                </div>
+              )}
+
+              {pushEnabled && pushEditing && (
+                <>
+                  <div className="push-frequency">
+                    <span className="settings-label">推送频率</span>
+                    <div className="radio-group">
+                      <label className="radio-item">
+                        <input
+                          type="radio"
+                          name="pushFrequency"
+                          value="daily"
+                          checked={pushFrequency === "daily"}
+                          onChange={(e) => setPushFrequency(e.target.value)}
+                        />
+                        每天
+                      </label>
+                      <label className="radio-item">
+                        <input
+                          type="radio"
+                          name="pushFrequency"
+                          value="weekly"
+                          checked={pushFrequency === "weekly"}
+                          onChange={(e) => setPushFrequency(e.target.value)}
+                        />
+                        每周
+                      </label>
+                      <label className="radio-item">
+                        <input
+                          type="radio"
+                          name="pushFrequency"
+                          value="monthly"
+                          checked={pushFrequency === "monthly"}
+                          onChange={(e) => setPushFrequency(e.target.value)}
+                        />
+                        每月
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="push-time-selector">
+                    <span className="settings-label">发送时间</span>
+                    <div className="time-selector-row">
+                      <div className="time-select-group">
+                        <select value={pushHour} onChange={(e) => setPushHour(e.target.value)}>
+                          {Array.from({ length: 24 }, (_, i) => (
+                            <option key={i} value={String(i)}>{String(i).padStart(2, '0')} 时</option>
+                          ))}
+                        </select>
+                        <span className="time-separator">:</span>
+                        <select value={pushMinute} onChange={(e) => setPushMinute(e.target.value)}>
+                          {["00", "15", "30", "45"].map((m) => (
+                            <option key={m} value={m}>{m} 分</option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      {pushFrequency === "weekly" && (
+                        <div className="time-select-group">
+                          <select value={pushWeekday} onChange={(e) => setPushWeekday(e.target.value)}>
+                            <option value="1">周一</option>
+                            <option value="2">周二</option>
+                            <option value="3">周三</option>
+                            <option value="4">周四</option>
+                            <option value="5">周五</option>
+                            <option value="6">周六</option>
+                            <option value="0">周日</option>
+                          </select>
+                        </div>
+                      )}
+                      
+                      {pushFrequency === "monthly" && (
+                        <div className="time-select-group">
+                          <select value={pushMonthDay} onChange={(e) => setPushMonthDay(e.target.value)}>
+                            {Array.from({ length: 28 }, (_, i) => (
+                              <option key={i + 1} value={String(i + 1)}>每月 {i + 1} 日</option>
+                            ))}
+                            <option value="28">每月 28 日</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                    <p className="field-hint">当前设置：{generateCron()}</p>
+                  </div>
+
+                  <div className="push-content-options">
+                    <span className="settings-label">邮件内容</span>
+                    <div className="checkbox-group">
+                      <label className="checkline">
+                        <input
+                          type="checkbox"
+                          checked={pushIncludeFile}
+                          onChange={(e) => setPushIncludeFile(e.target.checked)}
+                        />
+                        附件文件
+                      </label>
+                      <label className="checkline">
+                        <input
+                          type="checkbox"
+                          checked={pushIncludeAbstract}
+                          onChange={(e) => setPushIncludeAbstract(e.target.checked)}
+                        />
+                        摘要
+                      </label>
+                      <label className="checkline">
+                        <input
+                          type="checkbox"
+                          checked={pushIncludeKeywords}
+                          onChange={(e) => setPushIncludeKeywords(e.target.checked)}
+                        />
+                        关键词
+                      </label>
+                      <label className="checkline">
+                        <input
+                          type="checkbox"
+                          checked={pushIncludeTranslation}
+                          onChange={(e) => setPushIncludeTranslation(e.target.checked)}
+                        />
+                        翻译
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="push-journal-filter">
+                    <span className="settings-label">推送期刊范围</span>
+                    <p className="field-hint">勾选需要推送的期刊，不勾选则推送所有已订阅期刊</p>
+                    <div className="push-journal-list">
+                      <label className="checkline push-journal-all">
+                        <input
+                          type="checkbox"
+                          checked={pushSelectedJournals.size === 0}
+                          onChange={() => {
+                            setPushSelectedJournals(new Set());
+                            setPushJournalFilter("");
+                          }}
+                        />
+                        全部已订阅期刊
+                      </label>
+                      {availableJournals.map((j) => (
+                        <label className="checkline" key={j.name}>
+                          <input
+                            type="checkbox"
+                            checked={pushSelectedJournals.has(j.name)}
+                            onChange={() => togglePushJournal(j.name)}
+                          />
+                          {j.name}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="push-actions">
+                    <button className="primary" type="submit"><Save size={16} /> 保存推送设置</button>
+                    <button className="secondary" type="button" onClick={() => setPushEditing(false)}>
+                      取消
+                    </button>
+                    <button className="secondary" type="button" onClick={sendPush} disabled={sending || !savedEmail}>
+                      <Send size={16} /> {sending ? "发送中..." : "立即发送"}
+                    </button>
+                  </div>
+                  {pushMsg && <div className="inline-msg">{pushMsg}</div>}
+                </>
+              )}
+            </div>
+          </form>
+        </div>
+
+        {/* Right Column: Journals + Feedback */}
+        <div className="settings-right">
+          <form className="settings-section" onSubmit={submit}>
+            <h4>订阅期刊</h4>
+            <div className="journal-compact-header">
+              <span className="section-hint">勾选订阅期刊，最新文献仅展示已订阅的论文。</span>
+              <div>
+                <button type="button" className="link-button" onClick={() => setSelectedJournalNames(new Set(availableJournals.map((j) => j.name)))}>全选</button>
+                <button type="button" className="link-button" onClick={() => setSelectedJournalNames(new Set())}>清空</button>
+              </div>
+            </div>
+            <div className="journal-list-compact">
+              {availableJournals.map((j) => (
+                <label className="journal-item" key={j.name}>
+                  <input type="checkbox" checked={selectedJournalNames.has(j.name)} onChange={() => toggleJournal(j.name)} />
+                  <span>{j.name}</span>
+                </label>
+              ))}
+            </div>
+            <div className="settings-actions">
+              <button className="primary" type="submit"><Save size={16} /> 保存设置</button>
+              <button className="secondary" type="button" onClick={enrichKeywords} disabled={enriching}>
+                <RefreshCw size={16} className={enriching ? "spin" : ""} /> {enriching ? "补全中..." : "补全关键词"}
+              </button>
+            </div>
+            {enrichMessage && <div className="inline-msg">{enrichMessage}</div>}
+          </form>
+
+          <section className="settings-section">
+            <h4><MessageSquare size={15} /> 意见反馈</h4>
+            <p className="section-hint">{userEmail ? "反馈将发送至管理员邮箱，每小时可提交一次。" : "请先保存邮箱后再提交反馈。"}</p>
+            <textarea
+              value={fbContent}
+              onChange={(e) => setFbContent(e.target.value)}
+              rows={4}
+              placeholder="请输入您的意见或建议..."
+              disabled={!userEmail}
+            />
+            <button className="primary" type="button" onClick={submitFeedback} disabled={fbSending || !userEmail} style={{ marginTop: 8 }}>
+              <Send size={14} /> {fbSending ? "提交中..." : "提交反馈"}
+            </button>
+            {fbMsg && <div className="inline-msg">{fbMsg}</div>}
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+createRoot(document.getElementById("root")).render(<App />);
