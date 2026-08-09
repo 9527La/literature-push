@@ -6,11 +6,14 @@ import {
   Bell,
   BookOpen,
   Check,
+  CloudDownload,
+  CloudUpload,
   ExternalLink,
   Eye,
   EyeOff,
   Filter,
   Heart,
+  HardDrive,
   HelpCircle,
   Mail,
   MessageSquare,
@@ -34,6 +37,10 @@ function getAdminToken() {
   return localStorage.getItem("adminToken") || "";
 }
 
+function getUserToken() {
+  return localStorage.getItem("userToken") || "";
+}
+
 async function parseResponse(response) {
   if (response.ok) return response.json();
   const text = await response.text();
@@ -51,7 +58,20 @@ function requestHeaders(hasBody = false) {
   if (hasBody) headers["Content-Type"] = "application/json";
   const token = getAdminToken();
   if (token) headers.Authorization = `Bearer ${token}`;
+  const userToken = getUserToken();
+  if (userToken) headers["X-User-Token"] = userToken;
   return headers;
+}
+
+const DEFAULT_FILTERS = { journal: [], q: "", keyword: [], unread: false, favorite: false, from: "", to: "", sort: "desc" };
+const DEFAULT_DISPLAY = { authors: true, keywords: true, abstract: true, bilingual: true };
+
+function readLocalPersonalization() {
+  try {
+    return JSON.parse(localStorage.getItem("personalizationSnapshot") || "null");
+  } catch {
+    return null;
+  }
 }
 
 const api = {
@@ -190,7 +210,7 @@ function HelpView() {
     <div className="help-view">
       <section className="help-section">
         <h3><BookOpen size={18} /> 系统简介</h3>
-        <p>本系统自动订阅电力系统领域期刊的最新文献，提供文献浏览、关键词统计、周报邮件推送等功能。所有数据在本地运行，无需注册账号。</p>
+        <p>本系统自动订阅电力系统领域期刊的最新文献，提供文献浏览、关键词统计、邮件推送、公共反馈和账户个性设置同步。</p>
       </section>
 
       <section className="help-section">
@@ -201,7 +221,7 @@ function HelpView() {
           <li><strong>筛选</strong>：左侧面板提供多维度筛选条件，包括期刊（多选）、关键词频次（多选）、时间范围、仅未读、仅收藏。不同筛选条件之间为"且"关系，同一条件内多选为"或"关系。</li>
           <li><strong>排序</strong>：支持按发布时间（升序/降序）和按相关性排序。相关性排序根据搜索词在标题（权重 3）、关键词（权重 2）、摘要（权重 1）中出现的次数计算。</li>
           <li><strong>收藏与阅读</strong>：点击心形图标收藏文献，点击文献卡片可展开查看详情，同时自动标记为已读。</li>
-          <li><strong>显示控制</strong>：可通过顶部的显示开关控制作者、关键词、摘要的可见性。</li>
+          <li><strong>显示控制</strong>：可通过主页面顶部开关控制作者、关键词、摘要以及中英文标题的可见性。</li>
         </ul>
       </section>
 
@@ -218,11 +238,21 @@ function HelpView() {
         <h3><Mail size={18} /> 文献推送</h3>
         <p>管理邮件订阅和系统设置：</p>
         <ul>
-          <li><strong>周报邮箱</strong>：填写您的邮箱地址并保存，系统将按设定频率推送最新文献。每台设备（基于 IP）独立保存邮箱，互不影响。点击"发送测试邮箱"可收到一封测试邮件。</li>
-          <li><strong>意见反馈</strong>：填写邮箱后可提交意见反馈，反馈内容会直接发送至管理员邮箱。每小时限提交一次。</li>
+          <li><strong>周报邮箱</strong>：填写您的邮箱地址并保存，系统将按账户配置的频率推送最新文献。点击“发送测试邮箱”可收到一封测试邮件。</li>
           <li><strong>订阅期刊</strong>：勾选需要关注的期刊，只有已订阅期刊的文献会出现在最新文献页和推送中。</li>
           <li><strong>补全关键词</strong>：对缺失关键词的文献自动补全，提升关键词统计的完整性。</li>
           <li><strong>推送设置</strong>：可选择每天、每周或每月推送，设置发送时间（时:分），自定义邮件内容（附件、摘要、关键词、翻译），指定推送期刊范围。</li>
+        </ul>
+      </section>
+
+      <section className="help-section">
+        <h3><UserRound size={18} /> 账户与个性设置</h3>
+        <ul>
+          <li><strong>注册限制</strong>：每个 IP 地址只能注册一个账号，已有账号可在其他设备登录。</li>
+          <li><strong>账户资料</strong>：可保存姓名、入学年份、学历和周报邮箱。</li>
+          <li><strong>本机保存</strong>：开启自动保存后，筛选、列表显示、期刊订阅和推送配置会保存在当前浏览器。</li>
+          <li><strong>远端同步</strong>：登录后可手动上传当前设置，也可从远端账户载入。</li>
+          <li><strong>公共反馈</strong>：反馈直接公开展示，不发送邮件；管理员可回复或删除。</li>
         </ul>
       </section>
 
@@ -252,7 +282,10 @@ function App() {
   const [settings, setSettings] = useState({ journals: [], refreshCron: "", emailEnabled: false, emailRecipients: [] });
   const [status, setStatus] = useState(null);
   const [availableJournals, setAvailableJournals] = useState([]);
-  const [filters, setFilters] = useState({ journal: [], q: "", keyword: [], unread: false, favorite: false, from: "", to: "", sort: "desc" });
+  const [autoSavePersonalization, setAutoSavePersonalization] = useState(() => localStorage.getItem("autoSavePersonalization") === "true");
+  const localPersonalization = useMemo(() => localStorage.getItem("autoSavePersonalization") === "true" ? readLocalPersonalization() : null, []);
+  const [filters, setFilters] = useState(() => ({ ...DEFAULT_FILTERS, ...(localPersonalization?.filters || {}) }));
+  const [displayPreferences, setDisplayPreferences] = useState(() => ({ ...DEFAULT_DISPLAY, ...(localPersonalization?.displayPreferences || {}) }));
   const [activeView, setActiveView] = useState(() => {
     const requested = window.location.hash.slice(1);
     return ["feed", "stats", "settings", "feedback", "account", "help"].includes(requested) ? requested : "feed";
@@ -261,7 +294,7 @@ function App() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [versionInfo, setVersionInfo] = useState(null);
-  const [account, setAccount] = useState({ email: "", name: "", grade: "", show_bilingual_titles: true });
+  const [account, setAccount] = useState({ email: "", name: "", enrollment_year: null, degree: "", authenticated: false, can_register: true, username: "" });
   const [isAdmin, setIsAdmin] = useState(false);
   
   // Debounced search
@@ -296,6 +329,11 @@ function App() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!autoSavePersonalization || initialLoading) return;
+    localStorage.setItem("personalizationSnapshot", JSON.stringify({ filters, displayPreferences, settings }));
+  }, [autoSavePersonalization, initialLoading, filters, displayPreferences, settings]);
 
   useEffect(() => {
     window.history.replaceState(null, "", `#${activeView}`);
@@ -341,6 +379,7 @@ function App() {
     setStatus(nextStatus);
     setArticles(nextArticles);
     setAccount(nextAccount);
+    if (getUserToken() && !nextAccount.authenticated) localStorage.removeItem("userToken");
     if (!availableJournals.length) setAvailableJournals(journals);
     setInitialLoading(false);
   }
@@ -389,6 +428,55 @@ function App() {
     return saved;
   }
 
+  function getPersonalizationSnapshot() {
+    return { filters, displayPreferences, settings };
+  }
+
+  function savePersonalizationLocal() {
+    localStorage.setItem("personalizationSnapshot", JSON.stringify(getPersonalizationSnapshot()));
+  }
+
+  async function applyPersonalization(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") throw new Error("没有可载入的个性设置");
+    if (snapshot.filters) setFilters({ ...DEFAULT_FILTERS, ...snapshot.filters });
+    if (snapshot.displayPreferences) setDisplayPreferences({ ...DEFAULT_DISPLAY, ...snapshot.displayPreferences });
+    if (snapshot.settings) {
+      const saved = await api.put("/api/settings", snapshot.settings);
+      setSettings(saved);
+    }
+  }
+
+  async function authenticate(mode, credentials) {
+    const result = await api.post(`/api/auth/${mode}`, credentials);
+    localStorage.setItem("userToken", result.token);
+    await loadAll();
+  }
+
+  function logoutUser() {
+    localStorage.removeItem("userToken");
+    setAccount({ email: "", name: "", enrollment_year: null, degree: "", authenticated: false, can_register: false, username: "" });
+    loadAll().catch((error) => setMessage(error.message));
+  }
+
+  async function uploadPersonalization() {
+    const result = await api.put("/api/auth/preferences", { preferences: getPersonalizationSnapshot() });
+    setAccount((current) => ({ ...current, preferences_updated_at: result.updated_at }));
+    return result;
+  }
+
+  async function loadRemotePersonalization() {
+    const result = await api.get("/api/auth/preferences");
+    if (!result.preferences) throw new Error("远端尚未保存个性设置");
+    await applyPersonalization(result.preferences);
+    return result;
+  }
+
+  function setAutoSave(enabled) {
+    setAutoSavePersonalization(enabled);
+    localStorage.setItem("autoSavePersonalization", String(enabled));
+    if (enabled) savePersonalizationLocal();
+  }
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">跳到主要内容</a>
@@ -413,7 +501,7 @@ function App() {
               <MessageSquare size={16} /> 公共反馈
             </button>
             <button className={activeView === "account" ? "active" : ""} onClick={() => setActiveView("account")}>
-              <UserRound size={16} /> 我的账户
+              <UserRound size={16} /> {account.authenticated ? account.username : "登录账户"}
             </button>
             <button className={activeView === "help" ? "active" : ""} onClick={() => setActiveView("help")}>
               <HelpCircle size={16} /> 使用说明
@@ -459,8 +547,8 @@ function App() {
             setFilters={setFilters}
             markRead={markRead}
             toggleFavorite={toggleFavorite}
-            showBilingualTitles={account.show_bilingual_titles}
-            onToggleBilingualTitles={() => saveAccount({ ...account, show_bilingual_titles: !account.show_bilingual_titles })}
+            displayPreferences={displayPreferences}
+            onDisplayPreferencesChange={setDisplayPreferences}
           />
         ) : activeView === "settings" ? (
           <SettingsView
@@ -472,7 +560,18 @@ function App() {
         ) : activeView === "help" ? (
           <HelpView />
         ) : activeView === "account" ? (
-          <AccountView account={account} onSave={saveAccount} />
+          <AccountView
+            account={account}
+            onSave={saveAccount}
+            onAuthenticate={authenticate}
+            onLogout={logoutUser}
+            autoSavePersonalization={autoSavePersonalization}
+            onAutoSaveChange={setAutoSave}
+            onSaveLocal={savePersonalizationLocal}
+            onLoadLocal={() => applyPersonalization(readLocalPersonalization())}
+            onUploadRemote={uploadPersonalization}
+            onLoadRemote={loadRemotePersonalization}
+          />
         ) : activeView === "feedback" ? (
           <FeedbackView
             account={account}
@@ -502,20 +601,34 @@ function parseEmailRecipients(text) {
     .filter(Boolean);
 }
 
-function AccountView({ account, onSave }) {
+function AccountView({
+  account,
+  onSave,
+  onAuthenticate,
+  onLogout,
+  autoSavePersonalization,
+  onAutoSaveChange,
+  onSaveLocal,
+  onLoadLocal,
+  onUploadRemote,
+  onLoadRemote
+}) {
   const [form, setForm] = useState(account);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [authMode, setAuthMode] = useState("login");
+  const [credentials, setCredentials] = useState({ username: "", password: "", confirmPassword: "" });
+  const currentYear = new Date().getFullYear();
 
   useEffect(() => setForm(account), [account]);
 
-  async function submit(event) {
+  async function submitProfile(event) {
     event.preventDefault();
     setSaving(true);
     setMessage("");
     try {
       await onSave(form);
-      setMessage("账户资料与标题显示偏好已保存。");
+      setMessage("账户资料已保存。");
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -523,41 +636,97 @@ function AccountView({ account, onSave }) {
     }
   }
 
+  async function submitAuth(event) {
+    event.preventDefault();
+    if (authMode === "register" && credentials.password !== credentials.confirmPassword) {
+      setMessage("两次输入的密码不一致");
+      return;
+    }
+    setSaving(true);
+    setMessage("");
+    try {
+      await onAuthenticate(authMode, { username: credentials.username, password: credentials.password });
+      setCredentials({ username: "", password: "", confirmPassword: "" });
+      setMessage(authMode === "register" ? "账户已注册并登录。" : "登录成功。");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function runSettingAction(action, successMessage) {
+    setSaving(true);
+    setMessage("");
+    try {
+      await Promise.resolve(action());
+      setMessage(successMessage);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!account.authenticated) {
+    return (
+      <section className="profile-layout" aria-labelledby="account-title">
+        <div className="page-intro">
+          <span className="eyebrow">账户身份</span>
+          <h1 id="account-title">登录或注册</h1>
+          <p>登录后可维护个人资料，并在不同设备之间上传和载入个性设置。每个 IP 地址只能注册一个账号。</p>
+        </div>
+        <div className="auth-card">
+          <div className="auth-tabs" role="tablist">
+            <button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>登录</button>
+            <button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")} disabled={!account.can_register}>注册</button>
+          </div>
+          <form onSubmit={submitAuth} className="auth-form">
+            <label><span>用户名</span><input value={credentials.username} minLength={3} maxLength={32} autoComplete="username" onChange={(e) => setCredentials({ ...credentials, username: e.target.value })} placeholder="3–32 个字符" required /></label>
+            <label><span>密码</span><input type="password" value={credentials.password} minLength={8} maxLength={72} autoComplete={authMode === "login" ? "current-password" : "new-password"} onChange={(e) => setCredentials({ ...credentials, password: e.target.value })} placeholder="至少 8 个字符" required /></label>
+            {authMode === "register" && <label><span>确认密码</span><input type="password" value={credentials.confirmPassword} minLength={8} maxLength={72} autoComplete="new-password" onChange={(e) => setCredentials({ ...credentials, confirmPassword: e.target.value })} required /></label>}
+            {!account.can_register && <p className="auth-note">当前 IP 已注册过账号，如需使用请直接登录。</p>}
+            <button className="primary" disabled={saving}>{saving ? "处理中" : authMode === "login" ? "登录账户" : "注册并登录"}</button>
+            {message && <div className="inline-msg" role="status">{message}</div>}
+          </form>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="profile-layout" aria-labelledby="account-title">
-      <div className="page-intro">
-        <span className="eyebrow">个人空间</span>
-        <h1 id="account-title">我的账户</h1>
-        <p>完善姓名与年级，控制文献列表是否同时显示英文标题和中文译题。</p>
+      <div className="page-intro account-heading">
+        <div><span className="eyebrow">已登录 · {account.username}</span><h1 id="account-title">我的账户</h1><p>维护个人资料，并决定个性设置保存在本机还是同步至远端账户。</p></div>
+        <button className="secondary" type="button" onClick={onLogout}><LogOut size={15} /> 退出登录</button>
       </div>
-      <form className="profile-card" onSubmit={submit}>
-        <div className="profile-mark" aria-hidden="true">{(form.name || "用").slice(0, 1)}</div>
-        <div className="form-grid">
-          <label>
-            <span>姓名</span>
-            <input value={form.name || ""} maxLength={40} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="请输入姓名" />
-          </label>
-          <label>
-            <span>年级</span>
-            <input value={form.grade || ""} maxLength={40} onChange={(e) => setForm({ ...form, grade: e.target.value })} placeholder="例如：博士二年级" />
-          </label>
-          <label className="form-span">
-            <span>周报接收邮箱</span>
-            <input type="email" value={form.email || ""} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@example.com" />
-          </label>
-        </div>
-        <label className="preference-row">
-          <span>
-            <strong>显示中英文标题</strong>
-            <small>开启后，已有中文译题会显示在英文原标题下方。</small>
-          </span>
-          <input type="checkbox" checked={form.show_bilingual_titles !== false} onChange={(e) => setForm({ ...form, show_bilingual_titles: e.target.checked })} />
-        </label>
-        <div className="form-footer">
-          <span className="inline-msg" role="status">{message}</span>
-          <button className="primary" type="submit" disabled={saving}><Save size={16} /> {saving ? "保存中" : "保存账户信息"}</button>
-        </div>
-      </form>
+
+      <div className="account-grid">
+        <form className="profile-card" onSubmit={submitProfile}>
+          <div className="profile-mark" aria-hidden="true">{(form.name || account.username || "用").slice(0, 1)}</div>
+          <div className="form-grid">
+            <label><span>姓名</span><input value={form.name || ""} maxLength={40} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="请输入姓名" required /></label>
+            <label><span>入学年份</span><select value={form.enrollment_year || ""} onChange={(e) => setForm({ ...form, enrollment_year: Number(e.target.value) })} required><option value="">请选择</option>{Array.from({ length: currentYear - 1979 }, (_, i) => currentYear - i).map((year) => <option key={year} value={year}>{year}级</option>)}</select></label>
+            <label><span>学历</span><select value={form.degree || ""} onChange={(e) => setForm({ ...form, degree: e.target.value })} required><option value="">请选择</option><option value="硕士">硕士</option><option value="博士">博士</option></select></label>
+            <label><span>周报接收邮箱</span><input type="email" value={form.email || ""} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@example.com" /></label>
+          </div>
+          <div className="form-footer"><span>{message && <span className="inline-msg" role="status">{message}</span>}</span><button className="primary" type="submit" disabled={saving}><Save size={16} /> {saving ? "保存中" : "保存账户资料"}</button></div>
+        </form>
+
+        <section className="sync-card" aria-labelledby="sync-title">
+          <span className="eyebrow">个性设置</span>
+          <h2 id="sync-title">保存与同步</h2>
+          <p>包含文献筛选、列表内容显示、订阅期刊和推送配置。</p>
+          <label className="preference-row sync-toggle"><span><strong>自动保存在本机</strong><small>设置变化后自动写入当前浏览器。</small></span><input type="checkbox" checked={autoSavePersonalization} onChange={(e) => onAutoSaveChange(e.target.checked)} /></label>
+          <div className="sync-actions">
+            <button className="secondary" type="button" disabled={saving} onClick={() => runSettingAction(onSaveLocal, "当前个性设置已保存到本机。") }><HardDrive size={15} /> 保存到本机</button>
+            <button className="secondary" type="button" disabled={saving} onClick={() => runSettingAction(onLoadLocal, "已从本机载入个性设置。") }><HardDrive size={15} /> 从本机载入</button>
+            <button className="primary" type="button" disabled={saving} onClick={() => runSettingAction(onUploadRemote, "当前个性设置已上传到远端账户。") }><CloudUpload size={15} /> 上传远端</button>
+            <button className="secondary" type="button" disabled={saving} onClick={() => runSettingAction(onLoadRemote, "已从远端账户载入个性设置。") }><CloudDownload size={15} /> 从远端载入</button>
+          </div>
+          {account.preferences_updated_at && <small className="sync-time">远端最近保存：{formatDate(account.preferences_updated_at)}</small>}
+        </section>
+      </div>
     </section>
   );
 }
@@ -567,6 +736,7 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
   const [content, setContent] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
+  const [anonymous, setAnonymous] = useState(false);
   const [password, setPassword] = useState("");
   const [loginMessage, setLoginMessage] = useState("");
   const [replyDrafts, setReplyDrafts] = useState({});
@@ -584,7 +754,7 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
     setSending(true);
     setMessage("");
     try {
-      await api.post("/api/feedback", { content });
+      await api.post("/api/feedback", { content, anonymous: !account.authenticated || anonymous });
       setContent("");
       setMessage("反馈已公开发布，不会发送邮件。");
       await loadFeedback();
@@ -658,9 +828,10 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
         <div>
           <form className="feedback-composer" onSubmit={submitFeedback}>
             <div className="composer-author">
-              <div className="mini-avatar">{(account.name || "匿").slice(0, 1)}</div>
-              <span><strong>{account.name || "匿名用户"}</strong><small>{account.grade || "未填写年级"}</small></span>
+              <div className="mini-avatar">{(!account.authenticated || anonymous ? "匿" : account.name || account.username || "用").slice(0, 1)}</div>
+              <span><strong>{!account.authenticated || anonymous ? "匿名用户" : account.name || account.username}</strong><small>{!account.authenticated || anonymous ? "不会展示账户资料" : account.enrollment_year ? `${account.enrollment_year}级${account.degree ? ` ${account.degree}` : ""}` : "未填写入学年份"}</small></span>
             </div>
+            {account.authenticated && <fieldset className="identity-choice"><legend>发布身份</legend><label><input type="radio" name="feedbackIdentity" checked={!anonymous} onChange={() => setAnonymous(false)} /> 实名反馈</label><label><input type="radio" name="feedbackIdentity" checked={anonymous} onChange={() => setAnonymous(true)} /> 匿名反馈</label></fieldset>}
             <textarea value={content} onChange={(e) => setContent(e.target.value)} maxLength={2000} rows={5} placeholder="写下功能建议、数据问题或使用体验……" />
             <div className="composer-footer"><span>{content.length}/2000 · 每小时可提交一次</span><button className="primary" disabled={sending || !content.trim()}><Send size={15} /> {sending ? "发布中" : "公开发布"}</button></div>
             {message && <div className="inline-msg" role="status">{message}</div>}
@@ -700,10 +871,10 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
   );
 }
 
-function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, showBilingualTitles, onToggleBilingualTitles }) {
+function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
-  const [display, setDisplay] = useState({ authors: true, keywords: true, abstract: true });
   const [topKeywords, setTopKeywords] = useState([]);
+  const [visibleCount, setVisibleCount] = useState(50);
 
   useEffect(() => {
     api.get("/api/keyword-stats").then((data) => {
@@ -711,8 +882,10 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     }).catch(() => {});
   }, []);
 
+  useEffect(() => setVisibleCount(50), [filters]);
+
   function toggleDisplay(field) {
-    setDisplay((prev) => ({ ...prev, [field]: !prev[field] }));
+    onDisplayPreferencesChange({ ...displayPreferences, [field]: !displayPreferences[field] });
   }
 
   // Only show articles from subscribed journals
@@ -857,16 +1030,16 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
       <section className="content-main">
         <div className="display-toggles">
           <span className="display-toggles-label">显示内容</span>
-          <button type="button" className={`display-toggle ${display.authors ? "active" : ""}`} onClick={() => toggleDisplay("authors")}>
-            {display.authors ? <Eye size={14} /> : <EyeOff size={14} />} 作者
+          <button type="button" className={`display-toggle ${displayPreferences.authors ? "active" : ""}`} onClick={() => toggleDisplay("authors")}>
+            {displayPreferences.authors ? <Eye size={14} /> : <EyeOff size={14} />} 作者
           </button>
-          <button type="button" className={`display-toggle ${display.keywords ? "active" : ""}`} onClick={() => toggleDisplay("keywords")}>
-            {display.keywords ? <Eye size={14} /> : <EyeOff size={14} />} 关键词
+          <button type="button" className={`display-toggle ${displayPreferences.keywords ? "active" : ""}`} onClick={() => toggleDisplay("keywords")}>
+            {displayPreferences.keywords ? <Eye size={14} /> : <EyeOff size={14} />} 关键词
           </button>
-          <button type="button" className={`display-toggle ${display.abstract ? "active" : ""}`} onClick={() => toggleDisplay("abstract")}>
-            {display.abstract ? <Eye size={14} /> : <EyeOff size={14} />} 摘要
+          <button type="button" className={`display-toggle ${displayPreferences.abstract ? "active" : ""}`} onClick={() => toggleDisplay("abstract")}>
+            {displayPreferences.abstract ? <Eye size={14} /> : <EyeOff size={14} />} 摘要
           </button>
-          <button type="button" className={`display-toggle ${showBilingualTitles ? "active" : ""}`} onClick={onToggleBilingualTitles}>
+          <button type="button" className={`display-toggle ${displayPreferences.bilingual ? "active" : ""}`} onClick={() => toggleDisplay("bilingual")}>
             <Languages size={14} /> 中英文标题
           </button>
         </div>
@@ -881,7 +1054,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           {sortedArticles.length === 0 ? (
             <div className="empty">暂无文献。点击刷新从公开数据源获取，或调整筛选条件。</div>
           ) : (
-            sortedArticles.map((article) => (
+            sortedArticles.slice(0, visibleCount).map((article) => (
               <article className={`article ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}`} key={article.id}>
                 <div className="article-main">
                   <div className="article-meta">
@@ -894,11 +1067,11 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                   <button className="title-button" onClick={() => setSelectedArticle(article)}>
                     <Highlight text={article.title} terms={highlightTerms} />
                   </button>
-                  {showBilingualTitles && article.translated_title && article.translated_title !== article.title && (
+                  {displayPreferences.bilingual && article.translated_title && article.translated_title !== article.title && (
                     <p className="translated-title"><Languages size={14} /> {article.translated_title}</p>
                   )}
-                  {display.authors && article.authors && <p className="authors"><Highlight text={article.authors} terms={highlightTerms} /></p>}
-                  {display.keywords && article.keywords && (
+                  {displayPreferences.authors && article.authors && <p className="authors"><Highlight text={article.authors} terms={highlightTerms} /></p>}
+                  {displayPreferences.keywords && article.keywords && (
                     <div className="keywords">
                       {article.keywords.split(/[;；]/).map((kw, i) => kw.trim()).filter(Boolean).map((kw, i) => (
                         <span className={`keyword-tag ${highlightTerms.some((t) => kw.toLowerCase().includes(t.toLowerCase())) ? "keyword-tag-highlight" : ""}`} key={i}>
@@ -907,7 +1080,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                       ))}
                     </div>
                   )}
-                  {display.abstract && article.abstract && <p className="abstract"><Highlight text={article.abstract} terms={highlightTerms} /></p>}
+                  {displayPreferences.abstract && article.abstract && <p className="abstract"><Highlight text={article.abstract} terms={highlightTerms} /></p>}
                 </div>
                 <div className="article-actions">
                   <button title="查看摘要" onClick={() => setSelectedArticle(article)}>
@@ -933,6 +1106,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
             ))
           )}
         </div>
+        {visibleCount < sortedArticles.length && <div className="load-more"><button className="secondary" type="button" onClick={() => setVisibleCount((count) => count + 50)}>继续显示下一批文献（剩余 {sortedArticles.length - visibleCount} 篇）</button></div>}
       </section>
       {selectedArticle && (
         <ArticleDialog

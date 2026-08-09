@@ -28,7 +28,7 @@ const ENRICH_DELAY_MS = 500;
 let isRefreshing = false;
 let scheduledTask = null;
 let weeklyDigestTask = null;
-let pushTask = null;
+let pushTasks = [];
 
 function journalsToCollect(settings) {
   return [...new Map([...DEFAULT_JOURNALS, ...(settings.journals || [])].map((journal) => [journal.name, journal])).values()];
@@ -174,8 +174,9 @@ function safeCron(label, callback) {
 
 export function scheduleRefresh() {
   const settings = getSettings();
-  for (const task of [scheduledTask, weeklyDigestTask, pushTask]) task?.stop();
-  scheduledTask = weeklyDigestTask = pushTask = null;
+  for (const task of [scheduledTask, weeklyDigestTask, ...pushTasks]) task?.stop();
+  scheduledTask = weeklyDigestTask = null;
+  pushTasks = [];
   const cronOptions = { timezone: "Asia/Shanghai" };
 
   if (cron.validate(settings.refreshCron)) {
@@ -184,8 +185,23 @@ export function scheduleRefresh() {
 
   // The configurable push supersedes the legacy weekly job and avoids sending
   // two messages at the same time.
-  if (settings.pushEnabled && cron.validate(settings.pushCron)) {
-    pushTask = cron.schedule(settings.pushCron, safeCron("push", runPush), cronOptions);
+  const userTargets = getAllUserEmails()
+    .map((user) => ({ user, settings: getUserSettings(user.user_id) }))
+    .filter((target) => target.settings.pushEnabled && cron.validate(target.settings.pushCron));
+
+  if (userTargets.length) {
+    pushTasks = userTargets.map(({ user, settings: userSettings }) => cron.schedule(
+      userSettings.pushCron,
+      safeCron(`push:${user.user_id}`, async () => {
+        await refreshArticles();
+        const latest = getUserSettings(user.user_id);
+        const days = calculatePushDays(latest.pushFrequency);
+        await createAndSendDigest(latest, [user.email], days);
+      }),
+      cronOptions
+    ));
+  } else if (settings.pushEnabled && cron.validate(settings.pushCron)) {
+    pushTasks = [cron.schedule(settings.pushCron, safeCron("push", runPush), cronOptions)];
   } else if (cron.validate(config.weeklyDigestCron)) {
     weeklyDigestTask = cron.schedule(config.weeklyDigestCron, safeCron("weekly", async () => {
       await refreshArticles();

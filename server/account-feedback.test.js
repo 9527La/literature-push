@@ -11,21 +11,36 @@ test("persists account preferences, joins translated titles and hides feedback i
   const dbUrl = new URL("./db.js", import.meta.url).href;
   const script = `
     const dbModule = await import(${JSON.stringify(dbUrl)});
-    const { db, updateUserProfile, getUserProfile, saveTranslation, listArticles, addFeedback, listPublicFeedback, replyFeedback, deleteFeedback } = dbModule;
+    const { db, updateUserProfile, getUserProfile, getAllUserEmails, saveTranslation, listArticles, addFeedback, listPublicFeedback, replyFeedback, deleteFeedback, createUserAccount, saveRemotePreferences, getRemotePreferences, updateUserSettings, getUserSettings } = dbModule;
     db.prepare(\"INSERT INTO articles (external_id, title, fetched_at, first_seen_at) VALUES (?, ?, datetime('now'), datetime('now'))\").run('test-article', 'English title');
     const article = db.prepare(\"SELECT id FROM articles WHERE external_id = 'test-article'\").get();
     saveTranslation(article.id, 'zh', { title: '中文标题', abstract: '中文摘要', provider: 'test' });
-    updateUserProfile('test-user', { email: '', name: '测试用户', grade: '博士二年级', show_bilingual_titles: false });
+    updateUserProfile('test-user', { email: '', name: '测试用户', enrollment_year: 2024, degree: '博士' });
     const profile = getUserProfile('test-user');
-    if (profile.name !== '测试用户' || profile.grade !== '博士二年级' || profile.show_bilingual_titles !== false) process.exit(2);
+    if (profile.name !== '测试用户' || profile.enrollment_year !== 2024 || profile.degree !== '博士') process.exit(2);
     const listed = listArticles({}, 'test-user').find((item) => item.id === article.id);
     if (listed?.translated_title !== '中文标题') process.exit(3);
     const created = addFeedback('test-user', 'private@example.com', '公开建议');
     const publicItem = listPublicFeedback().find((item) => item.id === created.id);
-    if (!publicItem || publicItem.author_name !== '测试用户' || 'email' in publicItem || 'user_id' in publicItem) process.exit(4);
+    if (!publicItem || publicItem.author_name !== '测试用户' || publicItem.author_grade !== '2024级 博士' || 'email' in publicItem || 'user_id' in publicItem) process.exit(4);
     if (!replyFeedback(created.id, '管理员回复')) process.exit(5);
     if (listPublicFeedback().find((item) => item.id === created.id)?.admin_reply !== '管理员回复') process.exit(6);
     if (!deleteFeedback(created.id)) process.exit(7);
+    const anonymous = addFeedback('test-user', 'private@example.com', '匿名建议', true);
+    const anonymousItem = listPublicFeedback().find((item) => item.id === anonymous.id);
+    if (anonymousItem?.author_name !== '匿名用户' || anonymousItem?.author_grade !== '') process.exit(8);
+    deleteFeedback(anonymous.id);
+    updateUserProfile('10.0.0.1', { email: 'migrate@example.com', name: '待迁移用户', enrollment_year: 2022, degree: '硕士' });
+    const account = createUserAccount({ username: 'tester', passwordHash: 'hash', passwordSalt: 'salt', registeredIp: '10.0.0.1' });
+    if (getUserProfile('account:' + account.id).email !== 'migrate@example.com' || getAllUserEmails().some((item) => item.user_id === '10.0.0.1')) process.exit(9);
+    saveRemotePreferences(account.id, { filters: { favorite: true } });
+    if (getRemotePreferences(account.id)?.preferences?.filters?.favorite !== true) process.exit(10);
+    let duplicateIpRejected = false;
+    try { createUserAccount({ username: 'tester2', passwordHash: 'hash', passwordSalt: 'salt', registeredIp: '10.0.0.1' }); } catch { duplicateIpRejected = true; }
+    if (!duplicateIpRejected) process.exit(11);
+    updateUserSettings('user-a', { pushEnabled: true, pushFrequency: 'daily' });
+    updateUserSettings('user-b', { pushEnabled: false, pushFrequency: 'weekly' });
+    if (!getUserSettings('user-a').pushEnabled || getUserSettings('user-b').pushEnabled) process.exit(12);
   `;
   try {
     const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {

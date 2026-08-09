@@ -27,6 +27,12 @@ import {
   getAllUserEmails,
   getUserProfile,
   updateUserProfile,
+  getUserAccountByUsername,
+  getUserAccountById,
+  hasUserAccountForIp,
+  createUserAccount,
+  saveRemotePreferences,
+  getRemotePreferences,
   getRecentFeedbackCount,
   addFeedback,
   listPublicFeedback,
@@ -34,6 +40,7 @@ import {
   deleteFeedback
 } from "./db.js";
 import { createAdminToken, passwordMatches, requireAdmin, verifyAdminToken } from "./admin.js";
+import { createUserToken, getUserClaims, hashUserPassword, requireUser, verifyUserPassword } from "./user-auth.js";
 import { crawlArticleDetails } from "./crawler.js";
 import { translateArticle } from "./translate.js";
 import { refreshArticles, rescheduleRefresh, scheduleRefresh, enrichMissingKeywords } from "./refresh.js";
@@ -50,18 +57,18 @@ app.use(express.json());
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
 app.get("/api/articles", (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   res.json(listArticles(req.query, userId));
 });
 
 app.post("/api/articles/:id/read", (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   const isRead = setArticleReadForUser(userId, Number(req.params.id));
   res.json({ ok: true, isRead: Boolean(isRead) });
 });
 
 app.post("/api/articles/:id/favorite", (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   const article = toggleArticleFavoriteForUser(userId, Number(req.params.id));
   if (!article) {
     res.status(404).json({ error: "Article not found" });
@@ -133,12 +140,12 @@ app.post("/api/enrich-keywords", async (req, res) => {
 });
 
 app.get("/api/settings", (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   res.json(getUserSettings(userId));
 });
 
 app.put("/api/settings", (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   const settings = updateUserSettings(userId, req.body);
   rescheduleRefresh();
   res.json(settings);
@@ -157,7 +164,7 @@ app.get("/api/keyword-cooccurrence", (req, res) => {
 });
 
 app.get("/api/status", (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   const status = getUserStatus(userId);
   res.json({
     ...status,
@@ -188,7 +195,7 @@ app.post("/api/digests/weekly/email", asyncHandler(async (req, res) => {
 
 // New push endpoint
 app.post("/api/push/send", asyncHandler(async (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   const userEmail = getUserEmail(userId);
   const settings = getUserSettings(userId);
   const recipients = userEmail?.email ? [userEmail.email] : settings.emailRecipients;
@@ -219,41 +226,160 @@ app.post("/api/push/send", asyncHandler(async (req, res) => {
 
 // ── Helper ──
 function getClientIp(req) {
-  return req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress?.replace("::ffff:", "") || "unknown";
+  return req.socket.remoteAddress?.replace("::ffff:", "") || "unknown";
+}
+
+function getPrincipalId(req) {
+  const claims = getUserClaims(req);
+  return claims ? `account:${claims.accountId}` : getClientIp(req);
+}
+
+function buildAccountResponse(req) {
+  const claims = getUserClaims(req);
+  const ip = getClientIp(req);
+  if (!claims) {
+    return {
+      ...getUserProfile(ip),
+      authenticated: false,
+      can_register: !hasUserAccountForIp(ip),
+      username: ""
+    };
+  }
+  const account = getUserAccountById(claims.accountId);
+  if (!account) return { ...getUserProfile(ip), authenticated: false, can_register: !hasUserAccountForIp(ip), username: "" };
+  return {
+    ...getUserProfile(`account:${account.id}`),
+    authenticated: true,
+    can_register: false,
+    username: account.username,
+    preferences_updated_at: account.preferences_updated_at
+  };
 }
 
 // ── User Identity ──
 app.get("/api/me", (req, res) => {
-  res.json({ userId: getClientIp(req) });
+  res.json({ userId: getPrincipalId(req), authenticated: Boolean(getUserClaims(req)) });
 });
 
 app.get("/api/account", (req, res) => {
-  res.json(getUserProfile(getClientIp(req)));
+  res.json(buildAccountResponse(req));
 });
 
-app.put("/api/account", (req, res) => {
+app.put("/api/account", requireUser, (req, res) => {
   const email = String(req.body?.email ?? "").trim();
   const name = String(req.body?.name ?? "").trim();
-  const grade = String(req.body?.grade ?? "").trim();
+  const enrollmentYear = Number(req.body?.enrollment_year);
+  const degree = String(req.body?.degree ?? "").trim();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     res.status(400).json({ error: "请输入有效的邮箱地址" });
     return;
   }
-  if (name.length > 40 || grade.length > 40) {
-    res.status(400).json({ error: "姓名和年级均不能超过 40 个字符" });
+  if (name.length > 40) {
+    res.status(400).json({ error: "姓名不能超过 40 个字符" });
     return;
   }
-  res.json(updateUserProfile(getClientIp(req), {
+  if (!Number.isInteger(enrollmentYear) || enrollmentYear < 1980 || enrollmentYear > new Date().getFullYear() + 1) {
+    res.status(400).json({ error: "请输入有效的入学年份" });
+    return;
+  }
+  if (!["硕士", "博士"].includes(degree)) {
+    res.status(400).json({ error: "学历只能选择硕士或博士" });
+    return;
+  }
+  updateUserProfile(`account:${req.userClaims.accountId}`, {
     email,
     name,
-    grade,
-    show_bilingual_titles: req.body?.show_bilingual_titles
-  }));
+    enrollment_year: enrollmentYear,
+    degree
+  });
+  res.json(buildAccountResponse(req));
+});
+
+const userLoginAttempts = new Map();
+
+app.post("/api/auth/register", (req, res) => {
+  const username = String(req.body?.username || "").trim();
+  const password = String(req.body?.password || "");
+  const ip = getClientIp(req);
+  if (!/^[\p{L}\p{N}_-]{3,32}$/u.test(username)) {
+    res.status(400).json({ error: "用户名须为 3 至 32 个字符，可使用文字、数字、下划线或短横线" });
+    return;
+  }
+  if (password.length < 8 || password.length > 72) {
+    res.status(400).json({ error: "密码长度须为 8 至 72 个字符" });
+    return;
+  }
+  if (hasUserAccountForIp(ip)) {
+    res.status(409).json({ error: "当前 IP 已注册过账户，每个 IP 只能注册一个账户" });
+    return;
+  }
+  if (getUserAccountByUsername(username)) {
+    res.status(409).json({ error: "该用户名已被使用" });
+    return;
+  }
+  const credentials = hashUserPassword(password);
+  try {
+    const account = createUserAccount({ username, passwordHash: credentials.hash, passwordSalt: credentials.salt, registeredIp: ip });
+    const token = createUserToken(account.id);
+    res.status(201).json({
+      token,
+      account: {
+        ...getUserProfile(`account:${account.id}`),
+        authenticated: true,
+        can_register: false,
+        username: account.username,
+        preferences_updated_at: account.preferences_updated_at
+      }
+    });
+  } catch (error) {
+    res.status(409).json({ error: error.message?.includes("registered_ip") ? "当前 IP 已注册过账户" : "用户名已被使用" });
+  }
+});
+
+app.post("/api/auth/login", (req, res) => {
+  const username = String(req.body?.username || "").trim();
+  const password = String(req.body?.password || "");
+  const ip = getClientIp(req);
+  const now = Date.now();
+  const recent = (userLoginAttempts.get(ip) || []).filter((time) => now - time < 15 * 60 * 1000);
+  if (recent.length >= 8) {
+    res.status(429).json({ error: "登录尝试过多，请 15 分钟后再试" });
+    return;
+  }
+  const account = getUserAccountByUsername(username);
+  if (!account || !verifyUserPassword(password, account.password_salt, account.password_hash)) {
+    userLoginAttempts.set(ip, [...recent, now]);
+    res.status(401).json({ error: "用户名或密码错误" });
+    return;
+  }
+  userLoginAttempts.delete(ip);
+  res.json({ token: createUserToken(account.id), username: account.username, expiresInDays: config.userTokenTtlDays });
+});
+
+app.get("/api/auth/session", (req, res) => {
+  res.json(buildAccountResponse(req));
+});
+
+app.put("/api/auth/preferences", requireUser, (req, res) => {
+  const preferences = req.body?.preferences;
+  if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) {
+    res.status(400).json({ error: "个性设置格式无效" });
+    return;
+  }
+  if (JSON.stringify(preferences).length > 100000) {
+    res.status(400).json({ error: "个性设置数据过大" });
+    return;
+  }
+  res.json(saveRemotePreferences(req.userClaims.accountId, preferences));
+});
+
+app.get("/api/auth/preferences", requireUser, (req, res) => {
+  res.json(getRemotePreferences(req.userClaims.accountId));
 });
 
 // ── User Email ──
 app.post("/api/user-email", (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   const email = String(req.body?.email || "").trim();
   if (!email || !email.includes("@")) {
     res.status(400).json({ error: "请输入有效的邮箱地址" });
@@ -263,7 +389,7 @@ app.post("/api/user-email", (req, res) => {
 });
 
 app.get("/api/user-email", (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   const record = getUserEmail(userId);
   res.json(record || { userId, email: "" });
 });
@@ -274,7 +400,7 @@ app.get("/api/user-emails", requireAdmin, (req, res) => {
 
 // ── Test Email (weekly digest to user) ──
 app.post("/api/test-email", asyncHandler(async (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   const record = getUserEmail(userId);
   if (!record?.email) {
     res.status(400).json({ error: "请先填写邮箱地址" });
@@ -310,7 +436,7 @@ app.get("/api/feedback", (req, res) => {
 });
 
 app.post("/api/feedback", (req, res) => {
-  const userId = getClientIp(req);
+  const userId = getPrincipalId(req);
   if (getRecentFeedbackCount(userId) >= 1) {
     res.status(429).json({ error: "每小时只能提交一次反馈" });
     return;
@@ -325,7 +451,8 @@ app.post("/api/feedback", (req, res) => {
     return;
   }
   const profile = getUserProfile(userId);
-  res.status(201).json(addFeedback(userId, profile.email || "", content));
+  const isAnonymous = !getUserClaims(req) || Boolean(req.body?.anonymous);
+  res.status(201).json(addFeedback(userId, profile.email || "", content, isAnonymous));
 });
 
 const adminLoginAttempts = new Map();

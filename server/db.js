@@ -83,11 +83,24 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS user_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL,
+    registered_ip TEXT NOT NULL UNIQUE,
+    preferences_json TEXT,
+    preferences_updated_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
     email TEXT NOT NULL,
     content TEXT NOT NULL,
+    is_anonymous INTEGER NOT NULL DEFAULT 0,
     admin_reply TEXT,
     replied_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -111,6 +124,14 @@ db.exec(`
     journal_name TEXT NOT NULL,
     PRIMARY KEY (user_id, journal_name)
   );
+
+  CREATE TABLE IF NOT EXISTS user_settings (
+    user_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, key)
+  );
 `);
 
 for (const migration of [
@@ -118,8 +139,11 @@ for (const migration of [
   "ALTER TABLE user_emails ADD COLUMN grade TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE user_emails ADD COLUMN show_bilingual_titles INTEGER NOT NULL DEFAULT 1",
   "ALTER TABLE user_emails ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE user_emails ADD COLUMN enrollment_year INTEGER",
+  "ALTER TABLE user_emails ADD COLUMN degree TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE feedback ADD COLUMN admin_reply TEXT",
-  "ALTER TABLE feedback ADD COLUMN replied_at TEXT"
+  "ALTER TABLE feedback ADD COLUMN replied_at TEXT",
+  "ALTER TABLE feedback ADD COLUMN is_anonymous INTEGER NOT NULL DEFAULT 0"
 ]) {
   try { db.exec(migration); } catch (error) {
     if (!error.message?.includes("duplicate column")) throw error;
@@ -734,14 +758,14 @@ export function setUserEmail(userId, email) {
 }
 
 export function getUserEmail(userId) {
-  const row = db.prepare("SELECT user_id, email, name, grade, show_bilingual_titles, created_at, updated_at FROM user_emails WHERE user_id = ?").get(userId);
+  const row = db.prepare("SELECT user_id, email, name, grade, enrollment_year, degree, show_bilingual_titles, created_at, updated_at FROM user_emails WHERE user_id = ?").get(userId);
   return row || null;
 }
 
 export function getUserProfile(userId) {
   const row = getUserEmail(userId);
   return row ? { ...row, show_bilingual_titles: Boolean(row.show_bilingual_titles) } : {
-    user_id: userId, email: "", name: "", grade: "", show_bilingual_titles: true
+    user_id: userId, email: "", name: "", enrollment_year: null, degree: "", show_bilingual_titles: true
   };
 }
 
@@ -750,25 +774,28 @@ export function updateUserProfile(userId, profile) {
   const next = {
     email: profile.email === undefined ? current.email : String(profile.email).trim(),
     name: profile.name === undefined ? current.name : String(profile.name).trim(),
-    grade: profile.grade === undefined ? current.grade : String(profile.grade).trim(),
+    enrollment_year: profile.enrollment_year === undefined ? current.enrollment_year : Number(profile.enrollment_year) || null,
+    degree: profile.degree === undefined ? current.degree : String(profile.degree).trim(),
     show_bilingual_titles: profile.show_bilingual_titles === undefined
       ? current.show_bilingual_titles
       : Boolean(profile.show_bilingual_titles)
   };
   db.prepare(`
-    INSERT INTO user_emails (user_id, email, name, grade, show_bilingual_titles, created_at, updated_at)
-    VALUES (@userId, @email, @name, @grade, @showBilingual, datetime('now'), datetime('now'))
+    INSERT INTO user_emails (user_id, email, name, enrollment_year, degree, show_bilingual_titles, created_at, updated_at)
+    VALUES (@userId, @email, @name, @enrollmentYear, @degree, @showBilingual, datetime('now'), datetime('now'))
     ON CONFLICT(user_id) DO UPDATE SET
       email = excluded.email,
       name = excluded.name,
-      grade = excluded.grade,
+      enrollment_year = excluded.enrollment_year,
+      degree = excluded.degree,
       show_bilingual_titles = excluded.show_bilingual_titles,
       updated_at = datetime('now')
   `).run({
     userId,
     email: next.email,
     name: next.name,
-    grade: next.grade,
+    enrollmentYear: next.enrollment_year,
+    degree: next.degree,
     showBilingual: next.show_bilingual_titles ? 1 : 0
   });
   return getUserProfile(userId);
@@ -776,6 +803,70 @@ export function updateUserProfile(userId, profile) {
 
 export function getAllUserEmails() {
   return db.prepare("SELECT user_id, email, created_at FROM user_emails ORDER BY created_at DESC").all();
+}
+
+export function getUserAccountByUsername(username) {
+  return db.prepare("SELECT * FROM user_accounts WHERE username = ? COLLATE NOCASE").get(username) || null;
+}
+
+export function getUserAccountById(id) {
+  return db.prepare("SELECT id, username, registered_ip, preferences_updated_at, created_at, updated_at FROM user_accounts WHERE id = ?").get(Number(id)) || null;
+}
+
+export function hasUserAccountForIp(ip) {
+  return Boolean(db.prepare("SELECT 1 FROM user_accounts WHERE registered_ip = ?").get(ip));
+}
+
+export function createUserAccount({ username, passwordHash, passwordSalt, registeredIp }) {
+  db.exec("BEGIN");
+  try {
+    const result = db.prepare(`
+      INSERT INTO user_accounts (username, password_hash, password_salt, registered_ip)
+      VALUES (?, ?, ?, ?)
+    `).run(username, passwordHash, passwordSalt, registeredIp);
+    const accountId = Number(result.lastInsertRowid);
+    const principalId = `account:${accountId}`;
+    const existingProfile = getUserProfile(registeredIp);
+    updateUserProfile(principalId, existingProfile);
+    db.prepare(`
+      INSERT OR IGNORE INTO user_journals (user_id, journal_name)
+      SELECT ?, journal_name FROM user_journals WHERE user_id = ?
+    `).run(principalId, registeredIp);
+    db.prepare(`
+      INSERT OR IGNORE INTO user_interactions (user_id, article_id, is_read, is_favorite, updated_at)
+      SELECT ?, article_id, is_read, is_favorite, updated_at FROM user_interactions WHERE user_id = ?
+    `).run(principalId, registeredIp);
+    db.prepare(`
+      INSERT OR IGNORE INTO user_settings (user_id, key, value, updated_at)
+      SELECT ?, key, value, updated_at FROM user_settings WHERE user_id = ?
+    `).run(principalId, registeredIp);
+    db.prepare("UPDATE feedback SET user_id = ? WHERE user_id = ?").run(principalId, registeredIp);
+    db.prepare("DELETE FROM user_interactions WHERE user_id = ?").run(registeredIp);
+    db.prepare("DELETE FROM user_journals WHERE user_id = ?").run(registeredIp);
+    db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(registeredIp);
+    db.prepare("DELETE FROM user_emails WHERE user_id = ?").run(registeredIp);
+    db.exec("COMMIT");
+    return getUserAccountById(accountId);
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function saveRemotePreferences(accountId, preferences) {
+  db.prepare(`
+    UPDATE user_accounts SET preferences_json = ?, preferences_updated_at = datetime('now'), updated_at = datetime('now')
+    WHERE id = ?
+  `).run(JSON.stringify(preferences), Number(accountId));
+  return getRemotePreferences(accountId);
+}
+
+export function getRemotePreferences(accountId) {
+  const row = db.prepare("SELECT preferences_json, preferences_updated_at FROM user_accounts WHERE id = ?").get(Number(accountId));
+  if (!row) return null;
+  let preferences = null;
+  try { preferences = row.preferences_json ? JSON.parse(row.preferences_json) : null; } catch { preferences = null; }
+  return { preferences, updated_at: row.preferences_updated_at || null };
 }
 
 // ── Feedback ──
@@ -787,18 +878,23 @@ export function getRecentFeedbackCount(userId) {
   return row?.count || 0;
 }
 
-export function addFeedback(userId, email, content) {
+export function addFeedback(userId, email, content, isAnonymous = false) {
   const result = db.prepare(
-    "INSERT INTO feedback (user_id, email, content, created_at) VALUES (?, ?, ?, datetime('now'))"
-  ).run(userId, email, content);
+    "INSERT INTO feedback (user_id, email, content, is_anonymous, created_at) VALUES (?, ?, ?, ?, datetime('now'))"
+  ).run(userId, email, content, isAnonymous ? 1 : 0);
   return { id: Number(result.lastInsertRowid), content, created_at: new Date().toISOString() };
 }
 
 export function listPublicFeedback(limit = 100) {
   return db.prepare(`
     SELECT f.id, f.content, f.admin_reply, f.replied_at, f.created_at,
-      COALESCE(NULLIF(u.name, ''), '匿名用户') AS author_name,
-      COALESCE(NULLIF(u.grade, ''), '') AS author_grade
+      CASE WHEN f.is_anonymous = 1 THEN '匿名用户' ELSE COALESCE(NULLIF(u.name, ''), '匿名用户') END AS author_name,
+      CASE
+        WHEN f.is_anonymous = 1 THEN ''
+        WHEN u.enrollment_year IS NOT NULL AND u.degree <> '' THEN CAST(u.enrollment_year AS TEXT) || '级 ' || u.degree
+        WHEN u.enrollment_year IS NOT NULL THEN CAST(u.enrollment_year AS TEXT) || '级'
+        ELSE COALESCE(NULLIF(u.degree, ''), '')
+      END AS author_grade
     FROM feedback f
     LEFT JOIN user_emails u ON u.user_id = f.user_id
     ORDER BY f.created_at DESC, f.id DESC
@@ -847,6 +943,8 @@ export function setUserJournals(userId, journalNames) {
 export function getUserSettings(userId) {
   const rows = db.prepare("SELECT key, value FROM settings").all();
   const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
+  const userRows = db.prepare("SELECT key, value FROM user_settings WHERE user_id = ?").all(userId);
+  Object.assign(values, Object.fromEntries(userRows.map((row) => [row.key, row.value])));
   
   // Get user-specific journals - use DEFAULT_JOURNALS as base
   const userJournalNames = getUserJournals(userId);
@@ -877,32 +975,31 @@ export function updateUserSettings(userId, settings) {
     setUserJournals(userId, journalNames);
   }
   
-  // Save global settings (non-journal)
-  const current = getSettings();
+  const current = getUserSettings(userId);
   const upsert = db.prepare(`
-    INSERT INTO settings (key, value)
-    VALUES (@key, @value)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    INSERT INTO user_settings (user_id, key, value, updated_at)
+    VALUES (@userId, @key, @value, datetime('now'))
+    ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
   `);
 
   db.exec("BEGIN");
   try {
-    upsert.run({ key: "refreshCron", value: settings.refreshCron || current.refreshCron });
-    upsert.run({ key: "emailEnabled", value: String(settings.emailEnabled !== undefined ? settings.emailEnabled : current.emailEnabled) });
-    upsert.run({ key: "emailRecipients", value: JSON.stringify(
+    upsert.run({ userId, key: "refreshCron", value: settings.refreshCron || current.refreshCron });
+    upsert.run({ userId, key: "emailEnabled", value: String(settings.emailEnabled !== undefined ? settings.emailEnabled : current.emailEnabled) });
+    upsert.run({ userId, key: "emailRecipients", value: JSON.stringify(
       Array.isArray(settings.emailRecipients)
         ? settings.emailRecipients.map((email) => String(email).trim()).filter(Boolean)
         : current.emailRecipients
     )});
-    upsert.run({ key: "pushEnabled", value: String(settings.pushEnabled !== undefined ? settings.pushEnabled : current.pushEnabled) });
-    upsert.run({ key: "pushFrequency", value: settings.pushFrequency || current.pushFrequency });
-    upsert.run({ key: "pushCron", value: settings.pushCron || current.pushCron });
-    upsert.run({ key: "pushDays", value: String(settings.pushDays || current.pushDays) });
-    upsert.run({ key: "pushIncludeFile", value: String(settings.pushIncludeFile !== undefined ? settings.pushIncludeFile : current.pushIncludeFile) });
-    upsert.run({ key: "pushIncludeAbstract", value: String(settings.pushIncludeAbstract !== undefined ? settings.pushIncludeAbstract : current.pushIncludeAbstract) });
-    upsert.run({ key: "pushIncludeKeywords", value: String(settings.pushIncludeKeywords !== undefined ? settings.pushIncludeKeywords : current.pushIncludeKeywords) });
-    upsert.run({ key: "pushIncludeTranslation", value: String(settings.pushIncludeTranslation !== undefined ? settings.pushIncludeTranslation : current.pushIncludeTranslation) });
-    upsert.run({ key: "pushJournalFilter", value: settings.pushJournalFilter !== undefined ? String(settings.pushJournalFilter) : current.pushJournalFilter });
+    upsert.run({ userId, key: "pushEnabled", value: String(settings.pushEnabled !== undefined ? settings.pushEnabled : current.pushEnabled) });
+    upsert.run({ userId, key: "pushFrequency", value: settings.pushFrequency || current.pushFrequency });
+    upsert.run({ userId, key: "pushCron", value: settings.pushCron || current.pushCron });
+    upsert.run({ userId, key: "pushDays", value: String(settings.pushDays || current.pushDays) });
+    upsert.run({ userId, key: "pushIncludeFile", value: String(settings.pushIncludeFile !== undefined ? settings.pushIncludeFile : current.pushIncludeFile) });
+    upsert.run({ userId, key: "pushIncludeAbstract", value: String(settings.pushIncludeAbstract !== undefined ? settings.pushIncludeAbstract : current.pushIncludeAbstract) });
+    upsert.run({ userId, key: "pushIncludeKeywords", value: String(settings.pushIncludeKeywords !== undefined ? settings.pushIncludeKeywords : current.pushIncludeKeywords) });
+    upsert.run({ userId, key: "pushIncludeTranslation", value: String(settings.pushIncludeTranslation !== undefined ? settings.pushIncludeTranslation : current.pushIncludeTranslation) });
+    upsert.run({ userId, key: "pushJournalFilter", value: settings.pushJournalFilter !== undefined ? String(settings.pushJournalFilter) : current.pushJournalFilter });
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
