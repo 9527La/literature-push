@@ -294,24 +294,16 @@ export async function crawlArticleDetails(article) {
     throw new Error("Article has no DOI or URL to crawl");
   }
 
-  // OpenAlex exposes abstracts and topic metadata for many publisher pages that
-  // block HTML crawlers. DOI lookup also gives the online-first date rather than
-  // a future issue date frequently returned by Crossref.
-  if (article.doi) {
-    try {
-      const openAlexDetails = await fetchOpenAlexDetails(article.doi);
-      if (openAlexDetails.abstract || openAlexDetails.keywords) return openAlexDetails;
-    } catch {
-      // Continue with publisher-specific APIs and public HTML metadata.
-    }
-  }
+  let publisherDetails = {};
 
-  // Try Elsevier API first for Elsevier articles
+  // Prefer the official Elsevier API. OpenAlex often has topic keywords but no
+  // abstract; treating those keywords as a complete result used to bypass this
+  // API even when a valid Elsevier key was configured.
   if (config.elsevierApiKey && isElsevierArticle(article) && article.doi) {
     try {
       const elsevierDetails = await fetchElsevierArticleDetails(article.doi);
       if (elsevierDetails.abstract || elsevierDetails.keywords) {
-        return {
+        publisherDetails = {
           title: elsevierDetails.title || "",
           authors: elsevierDetails.authors || "",
           journal: article.journal || "",
@@ -329,6 +321,20 @@ export async function crawlArticleDetails(article) {
       // Fall through to HTML scraping
     }
   }
+
+  // OpenAlex is the public DOI-level fallback for publishers that block HTML
+  // crawlers or when a publisher API does not cover a particular record.
+  if (article.doi) {
+    try {
+      const openAlexDetails = await fetchOpenAlexDetails(article.doi);
+      const mergedDetails = mergeDetails(publisherDetails, openAlexDetails);
+      if (mergedDetails.abstract || mergedDetails.keywords) return mergedDetails;
+    } catch {
+      // Continue with public HTML metadata.
+    }
+  }
+
+  if (publisherDetails.abstract || publisherDetails.keywords) return publisherDetails;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.crawlerTimeoutMs);

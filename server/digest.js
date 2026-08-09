@@ -17,7 +17,8 @@ async function prepareArticle(article, targetLanguage, options = {}) {
 
   let translation = getTranslation(enrichedArticle.id, targetLanguage);
   let newlyTranslated = false;
-  if (!translation && options.translate && options.canTranslateMissing?.()) {
+  const translationIncomplete = !translation?.title || !translation?.abstract;
+  if (enrichedArticle.abstract && translationIncomplete && options.translate && options.canTranslateMissing?.()) {
     try {
       translation = saveTranslation(
         enrichedArticle.id,
@@ -121,15 +122,33 @@ export async function generateWeeklyDigestMarkdown(settings = {}, options = {}) 
     translationAttempts += 1;
     return true;
   };
+  let enrichmentAttempts = 0;
+  const maxEnrichments = Math.max(0, config.weeklyDigestEnrichMissingLimit);
+  const canEnrichMissing = (article) => {
+    if (article.abstract && article.keywords) return false;
+    if (enrichmentAttempts >= maxEnrichments) return false;
+    enrichmentAttempts += 1;
+    return true;
+  };
   const includeTranslation = settings.pushIncludeTranslation !== false;
-  const items = [];
+  const preparedItems = [];
   for (const article of articles) {
-    items.push(await prepareArticle(article, config.weeklyDigestTranslationLanguage, {
-      enrich: true,
+    preparedItems.push(await prepareArticle(article, config.weeklyDigestTranslationLanguage, {
+      enrich: canEnrichMissing(article),
       translate: includeTranslation,
       canTranslateMissing
     }));
   }
+  const requireComplete = options.requireComplete !== false;
+  const eligibleItems = requireComplete
+    ? preparedItems.filter(({ article, translation }) =>
+        Boolean(article.abstract && (!includeTranslation || (translation?.title && translation?.abstract)))
+      )
+    : preparedItems;
+  const excludedIncompleteCount = preparedItems.length - eligibleItems.length;
+  const maxItems = Number(options.maxItems || 0);
+  const items = maxItems > 0 ? eligibleItems.slice(0, maxItems) : eligibleItems;
+  const omittedCompleteCount = eligibleItems.length - items.length;
 
   const digestDir = path.resolve(config.weeklyDigestDir);
   await fs.mkdir(digestDir, { recursive: true });
@@ -155,8 +174,11 @@ export async function generateWeeklyDigestMarkdown(settings = {}, options = {}) 
     count: items.length,
     translatedCount: items.filter((item) => item.translation).length,
     missingTranslationCount: items.filter((item) => !item.translation).length,
+    excludedIncompleteCount,
+    omittedCompleteCount,
     newlyTranslatedCount: items.filter((item) => item.newlyTranslated).length,
-    translationAttemptCount: translationAttempts
+    translationAttemptCount: translationAttempts,
+    enrichmentAttemptCount: enrichmentAttempts
   };
 }
 

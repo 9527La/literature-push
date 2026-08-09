@@ -252,15 +252,26 @@ app.post("/api/test-email", asyncHandler(async (req, res) => {
   }
   const settings = getUserSettings(userId);
   // For test email, use all subscribed journals without push filter
-  const testSettings = { ...settings, pushJournalFilter: "" };
-  const digest = await generateWeeklyDigestMarkdown(testSettings, { days: 7, limit: 1 });
+  const testSettings = { ...settings, pushFrequency: "weekly", pushJournalFilter: "" };
+  const digest = await generateWeeklyDigestMarkdown(testSettings, {
+    days: 7,
+    limit: 20,
+    maxItems: 5,
+    requireComplete: true
+  });
   const sent = await sendMarkdownDigestEmail(digest.filePath, {
     fileName: digest.filePath.split(/[\\/]/).pop(),
     subject: `测试`,
     bodyMarkdown: digest.emailBodyMarkdown,
     recipients: [record.email]
   });
-  res.json({ sent, email: record.email });
+  res.json({
+    sent,
+    email: record.email,
+    count: digest.count,
+    excludedIncompleteCount: digest.excludedIncompleteCount,
+    omittedCompleteCount: digest.omittedCompleteCount
+  });
 }));
 
 // ── Feedback ──

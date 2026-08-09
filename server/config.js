@@ -78,6 +78,7 @@ export const config = {
     process.env.WEEKLY_DIGEST_TRANSLATION_LANGUAGE || process.env.MAIL_TRANSLATION_LANGUAGE || "zh",
   weeklyDigestDir: process.env.WEEKLY_DIGEST_DIR || "data/digests",
   weeklyDigestTranslateMissingLimit: Number(process.env.WEEKLY_DIGEST_TRANSLATE_MISSING_LIMIT || 20),
+  weeklyDigestEnrichMissingLimit: Number(process.env.WEEKLY_DIGEST_ENRICH_MISSING_LIMIT || 50),
   weeklyDigestEmailEnabled: String(process.env.WEEKLY_DIGEST_EMAIL_ENABLED || "true").toLowerCase() === "true",
   
   // New push settings defaults
