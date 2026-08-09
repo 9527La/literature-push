@@ -25,15 +25,21 @@ import {
   setUserEmail,
   getUserEmail,
   getAllUserEmails,
+  getUserProfile,
+  updateUserProfile,
   getRecentFeedbackCount,
-  addFeedback
+  addFeedback,
+  listPublicFeedback,
+  replyFeedback,
+  deleteFeedback
 } from "./db.js";
+import { createAdminToken, passwordMatches, requireAdmin, verifyAdminToken } from "./admin.js";
 import { crawlArticleDetails } from "./crawler.js";
 import { translateArticle } from "./translate.js";
 import { refreshArticles, rescheduleRefresh, scheduleRefresh, enrichMissingKeywords } from "./refresh.js";
 import { generateWeeklyDigestMarkdown } from "./digest.js";
 import { sendMarkdownDigestEmail } from "./mail.js";
-import { escapeHtml, calculatePushDays } from "./utils.js";
+import { calculatePushDays } from "./utils.js";
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -221,6 +227,30 @@ app.get("/api/me", (req, res) => {
   res.json({ userId: getClientIp(req) });
 });
 
+app.get("/api/account", (req, res) => {
+  res.json(getUserProfile(getClientIp(req)));
+});
+
+app.put("/api/account", (req, res) => {
+  const email = String(req.body?.email ?? "").trim();
+  const name = String(req.body?.name ?? "").trim();
+  const grade = String(req.body?.grade ?? "").trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    res.status(400).json({ error: "请输入有效的邮箱地址" });
+    return;
+  }
+  if (name.length > 40 || grade.length > 40) {
+    res.status(400).json({ error: "姓名和年级均不能超过 40 个字符" });
+    return;
+  }
+  res.json(updateUserProfile(getClientIp(req), {
+    email,
+    name,
+    grade,
+    show_bilingual_titles: req.body?.show_bilingual_titles
+  }));
+});
+
 // ── User Email ──
 app.post("/api/user-email", (req, res) => {
   const userId = getClientIp(req);
@@ -238,7 +268,7 @@ app.get("/api/user-email", (req, res) => {
   res.json(record || { userId, email: "" });
 });
 
-app.get("/api/user-emails", (req, res) => {
+app.get("/api/user-emails", requireAdmin, (req, res) => {
   res.json(getAllUserEmails());
 });
 
@@ -274,14 +304,13 @@ app.post("/api/test-email", asyncHandler(async (req, res) => {
   });
 }));
 
-// ── Feedback ──
-app.post("/api/feedback", async (req, res) => {
+// ── Public Feedback ──
+app.get("/api/feedback", (req, res) => {
+  res.json(listPublicFeedback(req.query.limit));
+});
+
+app.post("/api/feedback", (req, res) => {
   const userId = getClientIp(req);
-  const record = getUserEmail(userId);
-  if (!record?.email) {
-    res.status(400).json({ error: "请先填写周报接收邮箱" });
-    return;
-  }
   if (getRecentFeedbackCount(userId) >= 1) {
     res.status(429).json({ error: "每小时只能提交一次反馈" });
     return;
@@ -291,38 +320,65 @@ app.post("/api/feedback", async (req, res) => {
     res.status(400).json({ error: "反馈内容不能为空" });
     return;
   }
-  const fb = addFeedback(userId, record.email, content);
-  // Send feedback email to admin
-  try {
-    const { createTransporter } = await import("./mail.js");
-    // inline: use nodemailer directly
-    const nodemailer = await import("nodemailer");
-    const { config: cfg } = await import("./config.js");
-    if (cfg.smtp.host && cfg.smtp.from && cfg.smtp.user && cfg.smtp.pass) {
-      const transporter = nodemailer.default.createTransport({
-        host: cfg.smtp.host,
-        port: cfg.smtp.port,
-        secure: cfg.smtp.secure,
-        auth: { user: cfg.smtp.user, pass: cfg.smtp.pass }
-      });
-      await transporter.sendMail({
-        from: cfg.smtp.from,
-        to: cfg.smtp.to || cfg.smtp.from,
-        subject: `【意见反馈】来自 ${escapeHtml(record.email)}`,
-        html: `<div style="font-family:Arial,sans-serif;line-height:1.6;">
-          <h3>用户反馈</h3>
-          <p><strong>邮箱：</strong>${escapeHtml(record.email)}</p>
-          <p><strong>IP：</strong>${escapeHtml(userId)}</p>
-          <p><strong>时间：</strong>${escapeHtml(new Date().toLocaleString("zh-CN"))}</p>
-          <hr/>
-          <p>${escapeHtml(content).replace(/\n/g, "<br/>")}</p>
-        </div>`
-      });
-    }
-  } catch (emailErr) {
-    console.error("[feedback] email failed:", emailErr.message);
+  if (content.length > 2000) {
+    res.status(400).json({ error: "反馈内容不能超过 2000 个字符" });
+    return;
   }
-  res.json(fb);
+  const profile = getUserProfile(userId);
+  res.status(201).json(addFeedback(userId, profile.email || "", content));
+});
+
+const adminLoginAttempts = new Map();
+
+app.post("/api/admin/login", (req, res) => {
+  if (!config.adminPassword || !config.adminTokenSecret) {
+    res.status(503).json({ error: "管理员密码尚未配置" });
+    return;
+  }
+  const clientId = getClientIp(req);
+  const now = Date.now();
+  const recent = (adminLoginAttempts.get(clientId) || []).filter((time) => now - time < 15 * 60 * 1000);
+  if (recent.length >= 5) {
+    res.status(429).json({ error: "登录尝试过多，请 15 分钟后再试" });
+    return;
+  }
+  if (!passwordMatches(req.body?.password)) {
+    adminLoginAttempts.set(clientId, [...recent, now]);
+    res.status(401).json({ error: "管理员密码错误" });
+    return;
+  }
+  adminLoginAttempts.delete(clientId);
+  res.json({ token: createAdminToken(), expiresInHours: config.adminTokenTtlHours });
+});
+
+app.get("/api/admin/session", (req, res) => {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  res.json({ isAdmin: verifyAdminToken(token) });
+});
+
+app.post("/api/admin/feedback/:id/reply", requireAdmin, (req, res) => {
+  const reply = String(req.body?.reply || "").trim();
+  if (!reply || reply.length > 2000) {
+    res.status(400).json({ error: "管理员回复须为 1 至 2000 个字符" });
+    return;
+  }
+  if (!replyFeedback(req.params.id, reply)) {
+    res.status(404).json({ error: "反馈不存在" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.delete("/api/admin/feedback/:id", requireAdmin, (req, res) => {
+  if (!deleteFeedback(req.params.id)) {
+    res.status(404).json({ error: "反馈不存在" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.get("/version.json", (req, res) => {
+  res.sendFile(path.resolve(__dirname, "../version.json"));
 });
 
 const distPath = path.resolve(__dirname, "../dist");

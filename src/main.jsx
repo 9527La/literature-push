@@ -20,44 +20,60 @@ import {
   Search,
   Send,
   Settings,
+  ShieldCheck,
   Star,
   Languages,
+  LogOut,
+  Trash2,
+  UserRound,
   X
 } from "lucide-react";
 import "./styles.css";
 
+function getAdminToken() {
+  return localStorage.getItem("adminToken") || "";
+}
+
+async function parseResponse(response) {
+  if (response.ok) return response.json();
+  const text = await response.text();
+  try {
+    const data = JSON.parse(text);
+    throw new Error(data.error || text);
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error(text || `请求失败（${response.status}）`);
+    throw error;
+  }
+}
+
+function requestHeaders(hasBody = false) {
+  const headers = {};
+  if (hasBody) headers["Content-Type"] = "application/json";
+  const token = getAdminToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
 const api = {
   async get(path) {
-    const response = await fetch(path);
-    if (!response.ok) {
-      const text = await response.text();
-      try { throw new Error(JSON.parse(text).error || text); } catch { throw new Error(text); }
-    }
-    return response.json();
+    return parseResponse(await fetch(path, { headers: requestHeaders() }));
   },
   async post(path, body) {
-    const response = await fetch(path, {
+    return parseResponse(await fetch(path, {
       method: "POST",
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: requestHeaders(Boolean(body)),
       body: body ? JSON.stringify(body) : undefined
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      try { throw new Error(JSON.parse(text).error || text); } catch { throw new Error(text); }
-    }
-    return response.json();
+    }));
   },
   async put(path, body) {
-    const response = await fetch(path, {
+    return parseResponse(await fetch(path, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: requestHeaders(true),
       body: JSON.stringify(body)
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      try { throw new Error(JSON.parse(text).error || text); } catch { throw new Error(text); }
-    }
-    return response.json();
+    }));
+  },
+  async delete(path) {
+    return parseResponse(await fetch(path, { method: "DELETE", headers: requestHeaders() }));
   }
 };
 
@@ -237,11 +253,16 @@ function App() {
   const [status, setStatus] = useState(null);
   const [availableJournals, setAvailableJournals] = useState([]);
   const [filters, setFilters] = useState({ journal: [], q: "", keyword: [], unread: false, favorite: false, from: "", to: "", sort: "desc" });
-  const [activeView, setActiveView] = useState("feed");
+  const [activeView, setActiveView] = useState(() => {
+    const requested = window.location.hash.slice(1);
+    return ["feed", "stats", "settings", "feedback", "account", "help"].includes(requested) ? requested : "feed";
+  });
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [versionInfo, setVersionInfo] = useState(null);
+  const [account, setAccount] = useState({ email: "", name: "", grade: "", show_bilingual_titles: true });
+  const [isAdmin, setIsAdmin] = useState(false);
   
   // Debounced search
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -276,6 +297,21 @@ function App() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    window.history.replaceState(null, "", `#${activeView}`);
+  }, [activeView]);
+
+  useEffect(() => {
+    if (!getAdminToken()) return;
+    api.get("/api/admin/session").then((session) => {
+      setIsAdmin(Boolean(session.isAdmin));
+      if (!session.isAdmin) localStorage.removeItem("adminToken");
+    }).catch(() => {
+      localStorage.removeItem("adminToken");
+      setIsAdmin(false);
+    });
+  }, []);
+
   function dismissVersion() {
     if (versionInfo) localStorage.setItem("dismissedVersion", versionInfo.version);
     setVersionInfo(null);
@@ -294,15 +330,17 @@ function App() {
   }, [filters]);
 
   async function loadAll() {
-    const [nextSettings, nextStatus, nextArticles, journals] = await Promise.all([
+    const [nextSettings, nextStatus, nextArticles, journals, nextAccount] = await Promise.all([
       api.get("/api/settings"),
       api.get("/api/status"),
       api.get(`/api/articles${debouncedQuery ? `?${debouncedQuery}` : ""}`),
-      availableJournals.length ? Promise.resolve(availableJournals) : api.get("/api/journals")
+      availableJournals.length ? Promise.resolve(availableJournals) : api.get("/api/journals"),
+      api.get("/api/account")
     ]);
     setSettings(nextSettings);
     setStatus(nextStatus);
     setArticles(nextArticles);
+    setAccount(nextAccount);
     if (!availableJournals.length) setAvailableJournals(journals);
     setInitialLoading(false);
   }
@@ -344,8 +382,16 @@ function App() {
     setMessage("设置已保存。");
   }
 
+  async function saveAccount(nextAccount) {
+    const saved = await api.put("/api/account", nextAccount);
+    setAccount(saved);
+    setMessage("账户信息已保存。");
+    return saved;
+  }
+
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">跳到主要内容</a>
       <header className="topbar">
         <div className="topbar-left">
           <div className="brand">
@@ -362,6 +408,12 @@ function App() {
             </button>
             <button className={activeView === "settings" ? "active" : ""} onClick={() => setActiveView("settings")}>
               <Settings size={16} /> 文献推送
+            </button>
+            <button className={activeView === "feedback" ? "active" : ""} onClick={() => setActiveView("feedback")}>
+              <MessageSquare size={16} /> 公共反馈
+            </button>
+            <button className={activeView === "account" ? "active" : ""} onClick={() => setActiveView("account")}>
+              <UserRound size={16} /> 我的账户
             </button>
             <button className={activeView === "help" ? "active" : ""} onClick={() => setActiveView("help")}>
               <HelpCircle size={16} /> 使用说明
@@ -390,7 +442,7 @@ function App() {
 
       {message && <div className="message">{message}</div>}
 
-      <main className="main">
+      <main className="main" id="main-content">
         {initialLoading ? (
           <div className="loading-skeleton">
             <div className="skeleton" style={{ height: 40, marginBottom: 16 }} />
@@ -407,6 +459,8 @@ function App() {
             setFilters={setFilters}
             markRead={markRead}
             toggleFavorite={toggleFavorite}
+            showBilingualTitles={account.show_bilingual_titles}
+            onToggleBilingualTitles={() => saveAccount({ ...account, show_bilingual_titles: !account.show_bilingual_titles })}
           />
         ) : activeView === "settings" ? (
           <SettingsView
@@ -417,6 +471,14 @@ function App() {
           />
         ) : activeView === "help" ? (
           <HelpView />
+        ) : activeView === "account" ? (
+          <AccountView account={account} onSave={saveAccount} />
+        ) : activeView === "feedback" ? (
+          <FeedbackView
+            account={account}
+            isAdmin={isAdmin}
+            onAdminChange={setIsAdmin}
+          />
         ) : (
           <StatsView journals={settings.journals} markRead={markRead} toggleFavorite={toggleFavorite} />
         )}
@@ -440,7 +502,205 @@ function parseEmailRecipients(text) {
     .filter(Boolean);
 }
 
-function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite }) {
+function AccountView({ account, onSave }) {
+  const [form, setForm] = useState(account);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => setForm(account), [account]);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+    try {
+      await onSave(form);
+      setMessage("账户资料与标题显示偏好已保存。");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="profile-layout" aria-labelledby="account-title">
+      <div className="page-intro">
+        <span className="eyebrow">个人空间</span>
+        <h1 id="account-title">我的账户</h1>
+        <p>完善姓名与年级，控制文献列表是否同时显示英文标题和中文译题。</p>
+      </div>
+      <form className="profile-card" onSubmit={submit}>
+        <div className="profile-mark" aria-hidden="true">{(form.name || "用").slice(0, 1)}</div>
+        <div className="form-grid">
+          <label>
+            <span>姓名</span>
+            <input value={form.name || ""} maxLength={40} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="请输入姓名" />
+          </label>
+          <label>
+            <span>年级</span>
+            <input value={form.grade || ""} maxLength={40} onChange={(e) => setForm({ ...form, grade: e.target.value })} placeholder="例如：博士二年级" />
+          </label>
+          <label className="form-span">
+            <span>周报接收邮箱</span>
+            <input type="email" value={form.email || ""} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="name@example.com" />
+          </label>
+        </div>
+        <label className="preference-row">
+          <span>
+            <strong>显示中英文标题</strong>
+            <small>开启后，已有中文译题会显示在英文原标题下方。</small>
+          </span>
+          <input type="checkbox" checked={form.show_bilingual_titles !== false} onChange={(e) => setForm({ ...form, show_bilingual_titles: e.target.checked })} />
+        </label>
+        <div className="form-footer">
+          <span className="inline-msg" role="status">{message}</span>
+          <button className="primary" type="submit" disabled={saving}><Save size={16} /> {saving ? "保存中" : "保存账户信息"}</button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function FeedbackView({ account, isAdmin, onAdminChange }) {
+  const [items, setItems] = useState([]);
+  const [content, setContent] = useState("");
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [password, setPassword] = useState("");
+  const [loginMessage, setLoginMessage] = useState("");
+  const [replyDrafts, setReplyDrafts] = useState({});
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
+
+  async function loadFeedback() {
+    setItems(await api.get("/api/feedback"));
+  }
+
+  useEffect(() => { loadFeedback().catch((error) => setMessage(error.message)); }, []);
+
+  async function submitFeedback(event) {
+    event.preventDefault();
+    if (!content.trim()) return;
+    setSending(true);
+    setMessage("");
+    try {
+      await api.post("/api/feedback", { content });
+      setContent("");
+      setMessage("反馈已公开发布，不会发送邮件。");
+      await loadFeedback();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function login(event) {
+    event.preventDefault();
+    setLoginMessage("");
+    try {
+      const result = await api.post("/api/admin/login", { password });
+      localStorage.setItem("adminToken", result.token);
+      setPassword("");
+      onAdminChange(true);
+      setLoginMessage(`管理员会话已启用，有效期 ${result.expiresInHours} 小时。`);
+    } catch (error) {
+      setLoginMessage(error.message);
+    }
+  }
+
+  function logout() {
+    localStorage.removeItem("adminToken");
+    onAdminChange(false);
+    setLoginMessage("已退出管理员会话。");
+  }
+
+  async function submitReply(id) {
+    const reply = String(replyDrafts[id] || "").trim();
+    if (!reply) return;
+    try {
+      await api.post(`/api/admin/feedback/${id}/reply`, { reply });
+      setReplyDrafts({ ...replyDrafts, [id]: "" });
+      await loadFeedback();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function removeFeedback(id) {
+    if (deleteConfirmId !== id) {
+      setDeleteConfirmId(id);
+      return;
+    }
+    try {
+      await api.delete(`/api/admin/feedback/${id}`);
+      setDeleteConfirmId(null);
+      await loadFeedback();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  return (
+    <section className="feedback-layout" aria-labelledby="feedback-title">
+      <header className="feedback-hero">
+        <div>
+          <span className="eyebrow">公开交流</span>
+          <h1 id="feedback-title">意见反馈</h1>
+          <p>每条建议都会直接展示在这里，所有访问者都能看到；系统不会再向管理员发送反馈邮件。</p>
+        </div>
+        <div className={`admin-status ${isAdmin ? "active" : ""}`}>
+          <ShieldCheck size={18} /> {isAdmin ? "管理员模式" : "公开浏览"}
+        </div>
+      </header>
+
+      <div className="feedback-grid">
+        <div>
+          <form className="feedback-composer" onSubmit={submitFeedback}>
+            <div className="composer-author">
+              <div className="mini-avatar">{(account.name || "匿").slice(0, 1)}</div>
+              <span><strong>{account.name || "匿名用户"}</strong><small>{account.grade || "未填写年级"}</small></span>
+            </div>
+            <textarea value={content} onChange={(e) => setContent(e.target.value)} maxLength={2000} rows={5} placeholder="写下功能建议、数据问题或使用体验……" />
+            <div className="composer-footer"><span>{content.length}/2000 · 每小时可提交一次</span><button className="primary" disabled={sending || !content.trim()}><Send size={15} /> {sending ? "发布中" : "公开发布"}</button></div>
+            {message && <div className="inline-msg" role="status">{message}</div>}
+          </form>
+
+          <div className="feedback-stream" aria-live="polite">
+            {items.length === 0 ? <div className="empty">还没有公开反馈，欢迎发布第一条建议。</div> : items.map((item) => (
+              <article className="feedback-item" key={item.id}>
+                <header>
+                  <div className="mini-avatar">{item.author_name.slice(0, 1)}</div>
+                  <div><strong>{item.author_name}</strong><span>{item.author_grade || "用户"} · {formatDate(item.created_at)}</span></div>
+                </header>
+                <p>{item.content}</p>
+                {item.admin_reply && <div className="admin-reply"><strong><ShieldCheck size={14} /> 管理员回复</strong><p>{item.admin_reply}</p><time>{formatDate(item.replied_at)}</time></div>}
+                {isAdmin && <div className="moderation-tools">
+                  <textarea rows={2} maxLength={2000} value={replyDrafts[item.id] || ""} onChange={(e) => setReplyDrafts({ ...replyDrafts, [item.id]: e.target.value })} placeholder={item.admin_reply ? "更新管理员回复" : "输入管理员回复"} />
+                  <button className="secondary" type="button" onClick={() => submitReply(item.id)} disabled={!String(replyDrafts[item.id] || "").trim()}>回复</button>
+                  <button className="danger-button" type="button" onClick={() => removeFeedback(item.id)}><Trash2 size={14} /> {deleteConfirmId === item.id ? "再次点击确认删除" : "删除"}</button>
+                </div>}
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <aside className="admin-panel">
+          <span className="eyebrow">管理入口</span>
+          <h2>反馈管理</h2>
+          <p>{isAdmin ? "你可以公开回复或删除不适合保留的内容。" : "管理员登录后可回复和删除反馈，普通用户只能浏览与发布。"}</p>
+          {isAdmin ? <button className="secondary" type="button" onClick={logout}><LogOut size={15} /> 退出管理员</button> : <form onSubmit={login}>
+            <label><span>管理员密码</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>
+            <button className="primary" disabled={!password}><ShieldCheck size={15} /> 登录</button>
+          </form>}
+          {loginMessage && <div className="inline-msg" role="status">{loginMessage}</div>}
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, showBilingualTitles, onToggleBilingualTitles }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [display, setDisplay] = useState({ authors: true, keywords: true, abstract: true });
   const [topKeywords, setTopKeywords] = useState([]);
@@ -606,6 +866,9 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           <button type="button" className={`display-toggle ${display.abstract ? "active" : ""}`} onClick={() => toggleDisplay("abstract")}>
             {display.abstract ? <Eye size={14} /> : <EyeOff size={14} />} 摘要
           </button>
+          <button type="button" className={`display-toggle ${showBilingualTitles ? "active" : ""}`} onClick={onToggleBilingualTitles}>
+            <Languages size={14} /> 中英文标题
+          </button>
         </div>
 
         <div className="article-count">
@@ -631,6 +894,9 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                   <button className="title-button" onClick={() => setSelectedArticle(article)}>
                     <Highlight text={article.title} terms={highlightTerms} />
                   </button>
+                  {showBilingualTitles && article.translated_title && article.translated_title !== article.title && (
+                    <p className="translated-title"><Languages size={14} /> {article.translated_title}</p>
+                  )}
                   {display.authors && article.authors && <p className="authors"><Highlight text={article.authors} terms={highlightTerms} /></p>}
                   {display.keywords && article.keywords && (
                     <div className="keywords">
@@ -1141,10 +1407,6 @@ function SettingsView({ settings, availableJournals, status, onSave }) {
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState("");
 
-  const [fbContent, setFbContent] = useState("");
-  const [fbMsg, setFbMsg] = useState("");
-  const [fbSending, setFbSending] = useState(false);
-
   // Push settings
   const [pushEnabled, setPushEnabled] = useState(settings.pushEnabled || false);
   const [pushFrequency, setPushFrequency] = useState(settings.pushFrequency || "weekly");
@@ -1253,18 +1515,6 @@ function SettingsView({ settings, availableJournals, status, onSave }) {
       setTestMsg(res.sent ? `测试邮件已发送至 ${res.email}` : "发送失败，请检查 SMTP 配置");
     } catch (e) { setTestMsg(e.message); }
     finally { setTesting(false); }
-  }
-
-  async function submitFeedback() {
-    if (!userEmail) { setFbMsg("请先填写并保存邮箱"); return; }
-    if (!fbContent.trim()) { setFbMsg("反馈内容不能为空"); return; }
-    setFbSending(true); setFbMsg("");
-    try {
-      await api.post("/api/feedback", { content: fbContent });
-      setFbMsg("反馈已提交，感谢！");
-      setFbContent("");
-    } catch (e) { setFbMsg(e.message); }
-    finally { setFbSending(false); }
   }
 
   async function enrichKeywords() {
@@ -1563,7 +1813,7 @@ function SettingsView({ settings, availableJournals, status, onSave }) {
           </form>
         </div>
 
-        {/* Right Column: Journals + Feedback */}
+        {/* Right Column: Journals */}
         <div className="settings-right">
           <form className="settings-section" onSubmit={submit}>
             <h4>订阅期刊</h4>
@@ -1591,21 +1841,6 @@ function SettingsView({ settings, availableJournals, status, onSave }) {
             {enrichMessage && <div className="inline-msg">{enrichMessage}</div>}
           </form>
 
-          <section className="settings-section">
-            <h4><MessageSquare size={15} /> 意见反馈</h4>
-            <p className="section-hint">{userEmail ? "反馈将发送至管理员邮箱，每小时可提交一次。" : "请先保存邮箱后再提交反馈。"}</p>
-            <textarea
-              value={fbContent}
-              onChange={(e) => setFbContent(e.target.value)}
-              rows={4}
-              placeholder="请输入您的意见或建议..."
-              disabled={!userEmail}
-            />
-            <button className="primary" type="button" onClick={submitFeedback} disabled={fbSending || !userEmail} style={{ marginTop: 8 }}>
-              <Send size={14} /> {fbSending ? "提交中..." : "提交反馈"}
-            </button>
-            {fbMsg && <div className="inline-msg">{fbMsg}</div>}
-          </section>
         </div>
       </div>
     </div>

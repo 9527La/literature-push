@@ -8,27 +8,17 @@
 
 ## 新功能
 
-- 新增使用说明页面，介绍系统所有功能和使用方式
-- 周报邮箱新增已保存状态显示，方便查看是否已填写
-- 测试周报改为近一个月文献范围
-- **文献推送功能全面升级**：
-  - 周报递送更名为"文献推送"
-  - 新增推送期刊范围选择，可指定特定期刊进行推送
-  - 支持三种推送频率：每天、每周、每月
-  - 邮件内容可自定义：附件文件、摘要、关键词、翻译
-  - 新增"立即发送"按钮，可手动触发推送
-- 新增 5 本 Elsevier 期刊订阅：**Applied Energy**、**Energy**、**IJEPES**、**Renewable Energy**、**Journal of Modern Power Systems and Clean Energy**
-  - Applied Energy、Energy、Renewable Energy 为能源类综合期刊，系统自动筛选电气领域相关文献（含 power grid、electric、microgrid、renewable energy、energy storage、smart grid 等关键词）
-  - IJEPES 和 Journal of Modern Power Systems and Clean Energy 为电气电力专业期刊，无需筛选
+- 文献列表新增“中英文标题”开关，可按账户偏好显示或隐藏中文译题
+- 新增“我的账户”页面，可维护姓名、年级、周报邮箱和标题显示偏好
+- 新增公共意见反馈区，所有用户均可浏览和发布，不再发送反馈邮件
+- 新增管理员模式，管理员可公开回复或删除反馈
 
 ## 优化
 
-- 部署脚本自动读取 CHANGELOG.md 作为版本更新通知
-- 版本弹窗支持 Markdown 格式渲染
-- 增强 Elsevier 期刊元数据提取：
-  - 新增 Elsevier 专用解析器，支持 JSON-LD 结构化数据和 Elsevier meta 标签
-  - OpenAlex 数据源增强：使用 `primary_topic` 和高分 `concepts` 作为关键词补充
-  - 改进爬虫 User-Agent 和请求头，提高 Elsevier 页面访问成功率
+- 优化顶部导航、账户资料卡、反馈流、空状态和移动端展示
+- 公共反馈仅展示姓名和年级，不公开邮箱、IP 或内部用户标识
+- 管理员接口使用带有效期的服务端签名令牌，并限制登录失败次数
+- 原“全部邮箱”接口增加管理员鉴权，避免账户信息泄露
 
 ---
 

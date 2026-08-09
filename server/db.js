@@ -76,6 +76,10 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS user_emails (
     user_id TEXT PRIMARY KEY,
     email TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    grade TEXT NOT NULL DEFAULT '',
+    show_bilingual_titles INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -84,6 +88,8 @@ db.exec(`
     user_id TEXT NOT NULL,
     email TEXT NOT NULL,
     content TEXT NOT NULL,
+    admin_reply TEXT,
+    replied_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -106,6 +112,20 @@ db.exec(`
     PRIMARY KEY (user_id, journal_name)
   );
 `);
+
+for (const migration of [
+  "ALTER TABLE user_emails ADD COLUMN name TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE user_emails ADD COLUMN grade TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE user_emails ADD COLUMN show_bilingual_titles INTEGER NOT NULL DEFAULT 1",
+  "ALTER TABLE user_emails ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE feedback ADD COLUMN admin_reply TEXT",
+  "ALTER TABLE feedback ADD COLUMN replied_at TEXT"
+]) {
+  try { db.exec(migration); } catch (error) {
+    if (!error.message?.includes("duplicate column")) throw error;
+  }
+}
+db.exec("UPDATE user_emails SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''");
 
 db.exec("UPDATE articles SET first_seen_at = fetched_at WHERE first_seen_at IS NULL OR first_seen_at = ''");
 
@@ -266,10 +286,12 @@ export function listArticles(filters = {}, userId) {
     const articles = db.prepare(`
       SELECT a.*,
         COALESCE(ui_read.is_read, 0) AS is_read,
-        COALESCE(ui_fav.is_favorite, 0) AS is_favorite
+        COALESCE(ui_fav.is_favorite, 0) AS is_favorite,
+        zh.title AS translated_title
       FROM articles a
       LEFT JOIN user_interactions ui_read ON ui_read.article_id = a.id AND ui_read.user_id = @userId AND ui_read.is_read = 1
       LEFT JOIN user_interactions ui_fav ON ui_fav.article_id = a.id AND ui_fav.user_id = @userId AND ui_fav.is_favorite = 1
+      LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
       ${whereClause}
       ORDER BY COALESCE(a.published_at, a.fetched_at) ${order}, a.id ${order}
       LIMIT 500
@@ -279,8 +301,9 @@ export function listArticles(filters = {}, userId) {
 
   const whereFinal = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return db.prepare(`
-    SELECT *
+    SELECT a.*, zh.title AS translated_title
     FROM articles a
+    LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
     ${whereFinal}
     ORDER BY COALESCE(a.published_at, a.fetched_at) ${order}, a.id ${order}
     LIMIT 500
@@ -705,14 +728,50 @@ export function setUserEmail(userId, email) {
   db.prepare(`
     INSERT INTO user_emails (user_id, email, created_at)
     VALUES (?, ?, datetime('now'))
-    ON CONFLICT(user_id) DO UPDATE SET email = excluded.email, created_at = datetime('now')
+    ON CONFLICT(user_id) DO UPDATE SET email = excluded.email, updated_at = datetime('now')
   `).run(userId, email);
   return { userId, email };
 }
 
 export function getUserEmail(userId) {
-  const row = db.prepare("SELECT user_id, email FROM user_emails WHERE user_id = ?").get(userId);
+  const row = db.prepare("SELECT user_id, email, name, grade, show_bilingual_titles, created_at, updated_at FROM user_emails WHERE user_id = ?").get(userId);
   return row || null;
+}
+
+export function getUserProfile(userId) {
+  const row = getUserEmail(userId);
+  return row ? { ...row, show_bilingual_titles: Boolean(row.show_bilingual_titles) } : {
+    user_id: userId, email: "", name: "", grade: "", show_bilingual_titles: true
+  };
+}
+
+export function updateUserProfile(userId, profile) {
+  const current = getUserProfile(userId);
+  const next = {
+    email: profile.email === undefined ? current.email : String(profile.email).trim(),
+    name: profile.name === undefined ? current.name : String(profile.name).trim(),
+    grade: profile.grade === undefined ? current.grade : String(profile.grade).trim(),
+    show_bilingual_titles: profile.show_bilingual_titles === undefined
+      ? current.show_bilingual_titles
+      : Boolean(profile.show_bilingual_titles)
+  };
+  db.prepare(`
+    INSERT INTO user_emails (user_id, email, name, grade, show_bilingual_titles, created_at, updated_at)
+    VALUES (@userId, @email, @name, @grade, @showBilingual, datetime('now'), datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      email = excluded.email,
+      name = excluded.name,
+      grade = excluded.grade,
+      show_bilingual_titles = excluded.show_bilingual_titles,
+      updated_at = datetime('now')
+  `).run({
+    userId,
+    email: next.email,
+    name: next.name,
+    grade: next.grade,
+    showBilingual: next.show_bilingual_titles ? 1 : 0
+  });
+  return getUserProfile(userId);
 }
 
 export function getAllUserEmails() {
@@ -732,7 +791,30 @@ export function addFeedback(userId, email, content) {
   const result = db.prepare(
     "INSERT INTO feedback (user_id, email, content, created_at) VALUES (?, ?, ?, datetime('now'))"
   ).run(userId, email, content);
-  return { id: Number(result.lastInsertRowid), userId, email, content };
+  return { id: Number(result.lastInsertRowid), content, created_at: new Date().toISOString() };
+}
+
+export function listPublicFeedback(limit = 100) {
+  return db.prepare(`
+    SELECT f.id, f.content, f.admin_reply, f.replied_at, f.created_at,
+      COALESCE(NULLIF(u.name, ''), '匿名用户') AS author_name,
+      COALESCE(NULLIF(u.grade, ''), '') AS author_grade
+    FROM feedback f
+    LEFT JOIN user_emails u ON u.user_id = f.user_id
+    ORDER BY f.created_at DESC, f.id DESC
+    LIMIT ?
+  `).all(Math.min(Math.max(Number(limit) || 100, 1), 200));
+}
+
+export function replyFeedback(id, reply) {
+  const result = db.prepare(`
+    UPDATE feedback SET admin_reply = ?, replied_at = datetime('now') WHERE id = ?
+  `).run(reply, Number(id));
+  return result.changes > 0;
+}
+
+export function deleteFeedback(id) {
+  return db.prepare("DELETE FROM feedback WHERE id = ?").run(Number(id)).changes > 0;
 }
 
 // ── User Journals (per-user subscription) ──

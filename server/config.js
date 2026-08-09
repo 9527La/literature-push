@@ -52,6 +52,9 @@ export const DEFAULT_JOURNAL_BY_NAME = new Map(DEFAULT_JOURNALS.map((journal) =>
 export const config = {
   port: Number(process.env.PORT || 4177),
   clientOrigin: process.env.CLIENT_ORIGIN || "http://127.0.0.1:5173",
+  adminPassword: process.env.ADMIN_PASSWORD || "",
+  adminTokenSecret: process.env.ADMIN_TOKEN_SECRET || process.env.ADMIN_PASSWORD || "",
+  adminTokenTtlHours: Number(process.env.ADMIN_TOKEN_TTL_HOURS || 12),
   ieeeApiKey: process.env.IEEE_API_KEY || "",
   elsevierApiKey: process.env.ELSEVIER_API_KEY || "",
   publicDataSources: (process.env.PUBLIC_DATA_SOURCES || "crossref,openalex")
