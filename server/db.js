@@ -106,6 +106,35 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS feedback_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    feedback_id INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    is_anonymous INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (feedback_id) REFERENCES feedback(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS feedback_likes (
+    feedback_id INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (feedback_id, user_id),
+    FOREIGN KEY (feedback_id) REFERENCES feedback(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS feedback_comment_likes (
+    comment_id INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (comment_id, user_id),
+    FOREIGN KEY (comment_id) REFERENCES feedback_comments(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_feedback_comments_feedback ON feedback_comments(feedback_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_feedback_comments_user ON feedback_comments(user_id, created_at);
+
   CREATE TABLE IF NOT EXISTS user_interactions (
     user_id TEXT NOT NULL,
     article_id INTEGER NOT NULL,
@@ -883,6 +912,13 @@ export function getRecentFeedbackCount(userId) {
   return row?.count || 0;
 }
 
+export function getRecentFeedbackCommentCount(userId) {
+  const row = db.prepare(
+    "SELECT COUNT(*) as count FROM feedback_comments WHERE user_id = ? AND created_at > datetime('now', '-1 hour')"
+  ).get(userId);
+  return row?.count || 0;
+}
+
 export function addFeedback(userId, email, content, isAnonymous = false) {
   const result = db.prepare(
     "INSERT INTO feedback (user_id, email, content, is_anonymous, created_at) VALUES (?, ?, ?, ?, datetime('now'))"
@@ -890,8 +926,8 @@ export function addFeedback(userId, email, content, isAnonymous = false) {
   return { id: Number(result.lastInsertRowid), content, created_at: new Date().toISOString() };
 }
 
-export function listPublicFeedback(limit = 100) {
-  return db.prepare(`
+export function listPublicFeedback(limit = 100, userId = "") {
+  const discussions = db.prepare(`
     SELECT f.id, f.content, f.admin_reply, f.replied_at, f.created_at,
       CASE WHEN f.is_anonymous = 1 THEN '匿名用户' ELSE COALESCE(NULLIF(u.name, ''), '匿名用户') END AS author_name,
       CASE
@@ -899,12 +935,80 @@ export function listPublicFeedback(limit = 100) {
         WHEN u.enrollment_year IS NOT NULL AND u.degree <> '' THEN CAST(u.enrollment_year AS TEXT) || '级 ' || u.degree
         WHEN u.enrollment_year IS NOT NULL THEN CAST(u.enrollment_year AS TEXT) || '级'
         ELSE COALESCE(NULLIF(u.degree, ''), '')
-      END AS author_grade
+      END AS author_grade,
+      (SELECT COUNT(*) FROM feedback_likes fl WHERE fl.feedback_id = f.id) AS like_count,
+      EXISTS(SELECT 1 FROM feedback_likes fl WHERE fl.feedback_id = f.id AND fl.user_id = ?) AS liked_by_me,
+      (SELECT COUNT(*) FROM feedback_comments c WHERE c.feedback_id = f.id) AS comment_count
     FROM feedback f
     LEFT JOIN user_emails u ON u.user_id = f.user_id
     ORDER BY f.created_at DESC, f.id DESC
     LIMIT ?
-  `).all(Math.min(Math.max(Number(limit) || 100, 1), 200));
+  `).all(userId, Math.min(Math.max(Number(limit) || 100, 1), 200));
+
+  if (!discussions.length) return discussions;
+  const placeholders = discussions.map(() => "?").join(",");
+  const comments = db.prepare(`
+    SELECT c.id, c.feedback_id, c.content, c.created_at,
+      CASE WHEN c.is_anonymous = 1 THEN '匿名用户' ELSE COALESCE(NULLIF(u.name, ''), '匿名用户') END AS author_name,
+      CASE
+        WHEN c.is_anonymous = 1 THEN ''
+        WHEN u.enrollment_year IS NOT NULL AND u.degree <> '' THEN CAST(u.enrollment_year AS TEXT) || '级 ' || u.degree
+        WHEN u.enrollment_year IS NOT NULL THEN CAST(u.enrollment_year AS TEXT) || '级'
+        ELSE COALESCE(NULLIF(u.degree, ''), '')
+      END AS author_grade,
+      (SELECT COUNT(*) FROM feedback_comment_likes cl WHERE cl.comment_id = c.id) AS like_count,
+      EXISTS(SELECT 1 FROM feedback_comment_likes cl WHERE cl.comment_id = c.id AND cl.user_id = ?) AS liked_by_me
+    FROM feedback_comments c
+    LEFT JOIN user_emails u ON u.user_id = c.user_id
+    WHERE c.feedback_id IN (${placeholders})
+    ORDER BY c.created_at ASC, c.id ASC
+  `).all(userId, ...discussions.map((item) => item.id));
+
+  const commentsByDiscussion = new Map();
+  for (const comment of comments) {
+    const group = commentsByDiscussion.get(comment.feedback_id) || [];
+    group.push(comment);
+    commentsByDiscussion.set(comment.feedback_id, group);
+  }
+  return discussions.map((item) => ({ ...item, comments: commentsByDiscussion.get(item.id) || [] }));
+}
+
+export function addFeedbackComment(feedbackId, userId, content, isAnonymous = false) {
+  const discussion = db.prepare("SELECT id FROM feedback WHERE id = ?").get(Number(feedbackId));
+  if (!discussion) return null;
+  const result = db.prepare(`
+    INSERT INTO feedback_comments (feedback_id, user_id, content, is_anonymous, created_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+  `).run(Number(feedbackId), userId, content, isAnonymous ? 1 : 0);
+  return { id: Number(result.lastInsertRowid), feedback_id: Number(feedbackId), content };
+}
+
+export function toggleFeedbackLike(feedbackId, userId) {
+  if (!db.prepare("SELECT id FROM feedback WHERE id = ?").get(Number(feedbackId))) return null;
+  const inserted = db.prepare(`
+    INSERT INTO feedback_likes (feedback_id, user_id) VALUES (?, ?)
+    ON CONFLICT(feedback_id, user_id) DO NOTHING
+  `).run(Number(feedbackId), userId);
+  let liked = inserted.changes > 0;
+  if (!liked) {
+    db.prepare("DELETE FROM feedback_likes WHERE feedback_id = ? AND user_id = ?").run(Number(feedbackId), userId);
+  }
+  const count = db.prepare("SELECT COUNT(*) AS count FROM feedback_likes WHERE feedback_id = ?").get(Number(feedbackId)).count;
+  return { liked, count };
+}
+
+export function toggleFeedbackCommentLike(commentId, userId) {
+  if (!db.prepare("SELECT id FROM feedback_comments WHERE id = ?").get(Number(commentId))) return null;
+  const inserted = db.prepare(`
+    INSERT INTO feedback_comment_likes (comment_id, user_id) VALUES (?, ?)
+    ON CONFLICT(comment_id, user_id) DO NOTHING
+  `).run(Number(commentId), userId);
+  let liked = inserted.changes > 0;
+  if (!liked) {
+    db.prepare("DELETE FROM feedback_comment_likes WHERE comment_id = ? AND user_id = ?").run(Number(commentId), userId);
+  }
+  const count = db.prepare("SELECT COUNT(*) AS count FROM feedback_comment_likes WHERE comment_id = ?").get(Number(commentId)).count;
+  return { liked, count };
 }
 
 export function replyFeedback(id, reply) {
@@ -916,6 +1020,10 @@ export function replyFeedback(id, reply) {
 
 export function deleteFeedback(id) {
   return db.prepare("DELETE FROM feedback WHERE id = ?").run(Number(id)).changes > 0;
+}
+
+export function deleteFeedbackComment(id) {
+  return db.prepare("DELETE FROM feedback_comments WHERE id = ?").run(Number(id)).changes > 0;
 }
 
 // ── User Journals (per-user subscription) ──

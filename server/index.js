@@ -34,10 +34,15 @@ import {
   saveRemotePreferences,
   getRemotePreferences,
   getRecentFeedbackCount,
+  getRecentFeedbackCommentCount,
   addFeedback,
+  addFeedbackComment,
   listPublicFeedback,
+  toggleFeedbackLike,
+  toggleFeedbackCommentLike,
   replyFeedback,
-  deleteFeedback
+  deleteFeedback,
+  deleteFeedbackComment
 } from "./db.js";
 import { createAdminToken, passwordMatches, requireAdmin, verifyAdminToken } from "./admin.js";
 import { createUserToken, getUserClaims, hashUserPassword, requireUser, verifyUserPassword } from "./user-auth.js";
@@ -465,7 +470,7 @@ app.post("/api/test-email", asyncHandler(async (req, res) => {
 
 // ── Public Feedback ──
 app.get("/api/feedback", (req, res) => {
-  res.json(listPublicFeedback(req.query.limit));
+  res.json(listPublicFeedback(req.query.limit, getPrincipalId(req)));
 });
 
 app.post("/api/feedback", (req, res) => {
@@ -486,6 +491,44 @@ app.post("/api/feedback", (req, res) => {
   const profile = getUserProfile(userId);
   const isAnonymous = !getUserClaims(req) || Boolean(req.body?.anonymous);
   res.status(201).json(addFeedback(userId, profile.email || "", content, isAnonymous));
+});
+
+app.post("/api/feedback/:id/comments", (req, res) => {
+  const userId = getPrincipalId(req);
+  if (getRecentFeedbackCommentCount(userId) >= 10) {
+    res.status(429).json({ error: "每小时最多发布 10 条评论" });
+    return;
+  }
+  const content = String(req.body?.content || "").trim();
+  if (!content || content.length > 1000) {
+    res.status(400).json({ error: "评论须为 1 至 1000 个字符" });
+    return;
+  }
+  const isAnonymous = !getUserClaims(req) || Boolean(req.body?.anonymous);
+  const comment = addFeedbackComment(req.params.id, userId, content, isAnonymous);
+  if (!comment) {
+    res.status(404).json({ error: "讨论不存在" });
+    return;
+  }
+  res.status(201).json(comment);
+});
+
+app.post("/api/feedback/:id/like", (req, res) => {
+  const result = toggleFeedbackLike(req.params.id, getPrincipalId(req));
+  if (!result) {
+    res.status(404).json({ error: "讨论不存在" });
+    return;
+  }
+  res.json(result);
+});
+
+app.post("/api/feedback/comments/:id/like", (req, res) => {
+  const result = toggleFeedbackCommentLike(req.params.id, getPrincipalId(req));
+  if (!result) {
+    res.status(404).json({ error: "评论不存在" });
+    return;
+  }
+  res.json(result);
 });
 
 const adminLoginAttempts = new Map();
@@ -532,6 +575,14 @@ app.post("/api/admin/feedback/:id/reply", requireAdmin, (req, res) => {
 app.delete("/api/admin/feedback/:id", requireAdmin, (req, res) => {
   if (!deleteFeedback(req.params.id)) {
     res.status(404).json({ error: "反馈不存在" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.delete("/api/admin/feedback/comments/:id", requireAdmin, (req, res) => {
+  if (!deleteFeedbackComment(req.params.id)) {
+    res.status(404).json({ error: "评论不存在" });
     return;
   }
   res.json({ ok: true });

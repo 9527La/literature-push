@@ -3114,3 +3114,180 @@ mark {
   .identity-choice { align-items: stretch; flex-wrap: wrap; }
   .identity-choice legend { width: 100%; }
 }
+
+/* Public discussion: one quiet scholarly thread system, with the comment rail as its signature. */
+.feedback-layout { max-width: 1180px; }
+
+.feedback-composer,
+.admin-panel,
+.feedback-item {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-xs);
+}
+
+.feedback-composer { border-top: 3px solid var(--text-primary); }
+
+.feedback-item {
+  padding: 24px;
+  border-radius: var(--radius-xl);
+}
+
+.feedback-item > header,
+.discussion-comment header {
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.feedback-item > p {
+  margin: 17px 0 0 49px;
+  color: var(--text-primary);
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.discussion-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 16px 0 0 49px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.discussion-actions button,
+.discussion-actions span,
+.comment-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.discussion-actions button,
+.comment-actions button {
+  padding: 5px 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.discussion-actions button:hover,
+.comment-actions button:hover {
+  background: var(--bg-primary);
+  border-color: var(--border-color);
+}
+
+.discussion-actions button.is-liked,
+.comment-actions button.is-liked {
+  background: var(--accent-light);
+  color: var(--accent-hover);
+  border-color: rgba(49, 87, 213, 0.18);
+}
+
+.discussion-comments {
+  display: grid;
+  gap: 0;
+  margin: 20px 0 0 49px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-light);
+}
+
+.discussion-comment {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 12px;
+  position: relative;
+  padding: 16px 0 3px;
+}
+
+.comment-rail {
+  display: flex;
+  justify-content: center;
+  position: relative;
+}
+
+.comment-rail::after {
+  content: "";
+  position: absolute;
+  top: 29px;
+  bottom: -7px;
+  width: 1px;
+  background: var(--border-color);
+}
+
+.discussion-comment:last-of-type .comment-rail::after { display: none; }
+
+.comment-rail span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  z-index: 1;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.comment-body { min-width: 0; }
+.discussion-comment header { display: flex; gap: 8px; align-items: baseline; }
+.discussion-comment header strong { font-size: 13px; }
+.discussion-comment header span { color: var(--text-tertiary); font-size: 11px; }
+.discussion-comment p { margin: 6px 0 2px; white-space: pre-wrap; line-height: 1.65; font-size: 14px; }
+
+.comment-actions {
+  display: flex;
+  gap: 8px;
+  min-height: 30px;
+}
+
+.comment-actions button { font-size: 12px; }
+.comment-actions .comment-delete { color: var(--error); }
+
+.comment-composer {
+  margin-top: 15px;
+  padding: 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+}
+
+.comment-composer textarea {
+  width: 100%;
+  min-height: 68px;
+  resize: vertical;
+  background: var(--surface-raised);
+}
+
+.comment-composer > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 9px;
+}
+
+.comment-composer label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.admin-reply { background: var(--accent-light); }
+
+@media (max-width: 768px) {
+  .feedback-item { padding: 18px; }
+  .feedback-item > p,
+  .discussion-actions,
+  .discussion-comments,
+  .admin-reply,
+  .moderation-tools { margin-left: 0; }
+  .comment-composer > div { align-items: stretch; flex-direction: column; }
+  .comment-composer .secondary { justify-content: center; }
+}

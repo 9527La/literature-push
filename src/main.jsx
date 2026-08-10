@@ -16,6 +16,7 @@ import {
   HardDrive,
   HelpCircle,
   Mail,
+  MessageCircle,
   MessageSquare,
   RefreshCw,
   Save,
@@ -28,6 +29,7 @@ import {
   Languages,
   LogOut,
   Trash2,
+  ThumbsUp,
   UserRound,
   X
 } from "lucide-react";
@@ -210,7 +212,7 @@ function HelpView() {
     <div className="help-view">
       <section className="help-section">
         <h3><BookOpen size={18} /> 系统简介</h3>
-        <p>本系统自动订阅电力系统领域期刊的最新文献，提供文献浏览、关键词统计、邮件推送、公共反馈和账户个性设置同步。</p>
+        <p>本系统自动订阅电力系统领域期刊的最新文献，提供文献浏览、关键词统计、邮件推送、公共讨论和账户个性设置同步。</p>
       </section>
 
       <section className="help-section">
@@ -252,7 +254,7 @@ function HelpView() {
           <li><strong>账户资料</strong>：可保存姓名、入学年份、学历和周报邮箱。</li>
           <li><strong>本机保存</strong>：开启自动保存后，筛选、列表显示、期刊订阅和推送配置会保存在当前浏览器。</li>
           <li><strong>远端同步</strong>：登录后可手动上传当前设置，也可从远端账户载入。</li>
-          <li><strong>公共反馈</strong>：反馈直接公开展示，不发送邮件；管理员可回复或删除。</li>
+          <li><strong>公共讨论</strong>：公开发布主题、评论和点赞；登录用户可选择匿名参与，管理员可回复或删除内容。</li>
         </ul>
       </section>
 
@@ -506,7 +508,7 @@ function App() {
               <Settings size={16} /> 文献推送
             </button>
             <button className={activeView === "feedback" ? "active" : ""} onClick={() => setActiveView("feedback")}>
-              <MessageSquare size={16} /> 公共反馈
+              <MessageSquare size={16} /> 公共讨论
             </button>
             <button className={activeView === "account" ? "active" : ""} onClick={() => setActiveView("account")}>
               <UserRound size={16} /> {account.authenticated ? account.username : "登录账户"}
@@ -771,6 +773,8 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
   const [password, setPassword] = useState("");
   const [loginMessage, setLoginMessage] = useState("");
   const [replyDrafts, setReplyDrafts] = useState({});
+  const [commentDrafts, setCommentDrafts] = useState({});
+  const [commentAnonymous, setCommentAnonymous] = useState({});
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
   async function loadFeedback() {
@@ -787,7 +791,7 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
     try {
       await api.post("/api/feedback", { content, anonymous: !account.authenticated || anonymous });
       setContent("");
-      setMessage("反馈已公开发布，不会发送邮件。");
+      setMessage("讨论已公开发布。");
       await loadFeedback();
     } catch (error) {
       setMessage(error.message);
@@ -828,9 +832,47 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
     }
   }
 
+  async function submitComment(id) {
+    const comment = String(commentDrafts[id] || "").trim();
+    if (!comment) return;
+    try {
+      await api.post(`/api/feedback/${id}/comments`, {
+        content: comment,
+        anonymous: !account.authenticated || Boolean(commentAnonymous[id])
+      });
+      setCommentDrafts((current) => ({ ...current, [id]: "" }));
+      await loadFeedback();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function toggleDiscussionLike(id) {
+    try {
+      const result = await api.post(`/api/feedback/${id}/like`);
+      setItems((current) => current.map((item) => item.id === id
+        ? { ...item, liked_by_me: result.liked, like_count: result.count }
+        : item));
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function toggleCommentLike(discussionId, commentId) {
+    try {
+      const result = await api.post(`/api/feedback/comments/${commentId}/like`);
+      setItems((current) => current.map((item) => item.id === discussionId
+        ? { ...item, comments: item.comments.map((comment) => comment.id === commentId ? { ...comment, liked_by_me: result.liked, like_count: result.count } : comment) }
+        : item));
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
   async function removeFeedback(id) {
-    if (deleteConfirmId !== id) {
-      setDeleteConfirmId(id);
+    const confirmationKey = `discussion-${id}`;
+    if (deleteConfirmId !== confirmationKey) {
+      setDeleteConfirmId(confirmationKey);
       return;
     }
     try {
@@ -842,13 +884,28 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
     }
   }
 
+  async function removeComment(id) {
+    const confirmationKey = `comment-${id}`;
+    if (deleteConfirmId !== confirmationKey) {
+      setDeleteConfirmId(confirmationKey);
+      return;
+    }
+    try {
+      await api.delete(`/api/admin/feedback/comments/${id}`);
+      setDeleteConfirmId(null);
+      await loadFeedback();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
   return (
     <section className="feedback-layout" aria-labelledby="feedback-title">
       <header className="feedback-hero">
         <div>
-          <span className="eyebrow">公开交流</span>
-          <h1 id="feedback-title">意见反馈</h1>
-          <p>每条建议都会直接展示在这里，所有访问者都能看到；系统不会再向管理员发送反馈邮件。</p>
+          <span className="eyebrow">面向所有人的研究社区</span>
+          <h1 id="feedback-title">公共讨论区</h1>
+          <p>发布改进建议、补充使用经验，也可以评论和点赞已有讨论。这里的内容公开展示，不通过邮件转发。</p>
         </div>
         <div className={`admin-status ${isAdmin ? "active" : ""}`}>
           <ShieldCheck size={18} /> {isAdmin ? "管理员模式" : "公开浏览"}
@@ -862,25 +919,51 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
               <div className="mini-avatar">{(!account.authenticated || anonymous ? "匿" : account.name || account.username || "用").slice(0, 1)}</div>
               <span><strong>{!account.authenticated || anonymous ? "匿名用户" : account.name || account.username}</strong><small>{!account.authenticated || anonymous ? "不会展示账户资料" : account.enrollment_year ? `${account.enrollment_year}级${account.degree ? ` ${account.degree}` : ""}` : "未填写入学年份"}</small></span>
             </div>
-            {account.authenticated && <fieldset className="identity-choice"><legend>发布身份</legend><label><input type="radio" name="feedbackIdentity" checked={!anonymous} onChange={() => setAnonymous(false)} /> 实名反馈</label><label><input type="radio" name="feedbackIdentity" checked={anonymous} onChange={() => setAnonymous(true)} /> 匿名反馈</label></fieldset>}
-            <textarea value={content} onChange={(e) => setContent(e.target.value)} maxLength={2000} rows={5} placeholder="写下功能建议、数据问题或使用体验……" />
-            <div className="composer-footer"><span>{content.length}/2000 · 每小时可提交一次</span><button className="primary" disabled={sending || !content.trim()}><Send size={15} /> {sending ? "发布中" : "公开发布"}</button></div>
+            {account.authenticated && <fieldset className="identity-choice"><legend>发布身份</legend><label><input type="radio" name="feedbackIdentity" checked={!anonymous} onChange={() => setAnonymous(false)} /> 账户身份</label><label><input type="radio" name="feedbackIdentity" checked={anonymous} onChange={() => setAnonymous(true)} /> 匿名发布</label></fieldset>}
+            <textarea value={content} onChange={(e) => setContent(e.target.value)} maxLength={2000} rows={5} placeholder="发起一个讨论：描述问题、建议或希望大家补充的经验……" />
+            <div className="composer-footer"><span>{content.length}/2000 · 每小时可发起 1 个讨论</span><button className="primary" disabled={sending || !content.trim()}><Send size={15} /> {sending ? "发布中" : "发起讨论"}</button></div>
             {message && <div className="inline-msg" role="status">{message}</div>}
           </form>
 
           <div className="feedback-stream" aria-live="polite">
-            {items.length === 0 ? <div className="empty">还没有公开反馈，欢迎发布第一条建议。</div> : items.map((item) => (
+            {items.length === 0 ? <div className="empty">还没有讨论。可以从一个具体的问题或改进建议开始。</div> : items.map((item) => (
               <article className="feedback-item" key={item.id}>
                 <header>
                   <div className="mini-avatar">{item.author_name.slice(0, 1)}</div>
                   <div><strong>{item.author_name}</strong><span>{item.author_grade || "用户"} · {formatDate(item.created_at)}</span></div>
                 </header>
                 <p>{item.content}</p>
+                <div className="discussion-actions">
+                  <button className={item.liked_by_me ? "is-liked" : ""} type="button" onClick={() => toggleDiscussionLike(item.id)} aria-pressed={Boolean(item.liked_by_me)}><ThumbsUp size={15} /> {item.like_count || 0}</button>
+                  <span><MessageCircle size={15} /> {item.comment_count || 0} 条评论</span>
+                </div>
                 {item.admin_reply && <div className="admin-reply"><strong><ShieldCheck size={14} /> 管理员回复</strong><p>{item.admin_reply}</p><time>{formatDate(item.replied_at)}</time></div>}
+                <section className="discussion-comments" aria-label="讨论评论">
+                  {item.comments.map((comment) => (
+                    <article className="discussion-comment" key={comment.id}>
+                      <div className="comment-rail" aria-hidden="true"><span>{comment.author_name.slice(0, 1)}</span></div>
+                      <div className="comment-body">
+                        <header><strong>{comment.author_name}</strong><span>{comment.author_grade || "用户"} · {formatDate(comment.created_at)}</span></header>
+                        <p>{comment.content}</p>
+                        <div className="comment-actions">
+                          <button className={comment.liked_by_me ? "is-liked" : ""} type="button" onClick={() => toggleCommentLike(item.id, comment.id)} aria-pressed={Boolean(comment.liked_by_me)}><ThumbsUp size={13} /> {comment.like_count || 0}</button>
+                          {isAdmin && <button className="comment-delete" type="button" onClick={() => removeComment(comment.id)}><Trash2 size={13} /> {deleteConfirmId === `comment-${comment.id}` ? "确认删除" : "删除"}</button>}
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                  <div className="comment-composer">
+                    <textarea rows={2} maxLength={1000} value={commentDrafts[item.id] || ""} onChange={(event) => setCommentDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="补充你的看法或使用经验" />
+                    <div>
+                      {account.authenticated && <label><input type="checkbox" checked={Boolean(commentAnonymous[item.id])} onChange={(event) => setCommentAnonymous((current) => ({ ...current, [item.id]: event.target.checked }))} /> 匿名评论</label>}
+                      <button className="secondary" type="button" disabled={!String(commentDrafts[item.id] || "").trim()} onClick={() => submitComment(item.id)}><Send size={14} /> 发表评论</button>
+                    </div>
+                  </div>
+                </section>
                 {isAdmin && <div className="moderation-tools">
                   <textarea rows={2} maxLength={2000} value={replyDrafts[item.id] || ""} onChange={(e) => setReplyDrafts({ ...replyDrafts, [item.id]: e.target.value })} placeholder={item.admin_reply ? "更新管理员回复" : "输入管理员回复"} />
-                  <button className="secondary" type="button" onClick={() => submitReply(item.id)} disabled={!String(replyDrafts[item.id] || "").trim()}>回复</button>
-                  <button className="danger-button" type="button" onClick={() => removeFeedback(item.id)}><Trash2 size={14} /> {deleteConfirmId === item.id ? "再次点击确认删除" : "删除"}</button>
+                  <button className="secondary" type="button" onClick={() => submitReply(item.id)} disabled={!String(replyDrafts[item.id] || "").trim()}>官方回复</button>
+                  <button className="danger-button" type="button" onClick={() => removeFeedback(item.id)}><Trash2 size={14} /> {deleteConfirmId === `discussion-${item.id}` ? "确认删除主题" : "删除主题"}</button>
                 </div>}
               </article>
             ))}
@@ -889,8 +972,8 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
 
         <aside className="admin-panel">
           <span className="eyebrow">管理入口</span>
-          <h2>反馈管理</h2>
-          <p>{isAdmin ? "你可以公开回复或删除不适合保留的内容。" : "管理员登录后可回复和删除反馈，普通用户只能浏览与发布。"}</p>
+          <h2>讨论管理</h2>
+          <p>{isAdmin ? "你可以发布官方回复，并删除不适合公开保留的主题或评论。" : "所有人都能阅读、评论和点赞；登录账户后可选择实名或匿名参与。"}</p>
           {isAdmin ? <button className="secondary" type="button" onClick={logout}><LogOut size={15} /> 退出管理员</button> : <form onSubmit={login}>
             <label><span>管理员密码</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>
             <button className="primary" disabled={!password}><ShieldCheck size={15} /> 登录</button>
