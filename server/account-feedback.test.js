@@ -11,7 +11,7 @@ test("persists account preferences, joins translated titles and hides feedback i
   const dbUrl = new URL("./db.js", import.meta.url).href;
   const script = `
     const dbModule = await import(${JSON.stringify(dbUrl)});
-    const { db, updateUserProfile, getUserProfile, getAllUserEmails, saveTranslation, listArticles, addFeedback, addFeedbackComment, listPublicFeedback, toggleFeedbackLike, toggleFeedbackCommentLike, replyFeedback, deleteFeedback, deleteFeedbackComment, createUserAccount, saveRemotePreferences, getRemotePreferences, updateUserSettings, getUserSettings } = dbModule;
+    const { db, updateUserProfile, getUserProfile, getAllUserEmails, saveTranslation, listArticles, addFeedback, addFeedbackComment, listPublicFeedback, toggleFeedbackLike, toggleFeedbackCommentLike, replyFeedback, deleteFeedback, deleteFeedbackComment, createUserAccount, getAdminOverview, saveRemotePreferences, getRemotePreferences, updateUserSettings, getUserSettings } = dbModule;
     db.prepare(\"INSERT INTO articles (external_id, title, fetched_at, first_seen_at) VALUES (?, ?, datetime('now'), datetime('now'))\").run('test-article', 'English title');
     const article = db.prepare(\"SELECT id FROM articles WHERE external_id = 'test-article'\").get();
     saveTranslation(article.id, 'zh', { title: '中文标题', abstract: '中文摘要', provider: 'test' });
@@ -48,6 +48,10 @@ test("persists account preferences, joins translated titles and hides feedback i
     updateUserSettings('user-a', { pushEnabled: true, pushFrequency: 'daily' });
     updateUserSettings('user-b', { pushEnabled: false, pushFrequency: 'weekly' });
     if (!getUserSettings('user-a').pushEnabled || getUserSettings('user-b').pushEnabled) process.exit(12);
+    const superAdmin = createUserAccount({ username: '沈超2024', passwordHash: 'hash', passwordSalt: 'salt', registeredIp: '10.0.0.2' });
+    if (superAdmin.role !== 'super_admin') process.exit(16);
+    const overview = getAdminOverview();
+    if (overview.counts.users !== 2 || overview.counts.articles !== 1 || !overview.users.some((user) => user.username === '沈超2024' && user.role === 'super_admin') || typeof overview.coverage.abstracts !== 'number') process.exit(17);
   `;
   try {
     const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {

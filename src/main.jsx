@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
+  Activity,
   ArrowDownUp,
   BarChart3,
   Bell,
@@ -8,6 +9,7 @@ import {
   Check,
   CloudDownload,
   CloudUpload,
+  Database,
   ExternalLink,
   Eye,
   EyeOff,
@@ -30,14 +32,11 @@ import {
   LogOut,
   Trash2,
   ThumbsUp,
+  Users,
   UserRound,
   X
 } from "lucide-react";
 import "./styles.css";
-
-function getAdminToken() {
-  return localStorage.getItem("adminToken") || "";
-}
 
 function getUserToken() {
   return localStorage.getItem("userToken") || "";
@@ -58,8 +57,6 @@ async function parseResponse(response) {
 function requestHeaders(hasBody = false) {
   const headers = {};
   if (hasBody) headers["Content-Type"] = "application/json";
-  const token = getAdminToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
   const userToken = getUserToken();
   if (userToken) headers["X-User-Token"] = userToken;
   return headers;
@@ -262,7 +259,7 @@ function HelpView() {
         <h3><RefreshCw size={18} /> 数据刷新</h3>
         <p>系统支持两种刷新方式：</p>
         <ul>
-          <li><strong>手动刷新</strong>：点击页面右上角"立即刷新"按钮，即时拉取最新文献。</li>
+          <li><strong>手动刷新</strong>：最高管理员可在“管理中心”即时拉取最新文献或补全关键词。</li>
           <li><strong>定时刷新</strong>：在周报递送页面中设置 Cron 表达式，系统将按计划自动获取新文献。默认每天凌晨执行一次。</li>
         </ul>
       </section>
@@ -272,7 +269,7 @@ function HelpView() {
         <ul>
           <li><strong>局域网访问</strong>：同一 Wi-Fi 下的其他设备可通过浏览器输入本机显示的局域网地址访问本系统。</li>
           <li><strong>版本更新</strong>：系统更新后会弹出更新说明，可选择"知道了"关闭，下次更新前不再重复提示。</li>
-          <li><strong>数据同步</strong>：管理员执行一键部署后，所有用户刷新页面即可获取最新版本和数据。</li>
+          <li><strong>管理中心</strong>：仅“沈超2024”账户可查看网站统计、用户、期刊完整度和刷新记录，并执行数据维护。</li>
         </ul>
       </section>
     </div>
@@ -290,14 +287,13 @@ function App() {
   const [displayPreferences, setDisplayPreferences] = useState(() => ({ ...DEFAULT_DISPLAY, ...(localPersonalization?.displayPreferences || {}) }));
   const [activeView, setActiveView] = useState(() => {
     const requested = window.location.hash.slice(1);
-    return ["feed", "stats", "settings", "feedback", "account", "help"].includes(requested) ? requested : "feed";
+    return ["feed", "stats", "settings", "feedback", "account", "admin", "help"].includes(requested) ? requested : "feed";
   });
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [versionInfo, setVersionInfo] = useState(null);
-  const [account, setAccount] = useState({ email: "", name: "", enrollment_year: null, degree: "", authenticated: false, can_register: true, username: "" });
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [account, setAccount] = useState({ email: "", name: "", enrollment_year: null, degree: "", authenticated: false, can_register: true, username: "", role: "guest", is_admin: false });
   
   // Debounced search
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -341,17 +337,6 @@ function App() {
     window.history.replaceState(null, "", `#${activeView}`);
   }, [activeView]);
 
-  useEffect(() => {
-    if (!getAdminToken()) return;
-    api.get("/api/admin/session").then((session) => {
-      setIsAdmin(Boolean(session.isAdmin));
-      if (!session.isAdmin) localStorage.removeItem("adminToken");
-    }).catch(() => {
-      localStorage.removeItem("adminToken");
-      setIsAdmin(false);
-    });
-  }, []);
-
   function dismissVersion() {
     if (versionInfo) localStorage.setItem("dismissedVersion", versionInfo.version);
     setVersionInfo(null);
@@ -381,6 +366,7 @@ function App() {
     setStatus(nextStatus);
     setArticles(nextArticles);
     setAccount(nextAccount);
+    if (activeView === "admin" && !nextAccount.is_admin) setActiveView("feed");
     if (getUserToken() && !nextAccount.authenticated) localStorage.removeItem("userToken");
     if (!availableJournals.length) setAvailableJournals(journals);
     setInitialLoading(false);
@@ -464,7 +450,7 @@ function App() {
 
   function logoutUser() {
     localStorage.removeItem("userToken");
-    setAccount({ email: "", name: "", enrollment_year: null, degree: "", authenticated: false, can_register: false, username: "" });
+    setAccount({ email: "", name: "", enrollment_year: null, degree: "", authenticated: false, can_register: false, username: "", role: "guest", is_admin: false });
     loadAll().catch((error) => setMessage(error.message));
   }
 
@@ -513,6 +499,9 @@ function App() {
             <button className={activeView === "account" ? "active" : ""} onClick={() => setActiveView("account")}>
               <UserRound size={16} /> {account.authenticated ? account.username : "登录账户"}
             </button>
+            {account.is_admin && <button className={activeView === "admin" ? "active" : ""} onClick={() => setActiveView("admin")}>
+              <ShieldCheck size={16} /> 管理中心
+            </button>}
             <button className={activeView === "help" ? "active" : ""} onClick={() => setActiveView("help")}>
               <HelpCircle size={16} /> 使用说明
             </button>
@@ -531,10 +520,10 @@ function App() {
               <span className="stat-badge stat-badge-fav">收藏 <strong>{status.favoriteCount}</strong></span>
             )}
           </div>
-          <button className="primary" onClick={refresh} disabled={loading}>
+          {account.is_admin && <button className="primary" onClick={refresh} disabled={loading}>
             <RefreshCw size={16} className={loading ? "spin" : ""} />
             {loading ? "刷新中" : "立即刷新"}
-          </button>
+          </button>}
         </div>
       </header>
 
@@ -584,11 +573,9 @@ function App() {
             onLoadRemote={loadRemotePersonalization}
           />
         ) : activeView === "feedback" ? (
-          <FeedbackView
-            account={account}
-            isAdmin={isAdmin}
-            onAdminChange={setIsAdmin}
-          />
+          <FeedbackView account={account} />
+        ) : activeView === "admin" && account.is_admin ? (
+          <AdminView onDataChanged={loadAll} />
         ) : (
           <StatsView journals={settings.journals} markRead={markRead} toggleFavorite={toggleFavorite} />
         )}
@@ -764,17 +751,116 @@ function AccountView({
   );
 }
 
-function FeedbackView({ account, isAdmin, onAdminChange }) {
+function AdminView({ onDataChanged }) {
+  const [overview, setOverview] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [runningAction, setRunningAction] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function loadOverview() {
+    setOverview(await api.get("/api/admin/overview"));
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    loadOverview().catch((error) => {
+      setMessage(error.message);
+      setLoading(false);
+    });
+  }, []);
+
+  async function runDataAction(action) {
+    setRunningAction(action);
+    setMessage("");
+    try {
+      if (action === "refresh") {
+        const result = await api.post("/api/refresh");
+        setMessage(result.status === "success" ? `文献刷新完成，新增 ${result.addedCount || 0} 篇。` : result.message);
+      } else {
+        const result = await api.post("/api/enrich-keywords");
+        setMessage(`关键词补全完成，更新 ${result.updated || result.count || 0} 篇。`);
+      }
+      await Promise.all([loadOverview(), onDataChanged()]);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setRunningAction("");
+    }
+  }
+
+  if (loading) return <div className="loading-skeleton"><div className="skeleton" style={{ height: 150, marginBottom: 16 }} /><div className="skeleton" style={{ height: 320 }} /></div>;
+  if (!overview) return <div className="empty">无法读取管理数据。{message}</div>;
+
+  const counts = overview.counts || {};
+  const coverage = overview.coverage || {};
+  const metrics = [
+    ["文献记录", counts.articles],
+    ["原文摘要", counts.abstracts],
+    ["翻译记录", counts.translations],
+    ["注册账户", counts.users],
+    ["讨论主题", counts.discussions],
+    ["评论 / 点赞", `${counts.comments || 0} / ${counts.likes || 0}`]
+  ];
+  const coverageRows = [
+    ["原文摘要", coverage.abstracts],
+    ["原文关键词", coverage.keywords],
+    ["中文标题", coverage.translatedTitles],
+    ["中文摘要", coverage.translatedAbstracts]
+  ];
+
+  return (
+    <section className="admin-dashboard" aria-labelledby="admin-title">
+      <header className="admin-dashboard-hero">
+        <div className="admin-seal"><Database size={24} /></div>
+        <div><span className="eyebrow">仅最高管理员可见</span><h1 id="admin-title">网站管理中心</h1><p>查看远端数据库的完整度、用户与社区状态，并执行受保护的数据维护。</p></div>
+        <div className="admin-command-bar">
+          <button className="primary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("refresh")}><RefreshCw size={15} className={runningAction === "refresh" ? "spin" : ""} /> 刷新文献数据</button>
+          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("keywords")}><Activity size={15} /> 补全关键词</button>
+        </div>
+      </header>
+      {message && <div className="admin-notice" role="status">{message}</div>}
+
+      <section className="admin-ledger" aria-label="网站总览">
+        <header><span>远端数据总账</span><small>实时读取</small></header>
+        <div className="ledger-metrics">{metrics.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value ?? 0}</strong></div>)}</div>
+      </section>
+
+      <div className="admin-dashboard-grid">
+        <section className="admin-panel-card coverage-panel">
+          <header><div><span className="eyebrow">数据健康</span><h2>内容完整度</h2></div><Activity size={19} /></header>
+          <div className="coverage-list">{coverageRows.map(([label, value]) => <div className="coverage-row" key={label}><div><span>{label}</span><strong>{Number(value || 0).toFixed(1)}%</strong></div><div className="coverage-track"><span style={{ width: `${Math.min(Number(value || 0), 100)}%` }} /></div></div>)}</div>
+        </section>
+
+        <section className="admin-panel-card refresh-panel">
+          <header><div><span className="eyebrow">任务记录</span><h2>最近刷新</h2></div><RefreshCw size={19} /></header>
+          <div className="refresh-ledger">{overview.recentRefreshes.length ? overview.recentRefreshes.map((run, index) => <div key={`${run.started_at}-${index}`}><span className={`run-state ${run.status}`}>{run.status === "success" ? "完成" : run.status}</span><time>{formatDate(run.started_at)}</time><strong>新增 {run.added_count || 0}</strong></div>) : <p className="empty-compact">暂无刷新记录</p>}</div>
+        </section>
+      </div>
+
+      <section className="admin-panel-card admin-table-card">
+        <header><div><span className="eyebrow">账户权限</span><h2>用户管理</h2></div><Users size={19} /></header>
+        <div className="admin-table-wrap"><table><thead><tr><th>用户</th><th>账户角色</th><th>学籍</th><th>邮箱</th><th>注册日期</th></tr></thead><tbody>{overview.users.map((user) => <tr key={user.id}><td><strong>{user.name || user.username}</strong><small>@{user.username}</small></td><td><span className={`role-chip ${user.role}`}>{user.role === "super_admin" ? "最高管理员" : "普通用户"}</span></td><td>{user.enrollment_year ? `${user.enrollment_year}级 ${user.degree || ""}` : "—"}</td><td>{user.email || "—"}</td><td>{formatDate(user.created_at)}</td></tr>)}</tbody></table></div>
+      </section>
+
+      <section className="admin-panel-card admin-table-card">
+        <header><div><span className="eyebrow">期刊数据</span><h2>文献分布</h2></div><BookOpen size={19} /></header>
+        <div className="admin-table-wrap"><table><thead><tr><th>期刊</th><th>文献数量</th><th>带摘要</th><th>摘要覆盖率</th></tr></thead><tbody>{overview.journals.map((journal) => <tr key={journal.journal}><td><strong>{journal.journal || "未标记期刊"}</strong></td><td>{journal.count}</td><td>{journal.abstract_count}</td><td>{journal.count ? (journal.abstract_count * 100 / journal.count).toFixed(1) : "0.0"}%</td></tr>)}</tbody></table></div>
+      </section>
+    </section>
+  );
+}
+
+function FeedbackView({ account }) {
+  const isAdmin = Boolean(account.is_admin);
   const [items, setItems] = useState([]);
   const [content, setContent] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [anonymous, setAnonymous] = useState(false);
-  const [password, setPassword] = useState("");
-  const [loginMessage, setLoginMessage] = useState("");
   const [replyDrafts, setReplyDrafts] = useState({});
   const [commentDrafts, setCommentDrafts] = useState({});
   const [commentAnonymous, setCommentAnonymous] = useState({});
+  const [openCommentComposerId, setOpenCommentComposerId] = useState(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
   async function loadFeedback() {
@@ -800,26 +886,6 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
     }
   }
 
-  async function login(event) {
-    event.preventDefault();
-    setLoginMessage("");
-    try {
-      const result = await api.post("/api/admin/login", { password });
-      localStorage.setItem("adminToken", result.token);
-      setPassword("");
-      onAdminChange(true);
-      setLoginMessage(`管理员会话已启用，有效期 ${result.expiresInHours} 小时。`);
-    } catch (error) {
-      setLoginMessage(error.message);
-    }
-  }
-
-  function logout() {
-    localStorage.removeItem("adminToken");
-    onAdminChange(false);
-    setLoginMessage("已退出管理员会话。");
-  }
-
   async function submitReply(id) {
     const reply = String(replyDrafts[id] || "").trim();
     if (!reply) return;
@@ -841,6 +907,7 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
         anonymous: !account.authenticated || Boolean(commentAnonymous[id])
       });
       setCommentDrafts((current) => ({ ...current, [id]: "" }));
+      setOpenCommentComposerId(null);
       await loadFeedback();
     } catch (error) {
       setMessage(error.message);
@@ -907,9 +974,6 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
           <h1 id="feedback-title">公共讨论区</h1>
           <p>发布改进建议、补充使用经验，也可以评论和点赞已有讨论。这里的内容公开展示，不通过邮件转发。</p>
         </div>
-        <div className={`admin-status ${isAdmin ? "active" : ""}`}>
-          <ShieldCheck size={18} /> {isAdmin ? "管理员模式" : "公开浏览"}
-        </div>
       </header>
 
       <div className="feedback-grid">
@@ -935,7 +999,7 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
                 <p>{item.content}</p>
                 <div className="discussion-actions">
                   <button className={item.liked_by_me ? "is-liked" : ""} type="button" onClick={() => toggleDiscussionLike(item.id)} aria-pressed={Boolean(item.liked_by_me)}><ThumbsUp size={15} /> {item.like_count || 0}</button>
-                  <span><MessageCircle size={15} /> {item.comment_count || 0} 条评论</span>
+                  <button type="button" onClick={() => setOpenCommentComposerId((current) => current === item.id ? null : item.id)} aria-expanded={openCommentComposerId === item.id} aria-controls={`comment-composer-${item.id}`}><MessageCircle size={15} /> 评论 · {item.comment_count || 0}</button>
                 </div>
                 {item.admin_reply && <div className="admin-reply"><strong><ShieldCheck size={14} /> 管理员回复</strong><p>{item.admin_reply}</p><time>{formatDate(item.replied_at)}</time></div>}
                 <section className="discussion-comments" aria-label="讨论评论">
@@ -952,13 +1016,13 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
                       </div>
                     </article>
                   ))}
-                  <div className="comment-composer">
+                  {openCommentComposerId === item.id && <div className="comment-composer" id={`comment-composer-${item.id}`}>
                     <textarea rows={2} maxLength={1000} value={commentDrafts[item.id] || ""} onChange={(event) => setCommentDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="补充你的看法或使用经验" />
                     <div>
                       {account.authenticated && <label><input type="checkbox" checked={Boolean(commentAnonymous[item.id])} onChange={(event) => setCommentAnonymous((current) => ({ ...current, [item.id]: event.target.checked }))} /> 匿名评论</label>}
                       <button className="secondary" type="button" disabled={!String(commentDrafts[item.id] || "").trim()} onClick={() => submitComment(item.id)}><Send size={14} /> 发表评论</button>
                     </div>
-                  </div>
+                  </div>}
                 </section>
                 {isAdmin && <div className="moderation-tools">
                   <textarea rows={2} maxLength={2000} value={replyDrafts[item.id] || ""} onChange={(e) => setReplyDrafts({ ...replyDrafts, [item.id]: e.target.value })} placeholder={item.admin_reply ? "更新管理员回复" : "输入管理员回复"} />
@@ -970,16 +1034,6 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
           </div>
         </div>
 
-        <aside className="admin-panel">
-          <span className="eyebrow">管理入口</span>
-          <h2>讨论管理</h2>
-          <p>{isAdmin ? "你可以发布官方回复，并删除不适合公开保留的主题或评论。" : "所有人都能阅读、评论和点赞；登录账户后可选择实名或匿名参与。"}</p>
-          {isAdmin ? <button className="secondary" type="button" onClick={logout}><LogOut size={15} /> 退出管理员</button> : <form onSubmit={login}>
-            <label><span>管理员密码</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>
-            <button className="primary" disabled={!password}><ShieldCheck size={15} /> 登录</button>
-          </form>}
-          {loginMessage && <div className="inline-msg" role="status">{loginMessage}</div>}
-        </aside>
       </div>
     </section>
   );

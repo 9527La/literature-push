@@ -29,8 +29,10 @@ import {
   updateUserProfile,
   getUserAccountByUsername,
   getUserAccountById,
+  isUserAccountAdmin,
   hasUserAccountForIp,
   createUserAccount,
+  getAdminOverview,
   saveRemotePreferences,
   getRemotePreferences,
   getRecentFeedbackCount,
@@ -44,7 +46,6 @@ import {
   deleteFeedback,
   deleteFeedbackComment
 } from "./db.js";
-import { createAdminToken, passwordMatches, requireAdmin, verifyAdminToken } from "./admin.js";
 import { createUserToken, getUserClaims, hashUserPassword, requireUser, verifyUserPassword } from "./user-auth.js";
 import { crawlArticleDetails } from "./crawler.js";
 import { translateArticle } from "./translate.js";
@@ -163,12 +164,12 @@ app.post("/api/articles/:id/translate", async (req, res) => {
   }
 });
 
-app.post("/api/refresh", asyncHandler(async (req, res) => {
+app.post("/api/refresh", requireSiteAdmin, asyncHandler(async (req, res) => {
   const result = await refreshArticles();
   res.status(result.status === "error" ? 400 : 200).json(result);
 }));
 
-app.post("/api/enrich-keywords", async (req, res) => {
+app.post("/api/enrich-keywords", requireSiteAdmin, async (req, res) => {
   try {
     const result = await enrichMissingKeywords();
     res.json({ status: "success", ...result });
@@ -272,6 +273,19 @@ function getPrincipalId(req) {
   return claims ? `account:${claims.accountId}` : getClientIp(req);
 }
 
+function hasSiteAdminPermission(req) {
+  const claims = getUserClaims(req);
+  return Boolean(claims && isUserAccountAdmin(claims.accountId));
+}
+
+function requireSiteAdmin(req, res, next) {
+  if (!hasSiteAdminPermission(req)) {
+    res.status(403).json({ error: "需要最高管理员权限" });
+    return;
+  }
+  next();
+}
+
 function buildAccountResponse(req) {
   const claims = getUserClaims(req);
   const ip = getClientIp(req);
@@ -280,23 +294,27 @@ function buildAccountResponse(req) {
       ...getUserProfile(ip),
       authenticated: false,
       can_register: !hasUserAccountForIp(ip),
-      username: ""
+      username: "",
+      role: "guest",
+      is_admin: false
     };
   }
   const account = getUserAccountById(claims.accountId);
-  if (!account) return { ...getUserProfile(ip), authenticated: false, can_register: !hasUserAccountForIp(ip), username: "" };
+  if (!account) return { ...getUserProfile(ip), authenticated: false, can_register: !hasUserAccountForIp(ip), username: "", role: "guest", is_admin: false };
   return {
     ...getUserProfile(`account:${account.id}`),
     authenticated: true,
     can_register: false,
     username: account.username,
+    role: account.role || "user",
+    is_admin: account.role === "super_admin",
     preferences_updated_at: account.preferences_updated_at
   };
 }
 
 // ── User Identity ──
 app.get("/api/me", (req, res) => {
-  res.json({ userId: getPrincipalId(req), authenticated: Boolean(getUserClaims(req)) });
+  res.json({ userId: getPrincipalId(req), authenticated: Boolean(getUserClaims(req)), is_admin: hasSiteAdminPermission(req) });
 });
 
 app.get("/api/account", (req, res) => {
@@ -366,6 +384,8 @@ app.post("/api/auth/register", (req, res) => {
         authenticated: true,
         can_register: false,
         username: account.username,
+        role: account.role || "user",
+        is_admin: account.role === "super_admin",
         preferences_updated_at: account.preferences_updated_at
       }
     });
@@ -432,7 +452,7 @@ app.get("/api/user-email", (req, res) => {
   res.json(record || { userId, email: "" });
 });
 
-app.get("/api/user-emails", requireAdmin, (req, res) => {
+app.get("/api/user-emails", requireSiteAdmin, (req, res) => {
   res.json(getAllUserEmails());
 });
 
@@ -531,35 +551,15 @@ app.post("/api/feedback/comments/:id/like", (req, res) => {
   res.json(result);
 });
 
-const adminLoginAttempts = new Map();
-
-app.post("/api/admin/login", (req, res) => {
-  if (!config.adminPassword || !config.adminTokenSecret) {
-    res.status(503).json({ error: "管理员密码尚未配置" });
-    return;
-  }
-  const clientId = getClientIp(req);
-  const now = Date.now();
-  const recent = (adminLoginAttempts.get(clientId) || []).filter((time) => now - time < 15 * 60 * 1000);
-  if (recent.length >= 5) {
-    res.status(429).json({ error: "登录尝试过多，请 15 分钟后再试" });
-    return;
-  }
-  if (!passwordMatches(req.body?.password)) {
-    adminLoginAttempts.set(clientId, [...recent, now]);
-    res.status(401).json({ error: "管理员密码错误" });
-    return;
-  }
-  adminLoginAttempts.delete(clientId);
-  res.json({ token: createAdminToken(), expiresInHours: config.adminTokenTtlHours });
-});
-
 app.get("/api/admin/session", (req, res) => {
-  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  res.json({ isAdmin: verifyAdminToken(token) });
+  res.json({ isAdmin: hasSiteAdminPermission(req) });
 });
 
-app.post("/api/admin/feedback/:id/reply", requireAdmin, (req, res) => {
+app.get("/api/admin/overview", requireSiteAdmin, (req, res) => {
+  res.json(getAdminOverview());
+});
+
+app.post("/api/admin/feedback/:id/reply", requireSiteAdmin, (req, res) => {
   const reply = String(req.body?.reply || "").trim();
   if (!reply || reply.length > 2000) {
     res.status(400).json({ error: "管理员回复须为 1 至 2000 个字符" });
@@ -572,7 +572,7 @@ app.post("/api/admin/feedback/:id/reply", requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/api/admin/feedback/:id", requireAdmin, (req, res) => {
+app.delete("/api/admin/feedback/:id", requireSiteAdmin, (req, res) => {
   if (!deleteFeedback(req.params.id)) {
     res.status(404).json({ error: "反馈不存在" });
     return;
@@ -580,7 +580,7 @@ app.delete("/api/admin/feedback/:id", requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/api/admin/feedback/comments/:id", requireAdmin, (req, res) => {
+app.delete("/api/admin/feedback/comments/:id", requireSiteAdmin, (req, res) => {
   if (!deleteFeedbackComment(req.params.id)) {
     res.status(404).json({ error: "评论不存在" });
     return;

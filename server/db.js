@@ -172,12 +172,15 @@ for (const migration of [
   "ALTER TABLE user_emails ADD COLUMN degree TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE feedback ADD COLUMN admin_reply TEXT",
   "ALTER TABLE feedback ADD COLUMN replied_at TEXT",
-  "ALTER TABLE feedback ADD COLUMN is_anonymous INTEGER NOT NULL DEFAULT 0"
+  "ALTER TABLE feedback ADD COLUMN is_anonymous INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE user_accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"
 ]) {
   try { db.exec(migration); } catch (error) {
     if (!error.message?.includes("duplicate column")) throw error;
   }
 }
+db.prepare("UPDATE user_accounts SET role = 'user' WHERE role = 'super_admin' AND username <> ? COLLATE NOCASE").run(config.superAdminUsername);
+db.prepare("UPDATE user_accounts SET role = 'super_admin' WHERE username = ? COLLATE NOCASE").run(config.superAdminUsername);
 db.exec("UPDATE user_emails SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''");
 
 db.exec("UPDATE articles SET first_seen_at = fetched_at WHERE first_seen_at IS NULL OR first_seen_at = ''");
@@ -844,7 +847,11 @@ export function getUserAccountByUsername(username) {
 }
 
 export function getUserAccountById(id) {
-  return db.prepare("SELECT id, username, registered_ip, preferences_updated_at, created_at, updated_at FROM user_accounts WHERE id = ?").get(Number(id)) || null;
+  return db.prepare("SELECT id, username, role, registered_ip, preferences_updated_at, created_at, updated_at FROM user_accounts WHERE id = ?").get(Number(id)) || null;
+}
+
+export function isUserAccountAdmin(id) {
+  return getUserAccountById(id)?.role === "super_admin";
 }
 
 export function hasUserAccountForIp(ip) {
@@ -855,9 +862,10 @@ export function createUserAccount({ username, passwordHash, passwordSalt, regist
   db.exec("BEGIN");
   try {
     const result = db.prepare(`
-      INSERT INTO user_accounts (username, password_hash, password_salt, registered_ip)
-      VALUES (?, ?, ?, ?)
-    `).run(username, passwordHash, passwordSalt, registeredIp);
+      INSERT INTO user_accounts (username, password_hash, password_salt, registered_ip, role)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(username, passwordHash, passwordSalt, registeredIp,
+      String(username).toLocaleLowerCase() === String(config.superAdminUsername).toLocaleLowerCase() ? "super_admin" : "user");
     const accountId = Number(result.lastInsertRowid);
     const principalId = `account:${accountId}`;
     const existingProfile = getUserProfile(registeredIp);
@@ -875,6 +883,11 @@ export function createUserAccount({ username, passwordHash, passwordSalt, regist
       SELECT ?, key, value, updated_at FROM user_settings WHERE user_id = ?
     `).run(principalId, registeredIp);
     db.prepare("UPDATE feedback SET user_id = ? WHERE user_id = ?").run(principalId, registeredIp);
+    db.prepare("UPDATE feedback_comments SET user_id = ? WHERE user_id = ?").run(principalId, registeredIp);
+    db.prepare("UPDATE OR IGNORE feedback_likes SET user_id = ? WHERE user_id = ?").run(principalId, registeredIp);
+    db.prepare("UPDATE OR IGNORE feedback_comment_likes SET user_id = ? WHERE user_id = ?").run(principalId, registeredIp);
+    db.prepare("DELETE FROM feedback_likes WHERE user_id = ?").run(registeredIp);
+    db.prepare("DELETE FROM feedback_comment_likes WHERE user_id = ?").run(registeredIp);
     db.prepare("DELETE FROM user_interactions WHERE user_id = ?").run(registeredIp);
     db.prepare("DELETE FROM user_journals WHERE user_id = ?").run(registeredIp);
     db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(registeredIp);
@@ -885,6 +898,51 @@ export function createUserAccount({ username, passwordHash, passwordSalt, regist
     db.exec("ROLLBACK");
     throw error;
   }
+}
+
+export function getAdminOverview() {
+  const scalar = (sql) => Number(db.prepare(sql).get()?.count || 0);
+  const articleCount = scalar("SELECT COUNT(*) AS count FROM articles");
+  const abstractCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE length(trim(coalesce(abstract, ''))) > 0");
+  const keywordCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE length(trim(coalesce(keywords, ''))) > 0");
+  const translationCount = scalar("SELECT COUNT(*) AS count FROM translations");
+  const translatedAbstractCount = scalar("SELECT COUNT(*) AS count FROM translations WHERE length(trim(coalesce(abstract, ''))) > 0");
+  return {
+    counts: {
+      articles: articleCount,
+      abstracts: abstractCount,
+      keywords: keywordCount,
+      translations: translationCount,
+      translatedAbstracts: translatedAbstractCount,
+      users: scalar("SELECT COUNT(*) AS count FROM user_accounts"),
+      discussions: scalar("SELECT COUNT(*) AS count FROM feedback"),
+      comments: scalar("SELECT COUNT(*) AS count FROM feedback_comments"),
+      likes: scalar("SELECT (SELECT COUNT(*) FROM feedback_likes) + (SELECT COUNT(*) FROM feedback_comment_likes) AS count")
+    },
+    coverage: {
+      abstracts: articleCount ? Math.round(abstractCount * 1000 / articleCount) / 10 : 0,
+      keywords: articleCount ? Math.round(keywordCount * 1000 / articleCount) / 10 : 0,
+      translatedTitles: articleCount ? Math.round(translationCount * 1000 / articleCount) / 10 : 0,
+      translatedAbstracts: articleCount ? Math.round(translatedAbstractCount * 1000 / articleCount) / 10 : 0
+    },
+    users: db.prepare(`
+      SELECT a.id, a.username, a.role, a.created_at, a.updated_at,
+        COALESCE(u.name, '') AS name, COALESCE(u.email, '') AS email,
+        u.enrollment_year, COALESCE(u.degree, '') AS degree
+      FROM user_accounts a
+      LEFT JOIN user_emails u ON u.user_id = 'account:' || a.id
+      ORDER BY CASE a.role WHEN 'super_admin' THEN 0 ELSE 1 END, a.created_at ASC
+    `).all(),
+    journals: db.prepare(`
+      SELECT journal, COUNT(*) AS count,
+        SUM(CASE WHEN length(trim(coalesce(abstract, ''))) > 0 THEN 1 ELSE 0 END) AS abstract_count
+      FROM articles GROUP BY journal ORDER BY count DESC, journal ASC
+    `).all(),
+    recentRefreshes: db.prepare(`
+      SELECT started_at, finished_at, added_count, status, message
+      FROM refresh_runs ORDER BY id DESC LIMIT 8
+    `).all()
+  };
 }
 
 export function saveRemotePreferences(accountId, preferences) {

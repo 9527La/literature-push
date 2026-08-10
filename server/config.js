@@ -56,6 +56,7 @@ export const config = {
   adminTokenSecret: process.env.ADMIN_TOKEN_SECRET || process.env.ADMIN_PASSWORD || "",
   adminTokenTtlHours: Number(process.env.ADMIN_TOKEN_TTL_HOURS || 12),
   userTokenTtlDays: Number(process.env.USER_TOKEN_TTL_DAYS || 30),
+  superAdminUsername: process.env.SUPER_ADMIN_USERNAME || "沈超2024",
   ieeeApiKey: process.env.IEEE_API_KEY || "",
   elsevierApiKey: process.env.ELSEVIER_API_KEY || "",
   publicDataSources: (process.env.PUBLIC_DATA_SOURCES || "crossref,openalex")
