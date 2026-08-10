@@ -687,6 +687,13 @@ button.link-button:hover {
   color: var(--accent-primary);
 }
 
+.display-summary {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
 /* Article Count */
 .article-count {
   font-size: 12px;
@@ -870,6 +877,23 @@ button.link-button:hover {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.abstract-missing {
+  width: fit-content;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.abstract-missing:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* Article Actions */
@@ -2615,6 +2639,21 @@ button:active:not(:disabled) { transform: translateY(1px) scale(0.99); }
 
   .article-actions {
     flex-direction: row;
+  }
+
+  .display-toggles {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .display-toggles-label {
+    width: 100%;
+  }
+
+  .display-summary {
+    width: 100%;
+    margin-left: 0;
+    white-space: normal;
   }
 
   .profile-card { grid-template-columns: 1fr; padding: 20px; }

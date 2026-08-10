@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowDownUp,
@@ -424,9 +424,15 @@ function App() {
   async function saveAccount(nextAccount) {
     const saved = await api.put("/api/account", nextAccount);
     setAccount(saved);
-    setMessage("账户信息已保存。");
     return saved;
   }
+
+  const updateArticleInList = useCallback((nextArticle) => {
+    if (!nextArticle?.id) return;
+    setArticles((current) => current.map((article) => (
+      article.id === nextArticle.id ? { ...article, ...nextArticle } : article
+    )));
+  }, []);
 
   function getPersonalizationSnapshot() {
     return { filters, displayPreferences, settings };
@@ -549,6 +555,7 @@ function App() {
             toggleFavorite={toggleFavorite}
             displayPreferences={displayPreferences}
             onDisplayPreferencesChange={setDisplayPreferences}
+            onArticleUpdated={updateArticleInList}
           />
         ) : activeView === "settings" ? (
           <SettingsView
@@ -616,19 +623,41 @@ function AccountView({
   const [form, setForm] = useState(account);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const messageTimerRef = useRef(null);
   const [authMode, setAuthMode] = useState("login");
   const [credentials, setCredentials] = useState({ username: "", password: "", confirmPassword: "" });
   const currentYear = new Date().getFullYear();
 
   useEffect(() => setForm(account), [account]);
 
+  useEffect(() => () => {
+    if (messageTimerRef.current) clearTimeout(messageTimerRef.current);
+  }, []);
+
+  function showTemporaryMessage(text) {
+    if (messageTimerRef.current) clearTimeout(messageTimerRef.current);
+    setMessage(text);
+    messageTimerRef.current = setTimeout(() => {
+      setMessage("");
+      messageTimerRef.current = null;
+    }, 3000);
+  }
+
+  function clearAccountMessage() {
+    if (messageTimerRef.current) {
+      clearTimeout(messageTimerRef.current);
+      messageTimerRef.current = null;
+    }
+    setMessage("");
+  }
+
   async function submitProfile(event) {
     event.preventDefault();
     setSaving(true);
-    setMessage("");
+    clearAccountMessage();
     try {
       await onSave(form);
-      setMessage("账户资料已保存。");
+      showTemporaryMessage("账户资料已保存。");
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -643,11 +672,11 @@ function AccountView({
       return;
     }
     setSaving(true);
-    setMessage("");
+    clearAccountMessage();
     try {
       await onAuthenticate(authMode, { username: credentials.username, password: credentials.password });
       setCredentials({ username: "", password: "", confirmPassword: "" });
-      setMessage(authMode === "register" ? "账户已注册并登录。" : "登录成功。");
+      showTemporaryMessage(authMode === "register" ? "账户已注册并登录。" : "登录成功。");
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -657,10 +686,10 @@ function AccountView({
 
   async function runSettingAction(action, successMessage) {
     setSaving(true);
-    setMessage("");
+    clearAccountMessage();
     try {
       await Promise.resolve(action());
-      setMessage(successMessage);
+      showTemporaryMessage(successMessage);
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -681,7 +710,7 @@ function AccountView({
             <button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>登录</button>
             <button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")} disabled={!account.can_register}>注册</button>
           </div>
-          <form onSubmit={submitAuth} className="auth-form">
+          <form onSubmit={submitAuth} onInput={clearAccountMessage} className="auth-form">
             <label><span>用户名</span><input value={credentials.username} minLength={3} maxLength={32} autoComplete="username" onChange={(e) => setCredentials({ ...credentials, username: e.target.value })} placeholder="3–32 个字符" required /></label>
             <label><span>密码</span><input type="password" value={credentials.password} minLength={8} maxLength={72} autoComplete={authMode === "login" ? "current-password" : "new-password"} onChange={(e) => setCredentials({ ...credentials, password: e.target.value })} placeholder="至少 8 个字符" required /></label>
             {authMode === "register" && <label><span>确认密码</span><input type="password" value={credentials.confirmPassword} minLength={8} maxLength={72} autoComplete="new-password" onChange={(e) => setCredentials({ ...credentials, confirmPassword: e.target.value })} required /></label>}
@@ -702,7 +731,7 @@ function AccountView({
       </div>
 
       <div className="account-grid">
-        <form className="profile-card" onSubmit={submitProfile}>
+        <form className="profile-card" onSubmit={submitProfile} onInput={clearAccountMessage}>
           <div className="profile-mark" aria-hidden="true">{(form.name || account.username || "用").slice(0, 1)}</div>
           <div className="form-grid">
             <label><span>姓名</span><input value={form.name || ""} maxLength={40} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="请输入姓名" required /></label>
@@ -871,7 +900,7 @@ function FeedbackView({ account, isAdmin, onAdminChange }) {
   );
 }
 
-function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange }) {
+function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [topKeywords, setTopKeywords] = useState([]);
   const [visibleCount, setVisibleCount] = useState(50);
@@ -886,6 +915,13 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
 
   function toggleDisplay(field) {
     onDisplayPreferencesChange({ ...displayPreferences, [field]: !displayPreferences[field] });
+  }
+
+  function handleArticleUpdated(nextArticle) {
+    onArticleUpdated(nextArticle);
+    setSelectedArticle((current) => (
+      current?.id === nextArticle.id ? { ...current, ...nextArticle } : current
+    ));
   }
 
   // Only show articles from subscribed journals
@@ -921,6 +957,12 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
       return { ...a, _score: score, _total: titleCount + keywordCount + abstractCount };
     }).sort((a, b) => b._score - a._score || b._total - a._total);
   }, [filteredArticles, filters.sort, highlightTerms]);
+
+  const visibleArticles = sortedArticles.slice(0, visibleCount);
+  const visibleTranslatedCount = visibleArticles.filter((article) => (
+    article.translated_title && article.translated_title !== article.title
+  )).length;
+  const visibleAbstractCount = visibleArticles.filter((article) => Boolean(article.abstract?.trim())).length;
 
   return (
     <div className="content-layout">
@@ -1039,9 +1081,21 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           <button type="button" className={`display-toggle ${displayPreferences.abstract ? "active" : ""}`} onClick={() => toggleDisplay("abstract")}>
             {displayPreferences.abstract ? <Eye size={14} /> : <EyeOff size={14} />} 摘要
           </button>
-          <button type="button" className={`display-toggle ${displayPreferences.bilingual ? "active" : ""}`} onClick={() => toggleDisplay("bilingual")}>
-            <Languages size={14} /> 中英文标题
+          <button
+            type="button"
+            className={`display-toggle ${displayPreferences.bilingual ? "active" : ""}`}
+            aria-pressed={displayPreferences.bilingual}
+            onClick={() => toggleDisplay("bilingual")}
+          >
+            {displayPreferences.bilingual ? <Eye size={14} /> : <EyeOff size={14} />}
+            中英文标题 · {displayPreferences.bilingual ? "已显示" : "已隐藏"}
           </button>
+          <span className="display-summary" role="status">
+            {displayPreferences.bilingual
+              ? `当前批次 ${visibleTranslatedCount} 篇有中文译题`
+              : "中文译题已隐藏"}
+            {displayPreferences.abstract && ` · ${visibleAbstractCount} 篇有摘要`}
+          </span>
         </div>
 
         <div className="article-count">
@@ -1054,7 +1108,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           {sortedArticles.length === 0 ? (
             <div className="empty">暂无文献。点击刷新从公开数据源获取，或调整筛选条件。</div>
           ) : (
-            sortedArticles.slice(0, visibleCount).map((article) => (
+            visibleArticles.map((article) => (
               <article className={`article ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}`} key={article.id}>
                 <div className="article-main">
                   <div className="article-meta">
@@ -1080,7 +1134,11 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                       ))}
                     </div>
                   )}
-                  {displayPreferences.abstract && article.abstract && <p className="abstract"><Highlight text={article.abstract} terms={highlightTerms} /></p>}
+                  {displayPreferences.abstract && (
+                    article.abstract
+                      ? <p className="abstract"><Highlight text={article.abstract} terms={highlightTerms} /></p>
+                      : <button type="button" className="abstract-missing" onClick={() => setSelectedArticle(article)}>摘要尚未载入，点击获取并查看</button>
+                  )}
                 </div>
                 <div className="article-actions">
                   <button title="查看摘要" onClick={() => setSelectedArticle(article)}>
@@ -1114,13 +1172,14 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           close={() => setSelectedArticle(null)}
           markRead={markRead}
           toggleFavorite={toggleFavorite}
+          onArticleUpdated={handleArticleUpdated}
         />
       )}
     </div>
   );
 }
 
-function ArticleDialog({ article, close, markRead, toggleFavorite }) {
+function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpdated }) {
   const [detail, setDetail] = useState(article);
   const [enriching, setEnriching] = useState(!article.abstract);
   const [enrichError, setEnrichError] = useState("");
@@ -1144,7 +1203,11 @@ function ArticleDialog({ article, close, markRead, toggleFavorite }) {
     setEnriching(true);
     api.get(`/api/articles/${article.id}/enrich`)
       .then((nextArticle) => {
-        if (!ignore) setDetail(nextArticle);
+        if (!ignore) {
+          const mergedArticle = { ...article, ...nextArticle };
+          setDetail(mergedArticle);
+          onArticleUpdated?.(mergedArticle);
+        }
       })
       .catch((error) => {
         if (!ignore) setEnrichError(error.message);
@@ -1156,7 +1219,7 @@ function ArticleDialog({ article, close, markRead, toggleFavorite }) {
     return () => {
       ignore = true;
     };
-  }, [article]);
+  }, [article.id]);
 
   async function translate(targetLanguage) {
     setTranslating(targetLanguage);
@@ -1164,6 +1227,11 @@ function ArticleDialog({ article, close, markRead, toggleFavorite }) {
     try {
       const nextTranslation = await api.post(`/api/articles/${detail.id}/translate`, { targetLanguage });
       setTranslation(nextTranslation);
+      if (targetLanguage === "zh" && nextTranslation.title) {
+        const translatedArticle = { ...detail, translated_title: nextTranslation.title };
+        setDetail(translatedArticle);
+        onArticleUpdated?.(translatedArticle);
+      }
     } catch (error) {
       setTranslationError(error.message);
     } finally {
