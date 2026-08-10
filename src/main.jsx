@@ -64,7 +64,7 @@ function requestHeaders(hasBody = false) {
 }
 
 const DEFAULT_FILTERS = { journal: [], q: "", keyword: [], unread: false, favorite: false, from: "", to: "", sort: "desc" };
-const DEFAULT_DISPLAY = { authors: true, keywords: true, abstract: true, bilingual: true };
+const DEFAULT_DISPLAY = { authors: true, keywords: true, abstract: true, bilingual: true, translatedAbstract: true };
 
 function readLocalPersonalization() {
   try {
@@ -427,10 +427,12 @@ function App() {
     return saved;
   }
 
-  const updateArticleInList = useCallback((nextArticle) => {
-    if (!nextArticle?.id) return;
+  const updateArticleInList = useCallback((nextArticles) => {
+    const updates = (Array.isArray(nextArticles) ? nextArticles : [nextArticles]).filter((article) => article?.id);
+    if (!updates.length) return;
+    const updatesById = new Map(updates.map((article) => [article.id, article]));
     setArticles((current) => current.map((article) => (
-      article.id === nextArticle.id ? { ...article, ...nextArticle } : article
+      updatesById.has(article.id) ? { ...article, ...updatesById.get(article.id) } : article
     )));
   }, []);
 
@@ -904,6 +906,11 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [topKeywords, setTopKeywords] = useState([]);
   const [visibleCount, setVisibleCount] = useState(50);
+  const [preparation, setPreparation] = useState({ active: false, total: 0, completed: 0, enriched: 0, translated: 0, failed: 0, message: "" });
+  const attemptedPreparationIdsRef = useRef(new Set());
+  const preparationJobRef = useRef("");
+  const preparationTimerRef = useRef(null);
+  const preparationMountedRef = useRef(true);
 
   useEffect(() => {
     api.get("/api/keyword-stats").then((data) => {
@@ -913,15 +920,84 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
 
   useEffect(() => setVisibleCount(50), [filters]);
 
+  useEffect(() => {
+    preparationMountedRef.current = true;
+    return () => {
+      preparationMountedRef.current = false;
+      preparationJobRef.current = "";
+      if (preparationTimerRef.current) clearTimeout(preparationTimerRef.current);
+    };
+  }, []);
+
   function toggleDisplay(field) {
     onDisplayPreferencesChange({ ...displayPreferences, [field]: !displayPreferences[field] });
   }
 
-  function handleArticleUpdated(nextArticle) {
-    onArticleUpdated(nextArticle);
-    setSelectedArticle((current) => (
-      current?.id === nextArticle.id ? { ...current, ...nextArticle } : current
-    ));
+  function handleArticleUpdated(nextArticles) {
+    const updates = (Array.isArray(nextArticles) ? nextArticles : [nextArticles]).filter((article) => article?.id);
+    onArticleUpdated(updates);
+    setSelectedArticle((current) => {
+      if (!current) return current;
+      const update = updates.find((article) => article.id === current.id);
+      return update ? { ...current, ...update } : current;
+    });
+  }
+
+  function articleNeedsPreparation(article) {
+    return !article.abstract?.trim()
+      || !article.translated_title?.trim()
+      || (Boolean(article.abstract?.trim()) && !article.translated_abstract?.trim())
+      || (Boolean(article.keywords?.trim()) && !article.translated_keywords?.trim());
+  }
+
+  async function pollPreparationJob(jobId) {
+    if (!preparationMountedRef.current || preparationJobRef.current !== jobId) return;
+    try {
+      const job = await api.get(`/api/articles/prepare/${jobId}`);
+      if (job.results?.length) handleArticleUpdated(job.results);
+      const finished = job.status === "complete";
+      setPreparation({
+        active: !finished,
+        total: job.total,
+        completed: job.completed,
+        enriched: job.enriched,
+        translated: job.translated,
+        failed: job.failed,
+        message: finished
+          ? `当前批次补全完成：新增 ${job.enriched} 篇摘要，新增或更新 ${job.translated} 篇中文翻译${job.failed ? `，${job.failed} 篇暂未完全补齐` : ""}。`
+          : "正在后台获取摘要和中文翻译，已完成的文献会直接显示。"
+      });
+      if (finished) {
+        preparationJobRef.current = "";
+        preparationTimerRef.current = setTimeout(() => {
+          if (preparationMountedRef.current) setPreparation((current) => ({ ...current, message: "" }));
+        }, 6000);
+        return;
+      }
+      preparationTimerRef.current = setTimeout(() => pollPreparationJob(jobId), 1500);
+    } catch (error) {
+      preparationJobRef.current = "";
+      setPreparation((current) => ({ ...current, active: false, message: `批量补全暂未完成：${error.message}` }));
+    }
+  }
+
+  async function startArticlePreparation(ids, { force = false } = {}) {
+    if (preparationJobRef.current) return;
+    const uniqueIds = [...new Set(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+    const selectedIds = force
+      ? uniqueIds
+      : uniqueIds.filter((id) => !attemptedPreparationIdsRef.current.has(id));
+    if (!selectedIds.length) return;
+    selectedIds.forEach((id) => attemptedPreparationIdsRef.current.add(id));
+    setPreparation({ active: true, total: selectedIds.length, completed: 0, enriched: 0, translated: 0, failed: 0, message: "正在创建批量补全任务…" });
+    try {
+      const job = await api.post("/api/articles/prepare", { ids: selectedIds });
+      preparationJobRef.current = job.jobId;
+      setPreparation((current) => ({ ...current, total: job.total, message: "正在后台获取摘要和中文翻译，已完成的文献会直接显示。" }));
+      await pollPreparationJob(job.jobId);
+    } catch (error) {
+      setPreparation((current) => ({ ...current, active: false, message: `无法启动批量补全：${error.message}` }));
+    }
   }
 
   // Only show articles from subscribed journals
@@ -963,6 +1039,20 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     article.translated_title && article.translated_title !== article.title
   )).length;
   const visibleAbstractCount = visibleArticles.filter((article) => Boolean(article.abstract?.trim())).length;
+  const visibleTranslatedAbstractCount = visibleArticles.filter((article) => Boolean(article.translated_abstract?.trim())).length;
+  const visiblePreparationKey = visibleArticles.map((article) => [
+    article.id,
+    Boolean(article.abstract?.trim()),
+    Boolean(article.translated_title?.trim()),
+    Boolean(article.translated_abstract?.trim()),
+    Boolean(article.translated_keywords?.trim())
+  ].join(":" )).join("|");
+
+  useEffect(() => {
+    if (preparationJobRef.current) return;
+    const missingIds = visibleArticles.filter(articleNeedsPreparation).map((article) => article.id);
+    if (missingIds.length) void startArticlePreparation(missingIds);
+  }, [visiblePreparationKey, preparation.active]);
 
   return (
     <div className="content-layout">
@@ -1090,12 +1180,37 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
             {displayPreferences.bilingual ? <Eye size={14} /> : <EyeOff size={14} />}
             中英文标题 · {displayPreferences.bilingual ? "已显示" : "已隐藏"}
           </button>
+          <button type="button" className={`display-toggle ${displayPreferences.translatedAbstract ? "active" : ""}`} onClick={() => toggleDisplay("translatedAbstract")}>
+            {displayPreferences.translatedAbstract ? <Eye size={14} /> : <EyeOff size={14} />} 中文摘要
+          </button>
           <span className="display-summary" role="status">
             {displayPreferences.bilingual
               ? `当前批次 ${visibleTranslatedCount} 篇有中文译题`
               : "中文译题已隐藏"}
             {displayPreferences.abstract && ` · ${visibleAbstractCount} 篇有摘要`}
+            {displayPreferences.translatedAbstract && ` · ${visibleTranslatedAbstractCount} 篇有中文摘要`}
           </span>
+        </div>
+
+        <div className={`preparation-bar ${preparation.active ? "active" : ""}`} role="status" aria-live="polite">
+          <div className="preparation-copy">
+            <strong>{preparation.active ? "正在批量准备当前页面" : "摘要与翻译自动载入"}</strong>
+            <span>{preparation.message || "页面会自动补齐当前批次缺少的摘要、中文标题、中文摘要和中文关键词。"}</span>
+          </div>
+          {preparation.active && (
+            <div className="preparation-progress">
+              <progress max={Math.max(preparation.total, 1)} value={preparation.completed} />
+              <span>{preparation.completed}/{preparation.total}</span>
+            </div>
+          )}
+          <button
+            className="secondary compact"
+            type="button"
+            disabled={preparation.active}
+            onClick={() => startArticlePreparation(visibleArticles.filter(articleNeedsPreparation).map((article) => article.id), { force: true })}
+          >
+            <RefreshCw size={14} className={preparation.active ? "spin" : ""} /> 批量补全当前批次
+          </button>
         </div>
 
         <div className="article-count">
@@ -1124,6 +1239,11 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                   {displayPreferences.bilingual && article.translated_title && article.translated_title !== article.title && (
                     <p className="translated-title"><Languages size={14} /> {article.translated_title}</p>
                   )}
+                  {displayPreferences.bilingual && !article.translated_title && (
+                    <button type="button" className="translation-missing" disabled={preparation.active} onClick={() => startArticlePreparation([article.id], { force: true })}>
+                      <Languages size={13} /> 获取中文翻译
+                    </button>
+                  )}
                   {displayPreferences.authors && article.authors && <p className="authors"><Highlight text={article.authors} terms={highlightTerms} /></p>}
                   {displayPreferences.keywords && article.keywords && (
                     <div className="keywords">
@@ -1137,7 +1257,15 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                   {displayPreferences.abstract && (
                     article.abstract
                       ? <p className="abstract"><Highlight text={article.abstract} terms={highlightTerms} /></p>
-                      : <button type="button" className="abstract-missing" onClick={() => setSelectedArticle(article)}>摘要尚未载入，点击获取并查看</button>
+                      : <button type="button" className="abstract-missing" disabled={preparation.active} onClick={() => startArticlePreparation([article.id], { force: true })}>获取摘要与中文翻译</button>
+                  )}
+                  {displayPreferences.translatedAbstract && article.translated_abstract && (
+                    <div className="translated-abstract"><span>中文摘要</span><p>{article.translated_abstract}</p></div>
+                  )}
+                  {displayPreferences.translatedAbstract && article.abstract && !article.translated_abstract && (
+                    <button type="button" className="translation-missing" disabled={preparation.active} onClick={() => startArticlePreparation([article.id], { force: true })}>
+                      <Languages size={13} /> 获取中文摘要
+                    </button>
                   )}
                 </div>
                 <div className="article-actions">
@@ -1183,7 +1311,12 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
   const [detail, setDetail] = useState(article);
   const [enriching, setEnriching] = useState(!article.abstract);
   const [enrichError, setEnrichError] = useState("");
-  const [translation, setTranslation] = useState(null);
+  const [translation, setTranslation] = useState(() => article.translated_title ? {
+    target_language: "zh",
+    title: article.translated_title,
+    abstract: article.translated_abstract || "",
+    keywords: article.translated_keywords || ""
+  } : null);
   const [translating, setTranslating] = useState("");
   const [translationError, setTranslationError] = useState("");
 
@@ -1191,7 +1324,12 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
     let ignore = false;
     setDetail(article);
     setEnrichError("");
-    setTranslation(null);
+    setTranslation(article.translated_title ? {
+      target_language: "zh",
+      title: article.translated_title,
+      abstract: article.translated_abstract || "",
+      keywords: article.translated_keywords || ""
+    } : null);
     setTranslationError("");
     if (article.abstract) {
       setEnriching(false);
@@ -1228,7 +1366,12 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
       const nextTranslation = await api.post(`/api/articles/${detail.id}/translate`, { targetLanguage });
       setTranslation(nextTranslation);
       if (targetLanguage === "zh" && nextTranslation.title) {
-        const translatedArticle = { ...detail, translated_title: nextTranslation.title };
+        const translatedArticle = {
+          ...detail,
+          translated_title: nextTranslation.title,
+          translated_abstract: nextTranslation.abstract || "",
+          translated_keywords: nextTranslation.keywords || ""
+        };
         setDetail(translatedArticle);
         onArticleUpdated?.(translatedArticle);
       }

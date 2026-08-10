@@ -47,6 +47,7 @@ import { refreshArticles, rescheduleRefresh, scheduleRefresh, enrichMissingKeywo
 import { generateWeeklyDigestMarkdown } from "./digest.js";
 import { sendMarkdownDigestEmail } from "./mail.js";
 import { calculatePushDays } from "./utils.js";
+import { createArticlePreparationService } from "./prepare.js";
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -55,10 +56,42 @@ app.use(cors({ origin: config.clientOrigin }));
 app.use(express.json());
 
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+const pagePrepareConcurrency = config.translationProvider === "baidu"
+  || (config.translationProvider === "auto" && config.baiduTranslateAppId && config.baiduTranslateKey)
+  ? 1
+  : config.pagePrepareConcurrency;
+const articlePreparation = createArticlePreparationService({
+  getArticle,
+  updateArticleDetails,
+  crawlArticleDetails,
+  getTranslation,
+  saveTranslation,
+  translateArticle
+}, {
+  concurrency: pagePrepareConcurrency,
+  maxItems: config.pagePrepareMaxItems
+});
 
 app.get("/api/articles", (req, res) => {
   const userId = getPrincipalId(req);
   res.json(listArticles(req.query, userId));
+});
+
+app.post("/api/articles/prepare", (req, res) => {
+  try {
+    res.status(202).json(articlePreparation.start(req.body?.ids));
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.get("/api/articles/prepare/:jobId", (req, res) => {
+  const job = articlePreparation.get(req.params.jobId);
+  if (!job) {
+    res.status(404).json({ error: "批量补全任务不存在或已过期" });
+    return;
+  }
+  res.json(job);
 });
 
 app.post("/api/articles/:id/read", (req, res) => {

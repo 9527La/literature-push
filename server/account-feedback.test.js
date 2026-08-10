@@ -19,7 +19,7 @@ test("persists account preferences, joins translated titles and hides feedback i
     const profile = getUserProfile('test-user');
     if (profile.name !== '测试用户' || profile.enrollment_year !== 2024 || profile.degree !== '博士') process.exit(2);
     const listed = listArticles({}, 'test-user').find((item) => item.id === article.id);
-    if (listed?.translated_title !== '中文标题') process.exit(3);
+    if (listed?.translated_title !== '中文标题' || listed?.translated_abstract !== '中文摘要') process.exit(3);
     const created = addFeedback('test-user', 'private@example.com', '公开建议');
     const publicItem = listPublicFeedback().find((item) => item.id === created.id);
     if (!publicItem || publicItem.author_name !== '测试用户' || publicItem.author_grade !== '2024级 博士' || 'email' in publicItem || 'user_id' in publicItem) process.exit(4);

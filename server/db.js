@@ -311,7 +311,9 @@ export function listArticles(filters = {}, userId) {
       SELECT a.*,
         COALESCE(ui_read.is_read, 0) AS is_read,
         COALESCE(ui_fav.is_favorite, 0) AS is_favorite,
-        zh.title AS translated_title
+        zh.title AS translated_title,
+        zh.abstract AS translated_abstract,
+        zh.keywords AS translated_keywords
       FROM articles a
       LEFT JOIN user_interactions ui_read ON ui_read.article_id = a.id AND ui_read.user_id = @userId AND ui_read.is_read = 1
       LEFT JOIN user_interactions ui_fav ON ui_fav.article_id = a.id AND ui_fav.user_id = @userId AND ui_fav.is_favorite = 1
@@ -325,7 +327,10 @@ export function listArticles(filters = {}, userId) {
 
   const whereFinal = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return db.prepare(`
-    SELECT a.*, zh.title AS translated_title
+    SELECT a.*,
+      zh.title AS translated_title,
+      zh.abstract AS translated_abstract,
+      zh.keywords AS translated_keywords
     FROM articles a
     LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
     ${whereFinal}

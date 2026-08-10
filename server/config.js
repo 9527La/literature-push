@@ -83,6 +83,8 @@ export const config = {
   weeklyDigestDir: process.env.WEEKLY_DIGEST_DIR || "data/digests",
   weeklyDigestTranslateMissingLimit: Number(process.env.WEEKLY_DIGEST_TRANSLATE_MISSING_LIMIT || 20),
   weeklyDigestEnrichMissingLimit: Number(process.env.WEEKLY_DIGEST_ENRICH_MISSING_LIMIT || 50),
+  pagePrepareConcurrency: Number(process.env.PAGE_PREPARE_CONCURRENCY || 2),
+  pagePrepareMaxItems: Number(process.env.PAGE_PREPARE_MAX_ITEMS || 50),
   weeklyDigestEmailEnabled: String(process.env.WEEKLY_DIGEST_EMAIL_ENABLED || "true").toLowerCase() === "true",
   
   // New push settings defaults
