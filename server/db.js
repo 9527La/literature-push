@@ -173,6 +173,8 @@ for (const migration of [
   "ALTER TABLE feedback ADD COLUMN admin_reply TEXT",
   "ALTER TABLE feedback ADD COLUMN replied_at TEXT",
   "ALTER TABLE feedback ADD COLUMN is_anonymous INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE feedback ADD COLUMN is_closed INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE feedback ADD COLUMN closed_at TEXT",
   "ALTER TABLE user_accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"
 ]) {
   try { db.exec(migration); } catch (error) {
@@ -986,7 +988,7 @@ export function addFeedback(userId, email, content, isAnonymous = false) {
 
 export function listPublicFeedback(limit = 100, userId = "") {
   const discussions = db.prepare(`
-    SELECT f.id, f.content, f.admin_reply, f.replied_at, f.created_at,
+    SELECT f.id, f.content, f.admin_reply, f.replied_at, f.created_at, f.is_closed, f.closed_at,
       CASE WHEN f.is_anonymous = 1 THEN '匿名用户' ELSE COALESCE(NULLIF(u.name, ''), '匿名用户') END AS author_name,
       CASE
         WHEN f.is_anonymous = 1 THEN ''
@@ -1032,8 +1034,9 @@ export function listPublicFeedback(limit = 100, userId = "") {
 }
 
 export function addFeedbackComment(feedbackId, userId, content, isAnonymous = false) {
-  const discussion = db.prepare("SELECT id FROM feedback WHERE id = ?").get(Number(feedbackId));
+  const discussion = db.prepare("SELECT id, is_closed FROM feedback WHERE id = ?").get(Number(feedbackId));
   if (!discussion) return null;
+  if (discussion.is_closed) return { closed: true };
   const result = db.prepare(`
     INSERT INTO feedback_comments (feedback_id, user_id, content, is_anonymous, created_at)
     VALUES (?, ?, ?, ?, datetime('now'))
@@ -1073,6 +1076,13 @@ export function replyFeedback(id, reply) {
   const result = db.prepare(`
     UPDATE feedback SET admin_reply = ?, replied_at = datetime('now') WHERE id = ?
   `).run(reply, Number(id));
+  return result.changes > 0;
+}
+
+export function closeFeedback(id) {
+  const result = db.prepare(`
+    UPDATE feedback SET is_closed = 1, closed_at = datetime('now') WHERE id = ? AND is_closed = 0
+  `).run(Number(id));
   return result.changes > 0;
 }
 

@@ -11,7 +11,7 @@ test("persists account preferences, joins translated titles and hides feedback i
   const dbUrl = new URL("./db.js", import.meta.url).href;
   const script = `
     const dbModule = await import(${JSON.stringify(dbUrl)});
-    const { db, updateUserProfile, getUserProfile, getAllUserEmails, saveTranslation, listArticles, addFeedback, addFeedbackComment, listPublicFeedback, toggleFeedbackLike, toggleFeedbackCommentLike, replyFeedback, deleteFeedback, deleteFeedbackComment, createUserAccount, getAdminOverview, saveRemotePreferences, getRemotePreferences, updateUserSettings, getUserSettings } = dbModule;
+    const { db, updateUserProfile, getUserProfile, getAllUserEmails, saveTranslation, listArticles, addFeedback, addFeedbackComment, listPublicFeedback, toggleFeedbackLike, toggleFeedbackCommentLike, replyFeedback, closeFeedback, deleteFeedback, deleteFeedbackComment, createUserAccount, getAdminOverview, saveRemotePreferences, getRemotePreferences, updateUserSettings, getUserSettings } = dbModule;
     db.prepare(\"INSERT INTO articles (external_id, title, fetched_at, first_seen_at) VALUES (?, ?, datetime('now'), datetime('now'))\").run('test-article', 'English title');
     const article = db.prepare(\"SELECT id FROM articles WHERE external_id = 'test-article'\").get();
     saveTranslation(article.id, 'zh', { title: '中文标题', abstract: '中文摘要', provider: 'test' });
@@ -32,6 +32,8 @@ test("persists account preferences, joins translated titles and hides feedback i
     const discussed = listPublicFeedback(100, 'test-user').find((item) => item.id === created.id);
     if (!likedDiscussion?.liked || !likedComment?.liked || discussed?.like_count !== 1 || !discussed?.liked_by_me || discussed?.comment_count !== 1 || discussed?.comments?.[0]?.content !== '补充评论' || discussed.comments[0].like_count !== 1 || !discussed.comments[0].liked_by_me) process.exit(14);
     if (!deleteFeedbackComment(comment.id) || listPublicFeedback(100, 'test-user').find((item) => item.id === created.id)?.comment_count !== 0) process.exit(15);
+    if (!closeFeedback(created.id)) process.exit(18);
+    if (!addFeedbackComment(created.id, 'test-user', '不应写入')?.closed || !listPublicFeedback(100, 'test-user').find((item) => item.id === created.id)?.is_closed) process.exit(19);
     if (!deleteFeedback(created.id)) process.exit(7);
     const anonymous = addFeedback('test-user', 'private@example.com', '匿名建议', true);
     const anonymousItem = listPublicFeedback().find((item) => item.id === anonymous.id);

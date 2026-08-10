@@ -9,6 +9,7 @@ import {
   Check,
   CloudDownload,
   CloudUpload,
+  CircleStop,
   Database,
   ExternalLink,
   Eye,
@@ -251,7 +252,7 @@ function HelpView() {
           <li><strong>账户资料</strong>：可保存姓名、入学年份、学历和周报邮箱。</li>
           <li><strong>本机保存</strong>：开启自动保存后，筛选、列表显示、期刊订阅和推送配置会保存在当前浏览器。</li>
           <li><strong>远端同步</strong>：登录后可手动上传当前设置，也可从远端账户载入。</li>
-          <li><strong>公共讨论</strong>：公开发布主题、评论和点赞；登录用户可选择匿名参与，管理员可回复或删除内容。</li>
+          <li><strong>公共讨论</strong>：公开发布主题、评论和点赞；评论框按需展开，管理员可评论、结束或删除话题。</li>
         </ul>
       </section>
 
@@ -861,6 +862,8 @@ function FeedbackView({ account }) {
   const [commentDrafts, setCommentDrafts] = useState({});
   const [commentAnonymous, setCommentAnonymous] = useState({});
   const [openCommentComposerId, setOpenCommentComposerId] = useState(null);
+  const [openAdminReplyId, setOpenAdminReplyId] = useState(null);
+  const [closeConfirmId, setCloseConfirmId] = useState(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
   async function loadFeedback() {
@@ -892,6 +895,28 @@ function FeedbackView({ account }) {
     try {
       await api.post(`/api/admin/feedback/${id}/reply`, { reply });
       setReplyDrafts({ ...replyDrafts, [id]: "" });
+      setOpenAdminReplyId(null);
+      await loadFeedback();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  function openAdminReply(item) {
+    setOpenAdminReplyId((current) => current === item.id ? null : item.id);
+    setReplyDrafts((current) => ({ ...current, [item.id]: current[item.id] ?? item.admin_reply ?? "" }));
+  }
+
+  async function closeTopic(id) {
+    if (closeConfirmId !== id) {
+      setCloseConfirmId(id);
+      return;
+    }
+    try {
+      await api.post(`/api/admin/feedback/${id}/close`);
+      setCloseConfirmId(null);
+      setOpenAdminReplyId(null);
+      setOpenCommentComposerId(null);
       await loadFeedback();
     } catch (error) {
       setMessage(error.message);
@@ -995,13 +1020,25 @@ function FeedbackView({ account }) {
                 <header>
                   <div className="mini-avatar">{item.author_name.slice(0, 1)}</div>
                   <div><strong>{item.author_name}</strong><span>{item.author_grade || "用户"} · {formatDate(item.created_at)}</span></div>
+                  {Boolean(item.is_closed) && <span className="topic-closed-badge"><CircleStop size={13} /> 已结束</span>}
                 </header>
                 <p>{item.content}</p>
                 <div className="discussion-actions">
                   <button className={item.liked_by_me ? "is-liked" : ""} type="button" onClick={() => toggleDiscussionLike(item.id)} aria-pressed={Boolean(item.liked_by_me)}><ThumbsUp size={15} /> {item.like_count || 0}</button>
-                  <button type="button" onClick={() => setOpenCommentComposerId((current) => current === item.id ? null : item.id)} aria-expanded={openCommentComposerId === item.id} aria-controls={`comment-composer-${item.id}`}><MessageCircle size={15} /> 评论 · {item.comment_count || 0}</button>
+                  <button type="button" disabled={Boolean(item.is_closed)} onClick={() => setOpenCommentComposerId((current) => current === item.id ? null : item.id)} aria-expanded={openCommentComposerId === item.id} aria-controls={`comment-composer-${item.id}`}><MessageCircle size={15} /> {item.is_closed ? "话题已结束" : "评论"} · {item.comment_count || 0}</button>
                 </div>
                 {item.admin_reply && <div className="admin-reply"><strong><ShieldCheck size={14} /> 管理员回复</strong><p>{item.admin_reply}</p><time>{formatDate(item.replied_at)}</time></div>}
+                {isAdmin && <div className="admin-topic-toolbar" aria-label="管理员话题操作">
+                  <span>话题操作</span>
+                  <button className="secondary" type="button" disabled={Boolean(item.is_closed)} onClick={() => openAdminReply(item)}><MessageSquare size={14} /> 评论话题</button>
+                  <button className="secondary" type="button" disabled={Boolean(item.is_closed)} onClick={() => closeTopic(item.id)}><CircleStop size={14} /> {closeConfirmId === item.id ? "确认结束话题" : item.is_closed ? "话题已结束" : "结束话题"}</button>
+                  <button className="danger-button" type="button" onClick={() => removeFeedback(item.id)}><Trash2 size={14} /> {deleteConfirmId === `discussion-${item.id}` ? "确认删除话题" : "删除话题"}</button>
+                </div>}
+                {isAdmin && openAdminReplyId === item.id && !item.is_closed && <div className="admin-reply-composer">
+                  <label htmlFor={`admin-reply-${item.id}`}>{item.admin_reply ? "更新管理员评论" : "以管理员身份评论话题"}</label>
+                  <textarea id={`admin-reply-${item.id}`} rows={3} maxLength={2000} value={replyDrafts[item.id] || ""} onChange={(event) => setReplyDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="输入公开显示的管理员评论" />
+                  <div><button className="secondary" type="button" onClick={() => setOpenAdminReplyId(null)}>取消</button><button className="primary" type="button" onClick={() => submitReply(item.id)} disabled={!String(replyDrafts[item.id] || "").trim()}><Send size={14} /> 发布评论</button></div>
+                </div>}
                 <section className="discussion-comments" aria-label="讨论评论">
                   {item.comments.map((comment) => (
                     <article className="discussion-comment" key={comment.id}>
@@ -1016,7 +1053,7 @@ function FeedbackView({ account }) {
                       </div>
                     </article>
                   ))}
-                  {openCommentComposerId === item.id && <div className="comment-composer" id={`comment-composer-${item.id}`}>
+                  {openCommentComposerId === item.id && !item.is_closed && <div className="comment-composer" id={`comment-composer-${item.id}`}>
                     <textarea rows={2} maxLength={1000} value={commentDrafts[item.id] || ""} onChange={(event) => setCommentDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="补充你的看法或使用经验" />
                     <div>
                       {account.authenticated && <label><input type="checkbox" checked={Boolean(commentAnonymous[item.id])} onChange={(event) => setCommentAnonymous((current) => ({ ...current, [item.id]: event.target.checked }))} /> 匿名评论</label>}
@@ -1024,11 +1061,6 @@ function FeedbackView({ account }) {
                     </div>
                   </div>}
                 </section>
-                {isAdmin && <div className="moderation-tools">
-                  <textarea rows={2} maxLength={2000} value={replyDrafts[item.id] || ""} onChange={(e) => setReplyDrafts({ ...replyDrafts, [item.id]: e.target.value })} placeholder={item.admin_reply ? "更新管理员回复" : "输入管理员回复"} />
-                  <button className="secondary" type="button" onClick={() => submitReply(item.id)} disabled={!String(replyDrafts[item.id] || "").trim()}>官方回复</button>
-                  <button className="danger-button" type="button" onClick={() => removeFeedback(item.id)}><Trash2 size={14} /> {deleteConfirmId === `discussion-${item.id}` ? "确认删除主题" : "删除主题"}</button>
-                </div>}
               </article>
             ))}
           </div>

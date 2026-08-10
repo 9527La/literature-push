@@ -3187,6 +3187,22 @@ mark {
   border-color: rgba(49, 87, 213, 0.18);
 }
 
+.discussion-actions button:disabled { opacity: .58; background: var(--bg-primary); cursor: default; }
+
+.topic-closed-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 4px 8px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .discussion-comments {
   display: grid;
   gap: 0;
@@ -3288,13 +3304,56 @@ mark {
 
 .admin-reply { background: var(--accent-light); }
 
+.admin-topic-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0 0 49px;
+  padding: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+}
+
+.admin-topic-toolbar > span {
+  margin-right: auto;
+  padding-left: 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .05em;
+}
+
+.admin-topic-toolbar button { min-height: 34px; }
+
+.admin-reply-composer {
+  display: grid;
+  gap: 9px;
+  margin: 10px 0 0 49px;
+  padding: 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  animation: commentComposerIn 180ms var(--ease-out);
+}
+
+.admin-reply-composer label { color: var(--text-secondary); font-size: 12px; font-weight: 700; }
+.admin-reply-composer textarea { min-height: 82px; resize: vertical; }
+.admin-reply-composer > div { display: flex; justify-content: flex-end; gap: 8px; }
+
 @media (max-width: 768px) {
   .feedback-item { padding: 18px; }
   .feedback-item > p,
   .discussion-actions,
   .discussion-comments,
   .admin-reply,
+  .admin-topic-toolbar,
+  .admin-reply-composer,
   .moderation-tools { margin-left: 0; }
+  .admin-topic-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .admin-topic-toolbar > span { width: 100%; margin-right: 0; }
+  .admin-topic-toolbar button { flex: 1 1 auto; justify-content: center; }
   .comment-composer > div { align-items: stretch; flex-direction: column; }
   .comment-composer .secondary { justify-content: center; }
 }

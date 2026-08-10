@@ -43,6 +43,7 @@ import {
   toggleFeedbackLike,
   toggleFeedbackCommentLike,
   replyFeedback,
+  closeFeedback,
   deleteFeedback,
   deleteFeedbackComment
 } from "./db.js";
@@ -530,6 +531,10 @@ app.post("/api/feedback/:id/comments", (req, res) => {
     res.status(404).json({ error: "讨论不存在" });
     return;
   }
+  if (comment.closed) {
+    res.status(409).json({ error: "话题已结束，不能继续评论" });
+    return;
+  }
   res.status(201).json(comment);
 });
 
@@ -567,6 +572,14 @@ app.post("/api/admin/feedback/:id/reply", requireSiteAdmin, (req, res) => {
   }
   if (!replyFeedback(req.params.id, reply)) {
     res.status(404).json({ error: "反馈不存在" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
+app.post("/api/admin/feedback/:id/close", requireSiteAdmin, (req, res) => {
+  if (!closeFeedback(req.params.id)) {
+    res.status(404).json({ error: "话题不存在或已经结束" });
     return;
   }
   res.json({ ok: true });
