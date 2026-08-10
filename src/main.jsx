@@ -1343,10 +1343,10 @@ function WordCloud({ keywords, maxCount, onSelect, selectedKeyword }) {
   
   const getColor = (count, max) => {
     const ratio = count / max;
-    if (ratio > 0.7) return "#0d9488";
-    if (ratio > 0.4) return "#d97706";
-    if (ratio > 0.2) return "#5a6070";
-    return "#8b919e";
+    if (ratio > 0.7) return "#3157d5";
+    if (ratio > 0.4) return "#4f6fd2";
+    if (ratio > 0.2) return "#65738d";
+    return "#8b94a3";
   };
 
   return (
@@ -1364,7 +1364,7 @@ function WordCloud({ keywords, maxCount, onSelect, selectedKeyword }) {
               className={`wordcloud-word ${isSelected ? "selected" : ""}`}
               style={{
                 fontSize: `${fontSize}px`,
-                color: isSelected ? "#0d9488" : color,
+                color: isSelected ? "#2848b8" : color,
                 fontWeight: ratio > 0.5 ? 700 : ratio > 0.2 ? 600 : 400,
                 opacity: 0.6 + ratio * 0.4
               }}
