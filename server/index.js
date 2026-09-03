@@ -246,11 +246,14 @@ app.post("/api/admin/translate", requireSiteAdmin, asyncHandler(async (req, res)
   const runId = createRefreshRun({ taskType: field === "title" ? "translate_title" : "translate_abstract" });
   try {
     const result = await translateMissingArticles(field, "zh", limit);
+    const gaps = getMetadataGaps();
     finishRefreshRun(runId, {
       status: "success",
       translatedCount: result.translated,
       failedTranslationCount: result.failed,
-      message: `新增文献 0 篇 · 补全摘要 0 篇 · 补全关键词 0 篇 · 新增翻译 ${result.translated || 0} 篇 · 失败：文献 0 / 摘要 0 / 关键词 0 / 翻译 ${result.failed || 0}`
+      remainingAbstractCount: gaps.abstracts,
+      remainingKeywordCount: gaps.keywords,
+      message: `新增文献 0 篇 · 补全摘要 0 篇 · 补全关键词 0 篇 · 新增翻译 ${result.translated || 0} 篇 · 失败：文献 0 / 摘要 0 / 关键词 0 / 翻译 ${result.failed || 0} · 待补全：摘要 ${gaps.abstracts} 篇 / 关键词 ${gaps.keywords} 篇`
     });
     res.json({ status: "success", ...result });
   } catch (error) {
