@@ -12,11 +12,9 @@ import {
   updateUserSettings,
   getArticle,
   getStatus,
-  getTranslation,
   getKeywordStats,
   getKeywordCooccurrence,
   listArticles,
-  saveTranslation,
   setArticleRead,
   toggleArticleFavorite,
   setArticleReadForUser,
@@ -52,7 +50,9 @@ import {
   deleteFeedback,
   deleteFeedbackComment,
   getDiscussionProfile,
-  updateDiscussionProfile
+  updateDiscussionProfile,
+  createRefreshRun,
+  finishRefreshRun
 } from "./db.js";
 import {
   createPassportToken,
@@ -63,12 +63,12 @@ import {
   verifyUserPassword
 } from "./user-auth.js";
 import { crawlArticleDetails } from "./crawler.js";
-import { translateArticle } from "./translate.js";
-import { refreshArticles, rescheduleRefresh, scheduleRefresh, enrichMissingKeywords } from "./refresh.js";
+import { refreshArticles, rescheduleRefresh, scheduleRefresh, enrichMissingKeywords, enrichMissingAbstracts, translateMissingArticles } from "./refresh.js";
 import { generateWeeklyDigestMarkdown } from "./digest.js";
 import { sendMarkdownDigestEmail } from "./mail.js";
 import { calculatePushDays } from "./utils.js";
 import { createArticlePreparationService } from "./prepare.js";
+import { ensureTranslation } from "./translation-cache.js";
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -91,9 +91,7 @@ const articlePreparation = createArticlePreparationService({
   getArticle,
   updateArticleDetails,
   crawlArticleDetails,
-  getTranslation,
-  saveTranslation,
-  translateArticle
+  ensureTranslation
 }, {
   concurrency: pagePrepareConcurrency,
   maxItems: config.pagePrepareMaxItems
@@ -180,15 +178,9 @@ app.post("/api/articles/:id/translate", async (req, res) => {
     return;
   }
 
-  const cached = getTranslation(req.params.id, targetLanguage);
-  if (cached) {
-    res.json(cached);
-    return;
-  }
-
   try {
-    const translation = await translateArticle(article, targetLanguage);
-    res.json(saveTranslation(req.params.id, targetLanguage, translation));
+    const result = await ensureTranslation(article, targetLanguage);
+    res.json(result.translation || {});
   } catch (error) {
     res.status(502).json({ error: error.message });
   }
@@ -200,13 +192,61 @@ app.post("/api/refresh", requireSiteAdmin, asyncHandler(async (req, res) => {
 }));
 
 app.post("/api/enrich-keywords", requireSiteAdmin, async (req, res) => {
+  const runId = createRefreshRun({ taskType: "keywords" });
   try {
     const result = await enrichMissingKeywords();
+    finishRefreshRun(runId, {
+      status: "success",
+      keywordCount: result.enriched,
+      failedKeywordCount: result.failed,
+      message: `新增文献 0 篇 · 补全摘要 0 篇 · 补全关键词 ${result.enriched || 0} 篇 · 新增翻译 0 篇 · 失败：文献 0 / 摘要 0 / 关键词 ${result.failed || 0} / 翻译 0`
+    });
     res.json({ status: "success", ...result });
   } catch (error) {
+    finishRefreshRun(runId, { status: "error", message: `补全关键词失败：${error.message}` });
     res.status(500).json({ status: "error", message: error.message });
   }
 });
+
+app.post("/api/enrich-abstracts", requireSiteAdmin, async (req, res) => {
+  const runId = createRefreshRun({ taskType: "abstracts" });
+  try {
+    const result = await enrichMissingAbstracts();
+    finishRefreshRun(runId, {
+      status: "success",
+      abstractCount: result.enriched,
+      failedAbstractCount: result.failed,
+      message: `新增文献 0 篇 · 补全摘要 ${result.enriched || 0} 篇 · 补全关键词 0 篇 · 新增翻译 0 篇 · 失败：文献 0 / 摘要 ${result.failed || 0} / 关键词 0 / 翻译 0`
+    });
+    res.json({ status: "success", ...result });
+  } catch (error) {
+    finishRefreshRun(runId, { status: "error", message: `补全摘要失败：${error.message}` });
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.post("/api/admin/translate", requireSiteAdmin, asyncHandler(async (req, res) => {
+  const field = String(req.body?.field || "").trim().toLowerCase();
+  if (!["title", "abstract"].includes(field)) {
+    res.status(400).json({ error: "只支持标题或摘要翻译" });
+    return;
+  }
+  const limit = Math.min(Math.max(Number(req.body?.limit) || 20, 1), 100);
+  const runId = createRefreshRun({ taskType: field === "title" ? "translate_title" : "translate_abstract" });
+  try {
+    const result = await translateMissingArticles(field, "zh", limit);
+    finishRefreshRun(runId, {
+      status: "success",
+      translatedCount: result.translated,
+      failedTranslationCount: result.failed,
+      message: `新增文献 0 篇 · 补全摘要 0 篇 · 补全关键词 0 篇 · 新增翻译 ${result.translated || 0} 篇 · 失败：文献 0 / 摘要 0 / 关键词 0 / 翻译 ${result.failed || 0}`
+    });
+    res.json({ status: "success", ...result });
+  } catch (error) {
+    finishRefreshRun(runId, { status: "error", message: `翻译${field === "title" ? "标题" : "摘要"}失败：${error.message}` });
+    throw error;
+  }
+}));
 
 app.get("/api/settings", (req, res) => {
   const userId = getPrincipalId(req);
@@ -746,6 +786,73 @@ app.get("/api/admin/session", (req, res) => {
 
 app.get("/api/admin/overview", requireSiteAdmin, (req, res) => {
   res.json(getAdminOverview());
+});
+
+app.post("/api/admin/users", requireSiteAdmin, (req, res) => {
+  const username = String(req.body?.username || "").trim();
+  const password = String(req.body?.password || "");
+  const name = String(req.body?.name || "").trim();
+  const email = String(req.body?.email || "").trim();
+  if (!/^[\p{L}\p{N}_-]{3,32}$/u.test(username)) {
+    res.status(400).json({ error: "用户名须为 3 至 32 个字符，可使用文字、数字、下划线或短横线" });
+    return;
+  }
+  if (password.length < 8 || password.length > 72) {
+    res.status(400).json({ error: "密码长度须为 8 至 72 个字符" });
+    return;
+  }
+  if (name.length > 40) {
+    res.status(400).json({ error: "显示名称不能超过 40 个字符" });
+    return;
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    res.status(400).json({ error: "请输入有效的邮箱地址" });
+    return;
+  }
+
+  let account;
+  try {
+    const credentials = hashUserPassword(password);
+    account = createUserAccount({
+      username,
+      passwordHash: credentials.hash,
+      passwordSalt: credentials.salt,
+      registeredIp: getClientIp(req)
+    });
+  } catch (error) {
+    const message = String(error.message || "");
+    res.status(409).json({ error: message.includes("上限") ? message : "该用户名已被使用或账户无法创建" });
+    return;
+  }
+
+  if (name || email) updateUserProfile(`account:${account.id}`, { name, email });
+  res.status(201).json({
+    user: {
+      ...getUserProfile(`account:${account.id}`),
+      id: account.id,
+      username: account.username,
+      role: account.role || "user",
+      created_at: account.created_at,
+      updated_at: account.updated_at
+    }
+  });
+});
+
+app.delete("/api/admin/users/:id", requireSiteAdmin, (req, res) => {
+  const account = getUserAccountById(req.params.id);
+  if (!account) {
+    res.status(404).json({ error: "用户不存在" });
+    return;
+  }
+  if (account.role === "super_admin") {
+    res.status(403).json({ error: "不能删除最高管理员账户" });
+    return;
+  }
+  if (!deleteUserAccount(account.id)) {
+    res.status(404).json({ error: "用户不存在" });
+    return;
+  }
+  res.json({ ok: true, id: account.id });
 });
 
 app.post("/api/admin/feedback/:id/reply", requireSiteAdmin, (req, res) => {

@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
-import { getTranslation, listRecentArticlesForDigest, saveTranslation, updateArticleDetails } from "./db.js";
+import { getTranslation, listRecentArticlesForDigest, updateArticleDetails } from "./db.js";
 import { crawlArticleDetails } from "./crawler.js";
-import { translateArticle } from "./translate.js";
+import { ensureTranslation, isTranslationComplete } from "./translation-cache.js";
 
 async function prepareArticle(article, targetLanguage, options = {}) {
   let enrichedArticle = article;
@@ -17,15 +17,12 @@ async function prepareArticle(article, targetLanguage, options = {}) {
 
   let translation = getTranslation(enrichedArticle.id, targetLanguage);
   let newlyTranslated = false;
-  const translationIncomplete = !translation?.title || !translation?.abstract;
-  if (enrichedArticle.abstract && translationIncomplete && options.translate && options.canTranslateMissing?.()) {
+  const translationIncomplete = !isTranslationComplete(enrichedArticle, translation);
+  if (translationIncomplete && options.translate && options.canTranslateMissing?.()) {
     try {
-      translation = saveTranslation(
-        enrichedArticle.id,
-        targetLanguage,
-        await translateArticle(enrichedArticle, targetLanguage)
-      );
-      newlyTranslated = true;
+      const result = await ensureTranslation(enrichedArticle, targetLanguage);
+      translation = result.translation;
+      newlyTranslated = Boolean(result.translated);
     } catch (error) {
       console.warn(`[digest] translation failed for #${article.id}: ${error.message}`);
     }
@@ -142,7 +139,7 @@ export async function generateWeeklyDigestMarkdown(settings = {}, options = {}) 
   const requireComplete = options.requireComplete !== false;
   const eligibleItems = requireComplete
     ? preparedItems.filter(({ article, translation }) =>
-        Boolean(article.abstract && (!includeTranslation || (translation?.title && translation?.abstract)))
+        Boolean(article.abstract && (!includeTranslation || isTranslationComplete(article, translation)))
       )
     : preparedItems;
   const excludedIncompleteCount = preparedItems.length - eligibleItems.length;

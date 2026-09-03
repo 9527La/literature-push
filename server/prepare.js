@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createTranslationCacheService } from "./translation-cache.js";
 
 const DEFAULT_JOB_TTL_MS = 10 * 60 * 1000;
 
@@ -32,6 +33,12 @@ export function createArticlePreparationService(dependencies, options = {}) {
     saveTranslation,
     translateArticle
   } = dependencies;
+  const ensureTranslation = dependencies.ensureTranslation || createTranslationCacheService({
+    getArticle,
+    getTranslation,
+    saveTranslation,
+    translateArticle
+  }).ensureTranslation;
   const concurrency = Math.max(1, Math.min(4, Number(options.concurrency || 2)));
   const maxItems = Math.max(1, Math.min(100, Number(options.maxItems || 50)));
   const maxJobs = Math.max(5, Math.min(200, Number(options.maxJobs || 50)));
@@ -52,6 +59,7 @@ export function createArticlePreparationService(dependencies, options = {}) {
 
     let enriched = false;
     let translated = false;
+    let translation = null;
     const stageErrors = [];
 
     if (!article.abstract || !article.keywords) {
@@ -64,18 +72,12 @@ export function createArticlePreparationService(dependencies, options = {}) {
       }
     }
 
-    let translation = getTranslation(id, "zh");
-    const translationIncomplete = !translation?.title
-      || (Boolean(article.abstract) && !translation?.abstract)
-      || (Boolean(article.keywords) && !translation?.keywords);
-
-    if (translationIncomplete) {
-      try {
-        translation = saveTranslation(id, "zh", await translateArticle(article, "zh"));
-        translated = true;
-      } catch (error) {
-        stageErrors.push(`中文翻译：${error.message}`);
-      }
+    try {
+      const translationResult = await ensureTranslation(article, "zh");
+      translation = translationResult.translation;
+      translated = Boolean(translationResult.translated);
+    } catch (error) {
+      stageErrors.push(`中文翻译：${error.message}`);
     }
 
     return {

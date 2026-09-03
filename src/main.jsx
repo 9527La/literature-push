@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  FileText,
   Filter,
   Heart,
   HardDrive,
@@ -34,13 +35,54 @@ import {
   Trash2,
   ThumbsUp,
   Users,
+  UserPlus,
   UserRound,
   X
 } from "lucide-react";
 import "./styles.css";
 
 function getUserToken() {
-  return localStorage.getItem("userToken") || "";
+  return localStorage.getItem("userToken") || sessionStorage.getItem("userToken") || "";
+}
+
+const ACCOUNT_LOGIN_SETTINGS_KEY = "accountLoginSettings";
+
+function readAccountLoginSettings() {
+  try {
+    const value = JSON.parse(localStorage.getItem(ACCOUNT_LOGIN_SETTINGS_KEY) || "null");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAccountLoginSettings({ username, password, rememberPassword, autoLogin }) {
+  const next = {
+    username: String(username || "").trim(),
+    rememberPassword: Boolean(rememberPassword),
+    autoLogin: Boolean(autoLogin)
+  };
+  if (rememberPassword && password) next.password = String(password);
+  localStorage.setItem(ACCOUNT_LOGIN_SETTINGS_KEY, JSON.stringify(next));
+}
+
+function setAccountToken(token, persistent) {
+  localStorage.removeItem("userToken");
+  sessionStorage.removeItem("userToken");
+  (persistent ? localStorage : sessionStorage).setItem("userToken", token);
+}
+
+function clearAccountToken() {
+  localStorage.removeItem("userToken");
+  sessionStorage.removeItem("userToken");
+}
+
+function disableAccountAutoLogin() {
+  const settings = readAccountLoginSettings();
+  localStorage.setItem(ACCOUNT_LOGIN_SETTINGS_KEY, JSON.stringify({
+    ...settings,
+    autoLogin: false
+  }));
 }
 
 function getPassportToken() {
@@ -269,7 +311,7 @@ function HelpView() {
         <h3><RefreshCw size={18} /> 数据刷新</h3>
         <p>系统支持两种刷新方式：</p>
         <ul>
-          <li><strong>手动刷新</strong>：最高管理员可在“管理中心”即时拉取最新文献或补全关键词。</li>
+          <li><strong>手动维护</strong>：最高管理员可在“管理中心”即时拉取最新文献、补全摘要和关键词，或批量翻译缺失的标题和摘要。</li>
           <li><strong>定时刷新</strong>：在周报递送页面中设置 Cron 表达式，系统将按计划自动获取新文献。默认每天凌晨执行一次。</li>
         </ul>
       </section>
@@ -342,6 +384,9 @@ function App() {
   const [message, setMessage] = useState("");
   const [versionInfo, setVersionInfo] = useState(null);
   const [account, setAccount] = useState({ authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" });
+  const autoLoginAttemptRef = useRef("");
+  const autoLoginPromiseRef = useRef(null);
+  const articleCacheRef = useRef(new Map());
   
   // Debounced search
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -402,20 +447,78 @@ function App() {
     return params.toString();
   }, [filters]);
 
-  async function loadAll() {
-    const [nextSettings, nextStatus, nextArticles, journals, nextAccount] = await Promise.all([
+  async function loadAccountWithAutoLogin() {
+    if (autoLoginPromiseRef.current) return autoLoginPromiseRef.current;
+
+    const run = (async () => {
+      const current = await api.get("/api/account");
+      const loginSettings = readAccountLoginSettings();
+      const hasStoredToken = Boolean(getUserToken());
+      const canAutoLogin = Boolean(
+        loginSettings.autoLogin
+        && loginSettings.username
+        && loginSettings.password
+        && loginSettings.rememberPassword
+      );
+      if (current.authenticated || (!canAutoLogin && hasStoredToken)) return current;
+      if (!canAutoLogin) return current;
+
+      // A failed stored credential should not be retried on every filter or
+      // view change during this page session. A successful manual login clears
+      // this marker below, allowing the user to recover immediately.
+      const attemptKey = `${loginSettings.username}\u0000${loginSettings.password}`;
+      if (autoLoginAttemptRef.current === attemptKey) return current;
+      autoLoginAttemptRef.current = attemptKey;
+
+      try {
+        const result = await api.post("/api/auth/login", {
+          username: loginSettings.username,
+          password: loginSettings.password
+        });
+        setAccountToken(result.token, true);
+        autoLoginAttemptRef.current = "";
+        return result.account || await api.get("/api/auth/session");
+      } catch {
+        // A stale password should not prevent the site itself from opening.
+        // Clear only the session token; keep the saved username/password visible
+        // in the account form so the user can correct it manually.
+        clearAccountToken();
+        return current;
+      }
+    })();
+
+    autoLoginPromiseRef.current = run;
+    try {
+      return await run;
+    } finally {
+      if (autoLoginPromiseRef.current === run) autoLoginPromiseRef.current = null;
+    }
+  }
+
+  async function loadAll({ forceArticles = false } = {}) {
+    // Resolve a remembered account before loading user-specific data. This
+    // ensures read/favorite/settings requests carry the restored token.
+    const nextAccount = await loadAccountWithAutoLogin();
+    const articleCacheKey = `${getUserToken() || "guest"}::${debouncedQuery}`;
+    const cachedArticles = !forceArticles && articleCacheRef.current.get(articleCacheKey);
+    const articlesPromise = cachedArticles
+      ? Promise.resolve(cachedArticles)
+      : api.get(`/api/articles${debouncedQuery ? `?${debouncedQuery}` : ""}`).then((result) => {
+        articleCacheRef.current.set(articleCacheKey, result);
+        return result;
+      });
+    const [nextSettings, nextStatus, nextArticles, journals] = await Promise.all([
       api.get("/api/settings"),
       api.get("/api/status"),
-      api.get(`/api/articles${debouncedQuery ? `?${debouncedQuery}` : ""}`),
-      availableJournals.length ? Promise.resolve(availableJournals) : api.get("/api/journals"),
-      api.get("/api/account")
+      articlesPromise,
+      availableJournals.length ? Promise.resolve(availableJournals) : api.get("/api/journals")
     ]);
     setSettings(nextSettings);
     setStatus(nextStatus);
     setArticles(nextArticles);
     setAccount(nextAccount);
     if (activeView === "admin" && !nextAccount.is_admin) setActiveView("feed");
-    if (getUserToken() && !nextAccount.authenticated) localStorage.removeItem("userToken");
+    if (getUserToken() && !nextAccount.authenticated) clearAccountToken();
     if (!availableJournals.length) setAvailableJournals(journals);
     setInitialLoading(false);
   }
@@ -440,7 +543,7 @@ function App() {
         localStorage.removeItem("passportToken");
         setGateAuthenticated(false);
         setGateRole("");
-        localStorage.removeItem("userToken");
+        clearAccountToken();
         setAccount({ authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" });
       } else {
         setMessage(error.message);
@@ -456,7 +559,8 @@ function App() {
       const result = await api.post("/api/refresh");
       setMessage(result.status === "success" ? `刷新完成，新增 ${result.addedCount} 篇文献。` : result.message);
       setTimeout(() => setMessage(""), 3000);
-      await loadAll();
+      articleCacheRef.current.clear();
+      await loadAll({ forceArticles: true });
     } catch (error) {
       setMessage(error.message);
       setTimeout(() => setMessage(""), 5000);
@@ -473,6 +577,7 @@ function App() {
       return;
     }
     await api.post(`/api/articles/${id}/read`);
+    articleCacheRef.current.clear();
     await loadAll();
   }
 
@@ -483,6 +588,7 @@ function App() {
       return;
     }
     await api.post(`/api/articles/${id}/favorite`);
+    articleCacheRef.current.clear();
     await loadAll();
   }
 
@@ -501,6 +607,7 @@ function App() {
   const updateArticleInList = useCallback((nextArticles) => {
     const updates = (Array.isArray(nextArticles) ? nextArticles : [nextArticles]).filter((article) => article?.id);
     if (!updates.length) return;
+    articleCacheRef.current.clear();
     const updatesById = new Map(updates.map((article) => [article.id, article]));
     setArticles((current) => current.map((article) => (
       updatesById.has(article.id) ? { ...article, ...updatesById.get(article.id) } : article
@@ -534,9 +641,18 @@ function App() {
     await loadAll();
   }
 
-  async function authenticateAccount(mode, credentials) {
+  async function authenticateAccount(mode, credentials, loginOptions = {}) {
     const result = await api.post(`/api/auth/${mode}`, credentials);
-    localStorage.setItem("userToken", result.token);
+    const shouldAutoLogin = Boolean(loginOptions.autoLogin);
+    setAccountToken(result.token, shouldAutoLogin);
+    saveAccountLoginSettings({
+      username: credentials.username,
+      password: credentials.password,
+      rememberPassword: loginOptions.rememberPassword,
+      autoLogin: shouldAutoLogin
+    });
+    autoLoginAttemptRef.current = "";
+    articleCacheRef.current.clear();
     const session = result.account || await api.get("/api/auth/session");
     setAccount(session);
     await loadAll();
@@ -544,7 +660,9 @@ function App() {
 
   async function logoutUser() {
     await api.post("/api/auth/logout").catch(() => {});
-    localStorage.removeItem("userToken");
+    clearAccountToken();
+    disableAccountAutoLogin();
+    articleCacheRef.current.clear();
     setAccount({ email: "", name: "", enrollment_year: null, degree: "", authenticated: false, can_register: true, username: "", role: "guest", is_admin: gateRole === "admin", passport_authenticated: gateAuthenticated, passport_role: gateRole });
     setActiveView("feed");
     await loadAll().catch(() => {});
@@ -552,7 +670,9 @@ function App() {
 
   async function leaveWebsite() {
     await api.post("/api/auth/logout").catch(() => {});
-    localStorage.removeItem("userToken");
+    clearAccountToken();
+    disableAccountAutoLogin();
+    articleCacheRef.current.clear();
     localStorage.removeItem("passportToken");
     setGateAuthenticated(false);
     setGateRole("");
@@ -718,16 +838,48 @@ function parseEmailRecipients(text) {
 
 function PersonalAccountAuth({ onAuthenticate }) {
   const [mode, setMode] = useState("login");
-  const [credentials, setCredentials] = useState({ username: "", password: "" });
+  const [credentials, setCredentials] = useState(() => {
+    const saved = readAccountLoginSettings();
+    return {
+      username: String(saved.username || ""),
+      password: saved.rememberPassword ? String(saved.password || "") : ""
+    };
+  });
+  const [rememberPassword, setRememberPassword] = useState(() => {
+    const saved = readAccountLoginSettings();
+    return Boolean(saved.rememberPassword && saved.password);
+  });
+  const [autoLogin, setAutoLogin] = useState(() => {
+    const saved = readAccountLoginSettings();
+    // Keep the previous behavior convenient for first-time users while
+    // respecting an explicit opt-out saved by logout or the form.
+    return saved.autoLogin === undefined ? true : Boolean(saved.autoLogin);
+  });
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  function switchMode(nextMode) {
+    setMode(nextMode);
+    setMessage("");
+    if (nextMode !== "login") {
+      setCredentials({ username: "", password: "" });
+      return;
+    }
+    const saved = readAccountLoginSettings();
+    setCredentials({
+      username: String(saved.username || ""),
+      password: saved.rememberPassword ? String(saved.password || "") : ""
+    });
+    setRememberPassword(Boolean(saved.rememberPassword && saved.password));
+    setAutoLogin(saved.autoLogin === undefined ? true : Boolean(saved.autoLogin));
+  }
 
   async function submit(event) {
     event.preventDefault();
     setSubmitting(true);
     setMessage("");
     try {
-      await onAuthenticate(mode, credentials);
+      await onAuthenticate(mode, credentials, { rememberPassword, autoLogin });
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -742,16 +894,26 @@ function PersonalAccountAuth({ onAuthenticate }) {
       </div>
       <div className="account-auth-card">
         <div className="auth-tabs" role="tablist" aria-label="个人账户操作">
-          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setMessage(""); }}>登录个人账户</button>
-          <button type="button" className={mode === "register" ? "active" : ""} onClick={() => { setMode("register"); setMessage(""); }}>注册个人账户</button>
+          <button type="button" role="tab" aria-selected={mode === "login"} className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>登录个人账户</button>
+          <button type="button" role="tab" aria-selected={mode === "register"} className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")}>注册个人账户</button>
         </div>
         <form className="auth-form" onSubmit={submit} onInput={() => setMessage("")}>
           <label><span>用户名</span><input value={credentials.username} autoComplete={mode === "login" ? "username" : "new-username"} maxLength={32} onChange={(event) => setCredentials({ ...credentials, username: event.target.value })} required autoFocus /></label>
           <label><span>密码</span><input type="password" value={credentials.password} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "register" ? 8 : 1} maxLength={72} onChange={(event) => setCredentials({ ...credentials, password: event.target.value })} required /></label>
+          <div className="auth-options" role="group" aria-label="登录选项">
+            <label className="auth-option">
+              <input type="checkbox" checked={rememberPassword} onChange={(event) => setRememberPassword(event.target.checked)} />
+              <span><strong>记住密码</strong><small>在此浏览器保存用户名和密码，方便下次登录。</small></span>
+            </label>
+            <label className="auth-option">
+              <input type="checkbox" checked={autoLogin} onChange={(event) => setAutoLogin(event.target.checked)} />
+              <span><strong>自动登录</strong><small>同一 IP 下优先恢复有效登录状态，无需重复输入。</small></span>
+            </label>
+          </div>
           <button className="primary" disabled={submitting || !credentials.username || !credentials.password}>{submitting ? "处理中" : mode === "login" ? "登录个人账户" : "注册并登录"}</button>
           {message && <div className="inline-msg login-error" role="alert">{message}</div>}
         </form>
-        <p className="auth-note">用户名必须唯一；最多注册 40 个个人账户。每个账户同一时间只能在一个 IP 上保持登录，但之后可从其他 IP 再次登录。</p>
+        <p className="auth-note">用户名必须唯一；最多注册 40 个个人账户。每个账户同一时间只能在一个 IP 上保持登录，但之后可从其他 IP 再次登录。记住密码会将密码保存在当前浏览器，请只在可信设备上启用。</p>
       </div>
     </section>
   );
@@ -871,6 +1033,10 @@ function AdminView({ onDataChanged }) {
   const [loading, setLoading] = useState(true);
   const [runningAction, setRunningAction] = useState("");
   const [message, setMessage] = useState("");
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [userForm, setUserForm] = useState({ username: "", password: "", name: "", email: "" });
+  const [userSubmitting, setUserSubmitting] = useState(false);
+  const [deleteUserId, setDeleteUserId] = useState(null);
 
   async function loadOverview() {
     setOverview(await api.get("/api/admin/overview"));
@@ -891,15 +1057,61 @@ function AdminView({ onDataChanged }) {
       if (action === "refresh") {
         const result = await api.post("/api/refresh");
         setMessage(result.status === "success" ? `文献刷新完成，新增 ${result.addedCount || 0} 篇。` : result.message);
-      } else {
+      } else if (action === "keywords") {
         const result = await api.post("/api/enrich-keywords");
-        setMessage(`关键词补全完成，更新 ${result.updated || result.count || 0} 篇。`);
+        setMessage(`关键词补全完成：成功 ${result.enriched || 0} 篇${result.failed ? `，失败 ${result.failed} 篇` : ""}。`);
+      } else if (action === "abstracts") {
+        const result = await api.post("/api/enrich-abstracts");
+        setMessage(`摘要补全完成：成功 ${result.enriched || 0} 篇${result.failed ? `，失败 ${result.failed} 篇` : ""}。`);
+      } else {
+        const field = action === "titles" ? "title" : "abstract";
+        const label = action === "titles" ? "标题" : "摘要";
+        const result = await api.post("/api/admin/translate", { field, limit: 20 });
+        setMessage(`${label}翻译完成：成功 ${result.translated || 0} 篇${result.failed ? `，失败 ${result.failed} 篇` : ""}。`);
       }
       await Promise.all([loadOverview(), onDataChanged()]);
     } catch (error) {
       setMessage(error.message);
     } finally {
       setRunningAction("");
+    }
+  }
+
+  async function createUser(event) {
+    event.preventDefault();
+    setUserSubmitting(true);
+    setMessage("");
+    try {
+      const result = await api.post("/api/admin/users", userForm);
+      setMessage(`已新增用户 ${result.user?.username || userForm.username}。`);
+      setUserForm({ username: "", password: "", name: "", email: "" });
+      setShowCreateUser(false);
+      await loadOverview();
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setUserSubmitting(false);
+    }
+  }
+
+  async function removeUser(user) {
+    if (deleteUserId !== user.id) {
+      setDeleteUserId(user.id);
+      setMessage(`再次点击“确认删除”才会删除用户 ${user.username}。`);
+      return;
+    }
+    setUserSubmitting(true);
+    setMessage("");
+    try {
+      await api.delete(`/api/admin/users/${user.id}`);
+      setMessage(`用户 ${user.username} 已删除，其会话和个人数据也已清理。`);
+      setDeleteUserId(null);
+      await loadOverview();
+    } catch (error) {
+      setMessage(error.message);
+      setDeleteUserId(null);
+    } finally {
+      setUserSubmitting(false);
     }
   }
 
@@ -922,6 +1134,13 @@ function AdminView({ onDataChanged }) {
     ["中文标题", coverage.translatedTitles],
     ["中文摘要", coverage.translatedAbstracts]
   ];
+  const taskLabels = {
+    refresh: "刷新文献",
+    abstracts: "补全摘要",
+    keywords: "补全关键词",
+    translate_title: "翻译标题",
+    translate_abstract: "翻译摘要"
+  };
 
   return (
     <section className="admin-dashboard" aria-labelledby="admin-title">
@@ -929,8 +1148,11 @@ function AdminView({ onDataChanged }) {
         <div className="admin-seal"><Database size={24} /></div>
         <div><span className="eyebrow">仅最高管理员可见</span><h1 id="admin-title">网站管理中心</h1><p>查看远端数据库的完整度、用户与社区状态，并执行受保护的数据维护。</p></div>
         <div className="admin-command-bar">
-          <button className="primary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("refresh")}><RefreshCw size={15} className={runningAction === "refresh" ? "spin" : ""} /> 刷新文献数据</button>
-          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("keywords")}><Activity size={15} /> 补全关键词</button>
+          <button className="primary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("refresh")}><RefreshCw size={15} className={runningAction === "refresh" ? "spin" : ""} /> {runningAction === "refresh" ? "刷新中…" : "刷新文献数据"}</button>
+          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("keywords")}><Activity size={15} className={runningAction === "keywords" ? "spin" : ""} /> {runningAction === "keywords" ? "补全中…" : "补全关键词"}</button>
+          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("abstracts")}><FileText size={15} className={runningAction === "abstracts" ? "spin" : ""} /> {runningAction === "abstracts" ? "摘要补全中…" : "补全摘要"}</button>
+          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("titles")}><Languages size={15} className={runningAction === "titles" ? "spin" : ""} /> {runningAction === "titles" ? "标题翻译中…" : "翻译标题"}</button>
+          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("translate-abstracts")}><Languages size={15} className={runningAction === "translate-abstracts" ? "spin" : ""} /> {runningAction === "translate-abstracts" ? "摘要翻译中…" : "翻译摘要"}</button>
         </div>
       </header>
       {message && <div className="admin-notice" role="status">{message}</div>}
@@ -947,14 +1169,47 @@ function AdminView({ onDataChanged }) {
         </section>
 
         <section className="admin-panel-card refresh-panel">
-          <header><div><span className="eyebrow">任务记录</span><h2>最近刷新</h2></div><RefreshCw size={19} /></header>
-          <div className="refresh-ledger">{overview.recentRefreshes.length ? overview.recentRefreshes.map((run, index) => <div key={`${run.started_at}-${index}`}><span className={`run-state ${run.status}`}>{run.status === "success" ? "完成" : run.status}</span><time>{formatDate(run.started_at)}</time><strong>新增 {run.added_count || 0}</strong></div>) : <p className="empty-compact">暂无刷新记录</p>}</div>
+          <header><div><span className="eyebrow">任务记录</span><h2>最近任务</h2></div><RefreshCw size={19} /></header>
+          <div className="refresh-ledger">
+            {overview.recentRefreshes.length ? overview.recentRefreshes.map((run, index) => (
+              <div key={`${run.started_at}-${index}`}>
+                <span className={`run-state ${run.status}`}>{run.status === "success" ? "完成" : run.status}</span>
+                <div className="run-details">
+                  <div className="run-heading"><strong>{taskLabels[run.task_type] || "数据维护"}</strong><time>{formatDate(run.started_at)}</time></div>
+                  <small>文献 +{run.added_count || 0} · 摘要 +{run.enriched_abstract_count || 0} · 关键词 +{run.enriched_keyword_count || 0} · 翻译 +{run.translated_count || 0}</small>
+                  <small className="run-failures">失败：文献 {run.failed_article_count || 0} · 摘要 {run.failed_abstract_count || 0} · 关键词 {run.failed_keyword_count || 0} · 翻译 {run.failed_translation_count || 0}</small>
+                </div>
+              </div>
+            )) : <p className="empty-compact">暂无刷新记录</p>}
+          </div>
         </section>
       </div>
 
       <section className="admin-panel-card admin-table-card">
-        <header><div><span className="eyebrow">账户权限</span><h2>用户管理</h2></div><Users size={19} /></header>
-        <div className="admin-table-wrap"><table><thead><tr><th>用户</th><th>账户角色</th><th>学籍</th><th>邮箱</th><th>注册日期</th></tr></thead><tbody>{overview.users.map((user) => <tr key={user.id}><td><strong>{user.name || user.username}</strong><small>@{user.username}</small></td><td><span className={`role-chip ${user.role}`}>{user.role === "super_admin" ? "最高管理员" : "普通用户"}</span></td><td>{user.enrollment_year ? `${user.enrollment_year}级 ${user.degree || ""}` : "—"}</td><td>{user.email || "—"}</td><td>{formatDate(user.created_at)}</td></tr>)}</tbody></table></div>
+        <header>
+          <div><span className="eyebrow">账户权限</span><h2>用户管理</h2></div>
+          <div className="admin-section-actions">
+            <button className="secondary compact" type="button" aria-expanded={showCreateUser} onClick={() => { setShowCreateUser((current) => !current); setMessage(""); setDeleteUserId(null); }}>
+              <UserPlus size={15} /> {showCreateUser ? "取消新增" : "新增用户"}
+            </button>
+            <Users size={19} />
+          </div>
+        </header>
+        {showCreateUser && (
+          <form className="admin-user-form" onSubmit={createUser}>
+            <div className="admin-user-form-grid">
+              <label><span>用户名</span><input value={userForm.username} autoComplete="username" maxLength={32} onChange={(event) => setUserForm({ ...userForm, username: event.target.value })} required /></label>
+              <label><span>初始密码</span><input type="password" value={userForm.password} autoComplete="new-password" minLength={8} maxLength={72} onChange={(event) => setUserForm({ ...userForm, password: event.target.value })} required /></label>
+              <label><span>显示名称（可选）</span><input value={userForm.name} maxLength={40} onChange={(event) => setUserForm({ ...userForm, name: event.target.value })} /></label>
+              <label><span>邮箱（可选）</span><input type="email" value={userForm.email} onChange={(event) => setUserForm({ ...userForm, email: event.target.value })} /></label>
+            </div>
+            <div className="admin-user-form-actions">
+              <small>新账户默认为普通用户；密码长度须为 8 至 72 个字符。</small>
+              <button className="primary" type="submit" disabled={userSubmitting || !userForm.username || !userForm.password}><UserPlus size={15} /> {userSubmitting ? "创建中…" : "创建用户"}</button>
+            </div>
+          </form>
+        )}
+        <div className="admin-table-wrap"><table><thead><tr><th>用户</th><th>账户角色</th><th>学籍</th><th>邮箱</th><th>注册日期</th><th>操作</th></tr></thead><tbody>{overview.users.map((user) => <tr key={user.id}><td><strong>{user.name || user.username}</strong><small>@{user.username}</small></td><td><span className={`role-chip ${user.role}`}>{user.role === "super_admin" ? "最高管理员" : "普通用户"}</span></td><td>{user.enrollment_year ? `${user.enrollment_year}级 ${user.degree || ""}` : "—"}</td><td>{user.email || "—"}</td><td>{formatDate(user.created_at)}</td><td className="user-actions">{user.role === "super_admin" ? <small>受保护</small> : <button className="danger-button compact" type="button" disabled={userSubmitting} onClick={() => removeUser(user)}><Trash2 size={14} /> {deleteUserId === user.id ? "确认删除" : "删除"}</button>}</td></tr>)}</tbody></table></div>
       </section>
 
       <section className="admin-panel-card admin-table-card">
@@ -1274,8 +1529,8 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
         translated: job.translated,
         failed: job.failed,
         message: finished
-          ? `当前批次补全完成：新增 ${job.enriched} 篇摘要，新增或更新 ${job.translated} 篇中文翻译${job.failed ? `，${job.failed} 篇暂未完全补齐` : ""}。`
-          : "正在后台获取摘要和中文翻译，已完成的文献会直接显示。"
+          ? `后台补全完成：摘要 +${job.enriched}，翻译 +${job.translated}${job.failed ? `，${job.failed} 篇暂未完全补齐` : ""}；已有内容继续从本地数据库显示。`
+          : "已有内容已从本地数据库直接显示，正在后台补全缺失的摘要和中文翻译。"
       });
       if (finished) {
         preparationJobRef.current = "";
@@ -1299,11 +1554,11 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
       : uniqueIds.filter((id) => !attemptedPreparationIdsRef.current.has(id));
     if (!selectedIds.length) return;
     selectedIds.forEach((id) => attemptedPreparationIdsRef.current.add(id));
-    setPreparation({ active: true, total: selectedIds.length, completed: 0, enriched: 0, translated: 0, failed: 0, message: "正在创建批量补全任务…" });
+    setPreparation({ active: true, total: selectedIds.length, completed: 0, enriched: 0, translated: 0, failed: 0, message: `已从本地数据库直接显示已有内容，正在创建 ${selectedIds.length} 篇缺失内容的补全任务…` });
     try {
       const job = await api.post("/api/articles/prepare", { ids: selectedIds });
       preparationJobRef.current = job.jobId;
-      setPreparation((current) => ({ ...current, total: job.total, message: "正在后台获取摘要和中文翻译，已完成的文献会直接显示。" }));
+      setPreparation((current) => ({ ...current, total: job.total, message: "已有内容已从本地数据库直接显示，正在后台补全缺失的摘要和中文翻译。" }));
       await pollPreparationJob(job.jobId);
     } catch (error) {
       setPreparation((current) => ({ ...current, active: false, message: `无法启动批量补全：${error.message}` }));
@@ -1350,6 +1605,9 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   )).length;
   const visibleAbstractCount = visibleArticles.filter((article) => Boolean(article.abstract?.trim())).length;
   const visibleTranslatedAbstractCount = visibleArticles.filter((article) => Boolean(article.translated_abstract?.trim())).length;
+  const visiblePendingArticles = visibleArticles.filter(articleNeedsPreparation);
+  const visibleReadyCount = visibleArticles.length - visiblePendingArticles.length;
+  const visiblePendingCount = visiblePendingArticles.length;
   const visiblePreparationKey = visibleArticles.map((article) => [
     article.id,
     Boolean(article.abstract?.trim()),
@@ -1360,9 +1618,18 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
 
   useEffect(() => {
     if (preparationJobRef.current) return;
-    const missingIds = visibleArticles.filter(articleNeedsPreparation).map((article) => article.id);
+    const missingIds = visiblePendingArticles.map((article) => article.id);
     if (missingIds.length) void startArticlePreparation(missingIds);
   }, [visiblePreparationKey, preparation.active]);
+
+  useEffect(() => {
+    // A completion notice belongs to the page that started the job. Clear it
+    // when the user switches to a different journal/filter so it is not
+    // mistaken for another round of background loading.
+    if (!preparation.active && preparation.message) {
+      setPreparation((current) => ({ ...current, message: "" }));
+    }
+  }, [visiblePreparationKey]);
 
   return (
     <div className="content-layout">
@@ -1494,34 +1761,40 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
             {displayPreferences.translatedAbstract ? <Eye size={14} /> : <EyeOff size={14} />} 中文摘要
           </button>
           <span className="display-summary" role="status">
+            {`数据库已载入 ${visibleReadyCount} 篇`}
+            {visiblePendingCount > 0 && ` · ${visiblePendingCount} 篇待补全`}
             {displayPreferences.bilingual
-              ? `当前批次 ${visibleTranslatedCount} 篇有中文译题`
+              ? ` · ${visibleTranslatedCount} 篇有中文译题`
               : "中文译题已隐藏"}
             {displayPreferences.abstract && ` · ${visibleAbstractCount} 篇有摘要`}
             {displayPreferences.translatedAbstract && ` · ${visibleTranslatedAbstractCount} 篇有中文摘要`}
           </span>
         </div>
 
-        <div className={`preparation-bar ${preparation.active ? "active" : ""}`} role="status" aria-live="polite">
-          <div className="preparation-copy">
-            <strong>{preparation.active ? "正在批量准备当前页面" : "摘要与翻译自动载入"}</strong>
-            <span>{preparation.message || "页面会自动补齐当前批次缺少的摘要、中文标题、中文摘要和中文关键词。"}</span>
-          </div>
-          {preparation.active && (
-            <div className="preparation-progress">
-              <progress max={Math.max(preparation.total, 1)} value={preparation.completed} />
-              <span>{preparation.completed}/{preparation.total}</span>
+        {(preparation.active || preparation.message) && (
+          <div className={`preparation-bar ${preparation.active ? "active" : ""}`} role="status" aria-live="polite">
+            <div className="preparation-copy">
+              <strong>{preparation.active ? "正在补全当前页面缺失内容" : "当前页面后台补全结果"}</strong>
+              <span>{preparation.message || "已有内容直接来自本地数据库，仅对缺失的摘要和翻译进行补全。"}</span>
             </div>
-          )}
-          <button
-            className="secondary compact"
-            type="button"
-            disabled={preparation.active}
-            onClick={() => startArticlePreparation(visibleArticles.filter(articleNeedsPreparation).map((article) => article.id), { force: true })}
-          >
-            <RefreshCw size={14} className={preparation.active ? "spin" : ""} /> 批量补全当前批次
-          </button>
-        </div>
+            {preparation.active && (
+              <div className="preparation-progress">
+                <progress max={Math.max(preparation.total, 1)} value={preparation.completed} />
+                <span>{preparation.completed}/{preparation.total}</span>
+              </div>
+            )}
+            {visiblePendingCount > 0 && (
+              <button
+                className="secondary compact"
+                type="button"
+                disabled={preparation.active}
+                onClick={() => startArticlePreparation(visiblePendingArticles.map((article) => article.id), { force: true })}
+              >
+                <RefreshCw size={14} className={preparation.active ? "spin" : ""} /> 批量补全当前批次
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="article-count">
           共 <strong>{sortedArticles.length}</strong> 篇文献
@@ -2110,8 +2383,6 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
     new Set(settings.journals.map((j) => j.name))
   );
   const [refreshCron, setRefreshCron] = useState(settings.refreshCron);
-  const [enriching, setEnriching] = useState(false);
-  const [enrichMessage, setEnrichMessage] = useState("");
 
   const [userEmail, setUserEmail] = useState("");
   const [savedEmail, setSavedEmail] = useState("");
@@ -2227,15 +2498,6 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
       setTestMsg(res.sent ? `测试邮件已发送至 ${res.email}` : "发送失败，请检查 SMTP 配置");
     } catch (e) { setTestMsg(e.message); }
     finally { setTesting(false); }
-  }
-
-  async function enrichKeywords() {
-    setEnriching(true); setEnrichMessage("正在批量补全关键词...");
-    try {
-      const res = await api.post("/api/enrich-keywords");
-      setEnrichMessage(`补全完成：成功 ${res.enriched} 篇${res.failed ? `，失败 ${res.failed} 篇` : ""}`);
-    } catch (e) { setEnrichMessage(`补全失败：${e.message}`); }
-    finally { setEnriching(false); }
   }
 
   async function sendPush() {
@@ -2546,11 +2808,7 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
             </div>
             <div className="settings-actions">
               <button className="primary" type="submit"><Save size={16} /> 保存设置</button>
-              <button className="secondary" type="button" onClick={enrichKeywords} disabled={enriching}>
-                <RefreshCw size={16} className={enriching ? "spin" : ""} /> {enriching ? "补全中..." : "补全关键词"}
-              </button>
             </div>
-            {enrichMessage && <div className="inline-msg">{enrichMessage}</div>}
           </form>
 
         </div>

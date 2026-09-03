@@ -5,17 +5,18 @@ import {
   finishRefreshRun,
   getAllUserEmails,
   getSettings,
-  getTranslation,
   getUserSettings,
   insertArticles,
-  listArticlesMissingMetadata,
+  listArticlesMissingAbstract,
+  listArticlesMissingTranslation,
+  listArticlesWithoutKeywords,
   listArticlesWithoutTranslation,
-  saveTranslation,
-  updateArticleDetails
+  updateArticleDetails,
+  updateRefreshRunSummary
 } from "./db.js";
 import { fetchJournalArticles } from "./sources.js";
 import { crawlArticleDetails } from "./crawler.js";
-import { translateArticle } from "./translate.js";
+import { ensureTranslation } from "./translation-cache.js";
 import { generateWeeklyDigestMarkdown } from "./digest.js";
 import { sendMarkdownDigestEmail } from "./mail.js";
 import { calculatePushDays, sleep } from "./utils.js";
@@ -32,6 +33,50 @@ let pushTasks = [];
 
 function journalsToCollect(settings) {
   return [...new Map([...DEFAULT_JOURNALS, ...(settings.journals || [])].map((journal) => [journal.name, journal])).values()];
+}
+
+function hasText(value) {
+  return String(value || "").trim().length > 0;
+}
+
+function countMetadataAdditions(before, after) {
+  return after.reduce((counts, article, index) => {
+    const previous = before[index] || {};
+    if (!hasText(previous.abstract)) {
+      if (hasText(article.abstract)) counts.abstractCount += 1;
+      else counts.failedAbstractCount += 1;
+    }
+    if (!hasText(previous.keywords)) {
+      if (hasText(article.keywords)) counts.keywordCount += 1;
+      else counts.failedKeywordCount += 1;
+    }
+    return counts;
+  }, { abstractCount: 0, keywordCount: 0, failedAbstractCount: 0, failedKeywordCount: 0 });
+}
+
+function formatTaskMessage({
+  addedCount = 0,
+  abstractCount = 0,
+  keywordCount = 0,
+  translatedCount = 0,
+  failedArticleCount = 0,
+  failedAbstractCount = 0,
+  failedKeywordCount = 0,
+  failedTranslationCount = 0
+}) {
+  const additions = [
+    `新增文献 ${Number(addedCount || 0)} 篇`,
+    `补全摘要 ${Number(abstractCount || 0)} 篇`,
+    `补全关键词 ${Number(keywordCount || 0)} 篇`,
+    `新增翻译 ${Number(translatedCount || 0)} 篇`
+  ];
+  const failures = [
+    `文献 ${Number(failedArticleCount || 0)}`,
+    `摘要 ${Number(failedAbstractCount || 0)}`,
+    `关键词 ${Number(failedKeywordCount || 0)}`,
+    `翻译 ${Number(failedTranslationCount || 0)}`
+  ];
+  return `${additions.join(" · ")} · 失败：${failures.join(" / ")}`;
 }
 
 export async function refreshArticles() {
@@ -58,29 +103,84 @@ export async function refreshArticles() {
 
     const { addedCount, addedArticles } = insertArticles(fetched);
     const message = `Fetched ${fetched.length} records from ${journals.length - errors.length}/${journals.length} journals${errors.length ? `; ${errors.length} failed` : ""}`;
-    finishRefreshRun(runId, { addedCount, status: "success", message });
+    finishRefreshRun(runId, {
+      addedCount,
+      status: "success",
+      failedArticleCount: errors.length,
+      message: `抓取完成：新增文献 ${addedCount} 篇，后台补全与翻译处理中…`
+    });
 
     // Keep the HTTP refresh fast, but preserve the required order inside the
     // background pipeline: metadata first, translation second, local DB last.
     if (addedArticles.length) {
       void (async () => {
-        const enriched = await enrichArticles(addedArticles.slice(0, TRANSLATE_BATCH_LIMIT));
-        await autoTranslateArticles(enriched);
-      })().catch((error) => console.error("[post-process] failed:", error.message));
+        const selected = addedArticles.slice(0, TRANSLATE_BATCH_LIMIT);
+        const enriched = await enrichArticles(selected);
+        const metadata = countMetadataAdditions(selected, enriched);
+        const translationResult = await autoTranslateArticles(enriched);
+        updateRefreshRunSummary(runId, {
+          ...metadata,
+          translatedCount: translationResult.translated,
+          failedArticleCount: errors.length,
+          failedTranslationCount: translationResult.failed,
+          message: formatTaskMessage({
+            addedCount,
+            ...metadata,
+            translatedCount: translationResult.translated,
+            failedArticleCount: errors.length,
+            failedTranslationCount: translationResult.failed
+          })
+        });
+      })().catch((error) => {
+        console.error("[post-process] failed:", error.message);
+        updateRefreshRunSummary(runId, {
+          message: `新增文献 ${addedCount} 篇 · 后台补全或翻译失败：${error.message}`
+        });
+      });
     } else {
       void (async () => {
-        await enrichMissingKeywords();
+        const abstractResult = await enrichMissingAbstracts();
+        const keywordResult = await enrichMissingKeywords();
         const backlog = listArticlesWithoutTranslation(
           config.weeklyDigestTranslationLanguage || "zh",
           TRANSLATE_BATCH_LIMIT
         );
-        await autoTranslateArticles(backlog);
-      })().catch((error) => console.error("[post-process] backlog failed:", error.message));
+        const translationResult = await autoTranslateArticles(backlog);
+        updateRefreshRunSummary(runId, {
+          abstractCount: abstractResult.enriched,
+          keywordCount: keywordResult.enriched,
+          translatedCount: translationResult.translated,
+          failedArticleCount: errors.length,
+          failedAbstractCount: abstractResult.failed,
+          failedKeywordCount: keywordResult.failed,
+          failedTranslationCount: translationResult.failed,
+          message: formatTaskMessage({
+            addedCount,
+            abstractCount: abstractResult.enriched,
+            keywordCount: keywordResult.enriched,
+            translatedCount: translationResult.translated,
+            failedArticleCount: errors.length,
+            failedAbstractCount: abstractResult.failed,
+            failedKeywordCount: keywordResult.failed,
+            failedTranslationCount: translationResult.failed
+          })
+        });
+      })().catch((error) => {
+        console.error("[post-process] backlog failed:", error.message);
+        updateRefreshRunSummary(runId, {
+          message: `新增文献 ${addedCount} 篇 · 后台补全或翻译失败：${error.message}`
+        });
+      });
     }
 
     return { addedCount, status: "success", message, addedArticles: addedArticles.slice(0, 20), sourceErrors: errors };
   } catch (error) {
-    finishRefreshRun(runId, { addedCount: 0, status: "error", message: error.message });
+    finishRefreshRun(runId, {
+      addedCount: 0,
+      status: "error",
+      failedArticleCount: errors.length || 1,
+      message: error.message
+    });
     return { addedCount: 0, status: "error", message: error.message, addedArticles: [] };
   } finally {
     isRefreshing = false;
@@ -104,14 +204,60 @@ async function enrichArticles(articles) {
 }
 
 export async function enrichMissingKeywords() {
-  const articles = listArticlesMissingMetadata(ENRICH_BATCH_LIMIT);
+  const articles = listArticlesWithoutKeywords(ENRICH_BATCH_LIMIT);
   if (!articles.length) return { enriched: 0, failed: 0 };
   const results = await enrichArticles(articles);
   const enriched = results.filter((article, index) =>
-    String(article.abstract || "") !== String(articles[index].abstract || "") ||
     String(article.keywords || "") !== String(articles[index].keywords || "")
   ).length;
   return { enriched, failed: articles.length - enriched };
+}
+
+export async function enrichMissingAbstracts() {
+  const articles = listArticlesMissingAbstract(ENRICH_BATCH_LIMIT);
+  if (!articles.length) return { enriched: 0, failed: 0 };
+  const results = await enrichArticles(articles);
+  const enriched = results.filter((article, index) =>
+    String(article.abstract || "") !== String(articles[index].abstract || "")
+  ).length;
+  return { enriched, failed: articles.length - enriched };
+}
+
+// Translate one missing field at a time so the administrator can repair a
+// backlog without re-translating fields that are already present. The
+// translation table stores all fields in one row, therefore existing values
+// are preserved when only the title or abstract is requested.
+export async function translateMissingArticles(field, targetLanguage = "zh", limit = TRANSLATE_BATCH_LIMIT) {
+  if (!['title', 'abstract'].includes(field)) {
+    throw new Error("只支持标题或摘要翻译");
+  }
+
+  const articles = listArticlesMissingTranslation(field, targetLanguage, limit);
+  let translated = 0;
+  let failed = 0;
+  const errors = [];
+
+  for (const article of articles) {
+    let requested = false;
+    try {
+      const result = await ensureTranslation(article, targetLanguage, { fields: [field] });
+      requested = Boolean(result.translated);
+      if (requested) translated += 1;
+    } catch (error) {
+      failed += 1;
+      errors.push({ id: article.id, message: error.message });
+    }
+    if (requested) await sleep(TRANSLATE_DELAY_MS);
+  }
+
+  return {
+    field,
+    targetLanguage,
+    processed: articles.length,
+    translated,
+    failed,
+    errors
+  };
 }
 
 export async function autoTranslateArticles(articles) {
@@ -119,16 +265,20 @@ export async function autoTranslateArticles(articles) {
   let translated = 0;
   let failed = 0;
   for (const article of articles) {
-    if (!article.id || getTranslation(article.id, targetLanguage)) continue;
+    if (!article.id) continue;
+    let requested = false;
     try {
-      saveTranslation(article.id, targetLanguage, await translateArticle(article, targetLanguage));
-      translated += 1;
-      console.log(`[translate] #${article.id} translated and saved`);
+      const result = await ensureTranslation(article, targetLanguage);
+      requested = Boolean(result.translated);
+      if (requested) {
+        translated += 1;
+        console.log(`[translate] #${article.id} translated and saved`);
+      }
     } catch (error) {
       failed += 1;
       console.warn(`[translate] #${article.id} failed: ${error.message}`);
     }
-    await sleep(TRANSLATE_DELAY_MS);
+    if (requested) await sleep(TRANSLATE_DELAY_MS);
   }
   return { translated, failed };
 }

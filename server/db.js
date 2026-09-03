@@ -58,6 +58,14 @@ db.exec(`
     started_at TEXT NOT NULL,
     finished_at TEXT,
     added_count INTEGER NOT NULL DEFAULT 0,
+    task_type TEXT NOT NULL DEFAULT 'refresh',
+    enriched_abstract_count INTEGER NOT NULL DEFAULT 0,
+    enriched_keyword_count INTEGER NOT NULL DEFAULT 0,
+    translated_count INTEGER NOT NULL DEFAULT 0,
+    failed_article_count INTEGER NOT NULL DEFAULT 0,
+    failed_abstract_count INTEGER NOT NULL DEFAULT 0,
+    failed_keyword_count INTEGER NOT NULL DEFAULT 0,
+    failed_translation_count INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL,
     message TEXT
   );
@@ -197,7 +205,15 @@ for (const migration of [
   "ALTER TABLE feedback ADD COLUMN is_anonymous INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE feedback ADD COLUMN is_closed INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE feedback ADD COLUMN closed_at TEXT",
-  "ALTER TABLE user_accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"
+  "ALTER TABLE user_accounts ADD COLUMN role TEXT NOT NULL DEFAULT 'user'",
+  "ALTER TABLE refresh_runs ADD COLUMN task_type TEXT NOT NULL DEFAULT 'refresh'",
+  "ALTER TABLE refresh_runs ADD COLUMN enriched_abstract_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN enriched_keyword_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN translated_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN failed_article_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN failed_abstract_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN failed_keyword_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN failed_translation_count INTEGER NOT NULL DEFAULT 0"
 ]) {
   try { db.exec(migration); } catch (error) {
     if (!error.message?.includes("duplicate column")) throw error;
@@ -489,10 +505,13 @@ export function saveTranslation(articleId, targetLanguage, translation) {
     INSERT INTO translations (article_id, target_language, title, abstract, keywords, provider, translated_at)
     VALUES (@articleId, @targetLanguage, @title, @abstract, @keywords, @provider, @translatedAt)
     ON CONFLICT(article_id, target_language) DO UPDATE SET
-      title = excluded.title,
-      abstract = excluded.abstract,
-      keywords = excluded.keywords,
-      provider = excluded.provider,
+      -- Translation requests can intentionally contain only the missing
+      -- subset of fields.  Preserve anything already cached when a provider
+      -- returns an empty value for the other fields.
+      title = CASE WHEN length(trim(coalesce(excluded.title, ''))) > 0 THEN excluded.title ELSE translations.title END,
+      abstract = CASE WHEN length(trim(coalesce(excluded.abstract, ''))) > 0 THEN excluded.abstract ELSE translations.abstract END,
+      keywords = CASE WHEN length(trim(coalesce(excluded.keywords, ''))) > 0 THEN excluded.keywords ELSE translations.keywords END,
+      provider = CASE WHEN length(trim(coalesce(excluded.provider, ''))) > 0 THEN excluded.provider ELSE translations.provider END,
       translated_at = excluded.translated_at
   `).run({
     articleId,
@@ -628,21 +647,76 @@ export function getUserStatus(userId) {
   return { articleCount, unreadCount, favoriteCount, readCount };
 }
 
-export function createRefreshRun() {
+export function createRefreshRun({ taskType = "refresh", message = "" } = {}) {
   const startedAt = new Date().toISOString();
   const result = db.prepare(`
-    INSERT INTO refresh_runs (started_at, status, message)
-    VALUES (?, 'running', '')
-  `).run(startedAt);
+    INSERT INTO refresh_runs (started_at, status, message, task_type)
+    VALUES (?, 'running', ?, ?)
+  `).run(startedAt, String(message || ""), String(taskType || "refresh"));
   return result.lastInsertRowid;
 }
 
-export function finishRefreshRun(id, { addedCount, status, message }) {
+export function finishRefreshRun(id, {
+  addedCount = 0,
+  status,
+  message,
+  abstractCount = 0,
+  keywordCount = 0,
+  translatedCount = 0,
+  failedArticleCount = 0,
+  failedAbstractCount = 0,
+  failedKeywordCount = 0,
+  failedTranslationCount = 0
+}) {
   db.prepare(`
     UPDATE refresh_runs
-    SET finished_at = ?, added_count = ?, status = ?, message = ?
+    SET finished_at = ?, added_count = ?, status = ?, message = ?,
+        enriched_abstract_count = ?, enriched_keyword_count = ?, translated_count = ?,
+        failed_article_count = ?, failed_abstract_count = ?, failed_keyword_count = ?, failed_translation_count = ?
     WHERE id = ?
-  `).run(new Date().toISOString(), addedCount, status, message || "", id);
+  `).run(
+    new Date().toISOString(),
+    Number(addedCount || 0),
+    status,
+    message || "",
+    Number(abstractCount || 0),
+    Number(keywordCount || 0),
+    Number(translatedCount || 0),
+    Number(failedArticleCount || 0),
+    Number(failedAbstractCount || 0),
+    Number(failedKeywordCount || 0),
+    Number(failedTranslationCount || 0),
+    id
+  );
+}
+
+export function updateRefreshRunSummary(id, {
+  message,
+  abstractCount = 0,
+  keywordCount = 0,
+  translatedCount = 0,
+  failedArticleCount = 0,
+  failedAbstractCount = 0,
+  failedKeywordCount = 0,
+  failedTranslationCount = 0
+}) {
+  db.prepare(`
+    UPDATE refresh_runs
+    SET enriched_abstract_count = ?, enriched_keyword_count = ?, translated_count = ?,
+        failed_article_count = ?, failed_abstract_count = ?, failed_keyword_count = ?, failed_translation_count = ?,
+        message = ?
+    WHERE id = ?
+  `).run(
+    Number(abstractCount || 0),
+    Number(keywordCount || 0),
+    Number(translatedCount || 0),
+    Number(failedArticleCount || 0),
+    Number(failedAbstractCount || 0),
+    Number(failedKeywordCount || 0),
+    Number(failedTranslationCount || 0),
+    message || "",
+    id
+  );
 }
 
 export function getStatus() {
@@ -689,10 +763,38 @@ export function listArticlesWithoutTranslation(targetLanguage, limit = 20) {
     FROM articles a
     LEFT JOIN translations t
       ON t.article_id = a.id AND t.target_language = ?
-    WHERE t.article_id IS NULL
-    ORDER BY COALESCE(a.first_seen_at, a.fetched_at) DESC
+    WHERE length(trim(coalesce(t.title, ''))) = 0
+      OR (length(trim(coalesce(a.abstract, ''))) > 0 AND length(trim(coalesce(t.abstract, ''))) = 0)
+      OR (length(trim(coalesce(a.keywords, ''))) > 0 AND length(trim(coalesce(t.keywords, ''))) = 0)
+    ORDER BY COALESCE(a.first_seen_at, a.fetched_at) DESC, a.id DESC
     LIMIT ?
   `).all(targetLanguage, limit);
+}
+
+export function listArticlesMissingAbstract(limit = 50) {
+  return db.prepare(`
+    SELECT * FROM articles
+    WHERE abstract IS NULL OR length(trim(abstract)) = 0
+    ORDER BY COALESCE(first_seen_at, fetched_at) DESC, id DESC
+    LIMIT ?
+  `).all(limit);
+}
+
+// Return articles whose requested translated field is still missing. Keep the
+// field names allow-listed because they are interpolated into the SQL query.
+export function listArticlesMissingTranslation(field = "title", targetLanguage = "zh", limit = 20) {
+  const sourceColumn = field === "abstract" ? "abstract" : "title";
+  const translatedColumn = field === "abstract" ? "abstract" : "title";
+  return db.prepare(`
+    SELECT a.*
+    FROM articles a
+    LEFT JOIN translations t
+      ON t.article_id = a.id AND t.target_language = ?
+    WHERE length(trim(coalesce(a.${sourceColumn}, ''))) > 0
+      AND length(trim(coalesce(t.${translatedColumn}, ''))) = 0
+    ORDER BY COALESCE(a.first_seen_at, a.fetched_at) DESC, a.id DESC
+    LIMIT ?
+  `).all(targetLanguage, Math.min(Math.max(Number(limit) || 20, 1), 100));
 }
 
 export function getKeywordStats(filters = {}) {
@@ -981,7 +1083,37 @@ export function createUserAccount({ username, passwordHash, passwordSalt, regist
 }
 
 export function deleteUserAccount(accountId) {
-  return db.prepare("DELETE FROM user_accounts WHERE id = ?").run(Number(accountId)).changes > 0;
+  const id = Number(accountId);
+  if (!Number.isInteger(id) || id <= 0) return false;
+  const userId = `account:${id}`;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const account = db.prepare("SELECT id FROM user_accounts WHERE id = ?").get(id);
+    if (!account) {
+      db.exec("ROLLBACK");
+      return false;
+    }
+
+    // Personal-account tables use a text principal instead of a foreign key
+    // because they also support guest/legacy principals. Clean those rows up
+    // explicitly so deleting an account never leaves orphaned private data or
+    // a discussion identity behind.
+    db.prepare("DELETE FROM feedback_likes WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM feedback_comment_likes WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM feedback_comments WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM feedback WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM user_interactions WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM user_journals WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM user_emails WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM discussion_profiles WHERE user_id = ?").run(userId);
+    const deleted = db.prepare("DELETE FROM user_accounts WHERE id = ?").run(id).changes > 0;
+    db.exec("COMMIT");
+    return deleted;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 export function getAdminOverview() {
@@ -1023,7 +1155,10 @@ export function getAdminOverview() {
       FROM articles GROUP BY journal ORDER BY count DESC, journal ASC
     `).all(),
     recentRefreshes: db.prepare(`
-      SELECT started_at, finished_at, added_count, status, message
+      SELECT started_at, finished_at, added_count, task_type,
+        enriched_abstract_count, enriched_keyword_count, translated_count,
+        failed_article_count, failed_abstract_count, failed_keyword_count, failed_translation_count,
+        status, message
       FROM refresh_runs ORDER BY id DESC LIMIT 8
     `).all()
   };
