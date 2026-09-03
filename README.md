@@ -205,8 +205,8 @@
 
 ```bash
 # 克隆项目
-git clone <仓库地址>
-cd 文献推送
+git clone https://github.com/9527La/literature-push.git
+cd literature-push
 
 # 安装依赖
 npm install
