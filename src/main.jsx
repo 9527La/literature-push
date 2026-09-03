@@ -43,12 +43,18 @@ function getUserToken() {
   return localStorage.getItem("userToken") || "";
 }
 
+function getPassportToken() {
+  return localStorage.getItem("passportToken") || "";
+}
+
 async function parseResponse(response) {
   if (response.ok) return response.json();
   const text = await response.text();
   try {
     const data = JSON.parse(text);
-    throw new Error(data.error || text);
+    const error = new Error(data.error || text);
+    error.status = response.status;
+    throw error;
   } catch (error) {
     if (error instanceof SyntaxError) throw new Error(text || `请求失败（${response.status}）`);
     throw error;
@@ -58,6 +64,8 @@ async function parseResponse(response) {
 function requestHeaders(hasBody = false) {
   const headers = {};
   if (hasBody) headers["Content-Type"] = "application/json";
+  const passportToken = getPassportToken();
+  if (passportToken) headers["X-Passport-Token"] = passportToken;
   const userToken = getUserToken();
   if (userToken) headers["X-User-Token"] = userToken;
   return headers;
@@ -248,11 +256,12 @@ function HelpView() {
       <section className="help-section">
         <h3><UserRound size={18} /> 账户与个性设置</h3>
         <ul>
-          <li><strong>注册限制</strong>：每个 IP 地址只能注册一个账号，已有账号可在其他设备登录。</li>
+          <li><strong>网页通行证</strong>：先使用管理员或用户通行证进入网页；通行证与个人账户相互独立。</li>
+          <li><strong>个人账户</strong>：可自行注册，用户名唯一。游客可以浏览，但不能参与公共讨论或保存个人阅读、收藏和推送设置。</li>
           <li><strong>账户资料</strong>：可保存姓名、入学年份、学历和周报邮箱。</li>
           <li><strong>本机保存</strong>：开启自动保存后，筛选、列表显示、期刊订阅和推送配置会保存在当前浏览器。</li>
           <li><strong>远端同步</strong>：登录后可手动上传当前设置，也可从远端账户载入。</li>
-          <li><strong>公共讨论</strong>：公开发布主题、评论和点赞；评论框按需展开，管理员可评论、结束或删除话题。</li>
+          <li><strong>公共讨论</strong>：登录个人账户后可设置发言名称、发布主题、评论和点赞；公开标签按账户固定，不使用 IP 作为新账户身份。</li>
         </ul>
       </section>
 
@@ -270,10 +279,46 @@ function HelpView() {
         <ul>
           <li><strong>局域网访问</strong>：同一 Wi-Fi 下的其他设备可通过浏览器输入本机显示的局域网地址访问本系统。</li>
           <li><strong>版本更新</strong>：系统更新后会弹出更新说明，可选择"知道了"关闭，下次更新前不再重复提示。</li>
-          <li><strong>管理中心</strong>：仅“沈超2024”账户可查看网站统计、用户、期刊完整度和刷新记录，并执行数据维护。</li>
+          <li><strong>管理中心</strong>：只有管理员网页通行证可查看网站统计、用户、期刊完整度和刷新记录，并执行数据维护。</li>
         </ul>
       </section>
     </div>
+  );
+}
+
+function LoginGate({ onAuthenticate }) {
+  const [passport, setPassport] = useState("");
+  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    try {
+      await onAuthenticate(passport);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="login-shell">
+      <section className="login-panel" aria-labelledby="login-title">
+        <div className="login-brand"><BookOpen size={26} /><span>电力文献</span></div>
+        <span className="eyebrow">受限访问</span>
+        <h1 id="login-title">输入网页通行证</h1>
+        <p>通行证用于进入网页。进入后可游客浏览，也可以注册或登录独立的个人账户。</p>
+        <form className="auth-form login-form" onSubmit={submit} onInput={() => setMessage("")}>
+          <label><span>网页通行证</span><input type="password" value={passport} autoComplete="current-password" maxLength={128} onChange={(event) => setPassport(event.target.value)} required autoFocus /></label>
+          <button className="primary" disabled={submitting || !passport}>{submitting ? "正在验证" : "进入网页"}</button>
+          {message && <div className="inline-msg login-error" role="alert">{message}</div>}
+        </form>
+        <small>管理员通行证可进入管理中心；全站最多允许 20 个不同 IP 同时登录个人账户。</small>
+      </section>
+    </main>
   );
 }
 
@@ -292,9 +337,11 @@ function App() {
   });
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [gateAuthenticated, setGateAuthenticated] = useState(false);
+  const [gateRole, setGateRole] = useState("");
   const [message, setMessage] = useState("");
   const [versionInfo, setVersionInfo] = useState(null);
-  const [account, setAccount] = useState({ email: "", name: "", enrollment_year: null, degree: "", authenticated: false, can_register: true, username: "", role: "guest", is_admin: false });
+  const [account, setAccount] = useState({ authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" });
   
   // Debounced search
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -374,8 +421,33 @@ function App() {
   }
 
   useEffect(() => {
-    loadAll().catch((error) => setMessage(error.message));
-  }, [debouncedQuery]);
+    api.get("/api/gate/session")
+      .then((session) => {
+        setGateAuthenticated(Boolean(session.authenticated));
+        setGateRole(session.role || "");
+        if (!session.authenticated) {
+          localStorage.removeItem("passportToken");
+          setInitialLoading(false);
+        }
+      })
+      .catch(() => setInitialLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!gateAuthenticated) return;
+    loadAll().catch((error) => {
+      if (error.status === 401 || String(error.message).includes("通行证")) {
+        localStorage.removeItem("passportToken");
+        setGateAuthenticated(false);
+        setGateRole("");
+        localStorage.removeItem("userToken");
+        setAccount({ authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" });
+      } else {
+        setMessage(error.message);
+      }
+      setInitialLoading(false);
+    });
+  }, [debouncedQuery, gateAuthenticated]);
 
   async function refresh() {
     setLoading(true);
@@ -395,11 +467,21 @@ function App() {
   }
 
   async function markRead(id) {
+    if (!account.authenticated) {
+      setMessage("游客模式只能浏览，请先登录个人账户保存阅读状态。");
+      setActiveView("account");
+      return;
+    }
     await api.post(`/api/articles/${id}/read`);
     await loadAll();
   }
 
   async function toggleFavorite(id) {
+    if (!account.authenticated) {
+      setMessage("游客模式不能收藏文献，请先登录个人账户。");
+      setActiveView("account");
+      return;
+    }
     await api.post(`/api/articles/${id}/favorite`);
     await loadAll();
   }
@@ -443,16 +525,39 @@ function App() {
     }
   }
 
-  async function authenticate(mode, credentials) {
-    const result = await api.post(`/api/auth/${mode}`, credentials);
-    localStorage.setItem("userToken", result.token);
+  async function authenticate(passport) {
+    const result = await api.post("/api/gate/login", { passport });
+    localStorage.setItem("passportToken", result.token);
+    setGateAuthenticated(true);
+    setGateRole(result.role || "");
+    setInitialLoading(true);
     await loadAll();
   }
 
-  function logoutUser() {
+  async function authenticateAccount(mode, credentials) {
+    const result = await api.post(`/api/auth/${mode}`, credentials);
+    localStorage.setItem("userToken", result.token);
+    const session = result.account || await api.get("/api/auth/session");
+    setAccount(session);
+    await loadAll();
+  }
+
+  async function logoutUser() {
+    await api.post("/api/auth/logout").catch(() => {});
     localStorage.removeItem("userToken");
-    setAccount({ email: "", name: "", enrollment_year: null, degree: "", authenticated: false, can_register: false, username: "", role: "guest", is_admin: false });
-    loadAll().catch((error) => setMessage(error.message));
+    setAccount({ email: "", name: "", enrollment_year: null, degree: "", authenticated: false, can_register: true, username: "", role: "guest", is_admin: gateRole === "admin", passport_authenticated: gateAuthenticated, passport_role: gateRole });
+    setActiveView("feed");
+    await loadAll().catch(() => {});
+  }
+
+  async function leaveWebsite() {
+    await api.post("/api/auth/logout").catch(() => {});
+    localStorage.removeItem("userToken");
+    localStorage.removeItem("passportToken");
+    setGateAuthenticated(false);
+    setGateRole("");
+    setAccount({ authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" });
+    setInitialLoading(false);
   }
 
   async function uploadPersonalization() {
@@ -472,6 +577,14 @@ function App() {
     setAutoSavePersonalization(enabled);
     localStorage.setItem("autoSavePersonalization", String(enabled));
     if (enabled) savePersonalizationLocal();
+  }
+
+  if (initialLoading && !gateAuthenticated) {
+    return <div className="login-shell"><div className="login-loading" aria-label="正在检查登录状态" /></div>;
+  }
+
+  if (!gateAuthenticated) {
+    return <LoginGate onAuthenticate={authenticate} />;
   }
 
   return (
@@ -498,7 +611,7 @@ function App() {
               <MessageSquare size={16} /> 公共讨论
             </button>
             <button className={activeView === "account" ? "active" : ""} onClick={() => setActiveView("account")}>
-              <UserRound size={16} /> {account.authenticated ? account.username : "登录账户"}
+              <UserRound size={16} /> {account.authenticated ? account.username : "游客账户"}
             </button>
             {account.is_admin && <button className={activeView === "admin" ? "active" : ""} onClick={() => setActiveView("admin")}>
               <ShieldCheck size={16} /> 管理中心
@@ -525,6 +638,7 @@ function App() {
             <RefreshCw size={16} className={loading ? "spin" : ""} />
             {loading ? "刷新中" : "立即刷新"}
           </button>}
+          <button className="secondary topbar-exit" type="button" onClick={leaveWebsite}>退出网页</button>
         </div>
       </header>
 
@@ -550,6 +664,7 @@ function App() {
             displayPreferences={displayPreferences}
             onDisplayPreferencesChange={setDisplayPreferences}
             onArticleUpdated={updateArticleInList}
+            canPersonalize={account.authenticated}
           />
         ) : activeView === "settings" ? (
           <SettingsView
@@ -557,6 +672,7 @@ function App() {
             availableJournals={availableJournals}
             status={status}
             onSave={saveSettings}
+            canEdit={account.authenticated}
           />
         ) : activeView === "help" ? (
           <HelpView />
@@ -564,7 +680,7 @@ function App() {
           <AccountView
             account={account}
             onSave={saveAccount}
-            onAuthenticate={authenticate}
+            onAuthenticate={authenticateAccount}
             onLogout={logoutUser}
             autoSavePersonalization={autoSavePersonalization}
             onAutoSaveChange={setAutoSave}
@@ -600,6 +716,47 @@ function parseEmailRecipients(text) {
     .filter(Boolean);
 }
 
+function PersonalAccountAuth({ onAuthenticate }) {
+  const [mode, setMode] = useState("login");
+  const [credentials, setCredentials] = useState({ username: "", password: "" });
+  const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    setSubmitting(true);
+    setMessage("");
+    try {
+      await onAuthenticate(mode, credentials);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="profile-layout" aria-labelledby="personal-account-title">
+      <div className="page-intro account-heading">
+        <div><span className="eyebrow">游客模式</span><h1 id="personal-account-title">个人账户</h1><p>网页通行证只负责进入站点；注册个人账户后，才能跨设备保存自己的阅读、收藏、推送和讨论身份。</p></div>
+      </div>
+      <div className="account-auth-card">
+        <div className="auth-tabs" role="tablist" aria-label="个人账户操作">
+          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => { setMode("login"); setMessage(""); }}>登录个人账户</button>
+          <button type="button" className={mode === "register" ? "active" : ""} onClick={() => { setMode("register"); setMessage(""); }}>注册个人账户</button>
+        </div>
+        <form className="auth-form" onSubmit={submit} onInput={() => setMessage("")}>
+          <label><span>用户名</span><input value={credentials.username} autoComplete={mode === "login" ? "username" : "new-username"} maxLength={32} onChange={(event) => setCredentials({ ...credentials, username: event.target.value })} required autoFocus /></label>
+          <label><span>密码</span><input type="password" value={credentials.password} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "register" ? 8 : 1} maxLength={72} onChange={(event) => setCredentials({ ...credentials, password: event.target.value })} required /></label>
+          <button className="primary" disabled={submitting || !credentials.username || !credentials.password}>{submitting ? "处理中" : mode === "login" ? "登录个人账户" : "注册并登录"}</button>
+          {message && <div className="inline-msg login-error" role="alert">{message}</div>}
+        </form>
+        <p className="auth-note">用户名必须唯一；最多注册 40 个个人账户。每个账户同一时间只能在一个 IP 上保持登录，但之后可从其他 IP 再次登录。</p>
+      </div>
+    </section>
+  );
+}
+
 function AccountView({
   account,
   onSave,
@@ -616,8 +773,6 @@ function AccountView({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const messageTimerRef = useRef(null);
-  const [authMode, setAuthMode] = useState("login");
-  const [credentials, setCredentials] = useState({ username: "", password: "", confirmPassword: "" });
   const currentYear = new Date().getFullYear();
 
   useEffect(() => setForm(account), [account]);
@@ -657,25 +812,6 @@ function AccountView({
     }
   }
 
-  async function submitAuth(event) {
-    event.preventDefault();
-    if (authMode === "register" && credentials.password !== credentials.confirmPassword) {
-      setMessage("两次输入的密码不一致");
-      return;
-    }
-    setSaving(true);
-    clearAccountMessage();
-    try {
-      await onAuthenticate(authMode, { username: credentials.username, password: credentials.password });
-      setCredentials({ username: "", password: "", confirmPassword: "" });
-      showTemporaryMessage(authMode === "register" ? "账户已注册并登录。" : "登录成功。");
-    } catch (error) {
-      setMessage(error.message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
   async function runSettingAction(action, successMessage) {
     setSaving(true);
     clearAccountMessage();
@@ -690,29 +826,7 @@ function AccountView({
   }
 
   if (!account.authenticated) {
-    return (
-      <section className="profile-layout" aria-labelledby="account-title">
-        <div className="page-intro">
-          <span className="eyebrow">账户身份</span>
-          <h1 id="account-title">登录或注册</h1>
-          <p>登录后可维护个人资料，并在不同设备之间上传和载入个性设置。每个 IP 地址只能注册一个账号。</p>
-        </div>
-        <div className="auth-card">
-          <div className="auth-tabs" role="tablist">
-            <button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>登录</button>
-            <button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")} disabled={!account.can_register}>注册</button>
-          </div>
-          <form onSubmit={submitAuth} onInput={clearAccountMessage} className="auth-form">
-            <label><span>用户名</span><input value={credentials.username} minLength={3} maxLength={32} autoComplete="username" onChange={(e) => setCredentials({ ...credentials, username: e.target.value })} placeholder="3–32 个字符" required /></label>
-            <label><span>密码</span><input type="password" value={credentials.password} minLength={8} maxLength={72} autoComplete={authMode === "login" ? "current-password" : "new-password"} onChange={(e) => setCredentials({ ...credentials, password: e.target.value })} placeholder="至少 8 个字符" required /></label>
-            {authMode === "register" && <label><span>确认密码</span><input type="password" value={credentials.confirmPassword} minLength={8} maxLength={72} autoComplete="new-password" onChange={(e) => setCredentials({ ...credentials, confirmPassword: e.target.value })} required /></label>}
-            {!account.can_register && <p className="auth-note">当前 IP 已注册过账号，如需使用请直接登录。</p>}
-            <button className="primary" disabled={saving}>{saving ? "处理中" : authMode === "login" ? "登录账户" : "注册并登录"}</button>
-            {message && <div className="inline-msg" role="status">{message}</div>}
-          </form>
-        </div>
-      </section>
-    );
+    return <PersonalAccountAuth onAuthenticate={onAuthenticate} />;
   }
 
   return (
@@ -853,14 +967,15 @@ function AdminView({ onDataChanged }) {
 
 function FeedbackView({ account }) {
   const isAdmin = Boolean(account.is_admin);
+  const canDiscuss = Boolean(account.authenticated);
   const [items, setItems] = useState([]);
   const [content, setContent] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
-  const [anonymous, setAnonymous] = useState(false);
+  const [discussionProfile, setDiscussionProfile] = useState({ displayName: "", publicTag: "" });
+  const [displayNameDraft, setDisplayNameDraft] = useState("");
   const [replyDrafts, setReplyDrafts] = useState({});
   const [commentDrafts, setCommentDrafts] = useState({});
-  const [commentAnonymous, setCommentAnonymous] = useState({});
   const [openCommentComposerId, setOpenCommentComposerId] = useState(null);
   const [openAdminReplyId, setOpenAdminReplyId] = useState(null);
   const [closeConfirmId, setCloseConfirmId] = useState(null);
@@ -870,7 +985,27 @@ function FeedbackView({ account }) {
     setItems(await api.get("/api/feedback"));
   }
 
-  useEffect(() => { loadFeedback().catch((error) => setMessage(error.message)); }, []);
+  async function loadDiscussionProfile() {
+    const profile = await api.get("/api/feedback/profile");
+    setDiscussionProfile(profile);
+    setDisplayNameDraft(profile.displayName || "");
+  }
+
+  useEffect(() => {
+    Promise.all([loadFeedback(), loadDiscussionProfile()]).catch((error) => setMessage(error.message));
+  }, [canDiscuss]);
+
+  async function saveDiscussionName(event) {
+    event.preventDefault();
+    try {
+      const profile = await api.put("/api/feedback/profile", { displayName: displayNameDraft });
+      setDiscussionProfile(profile);
+      setMessage("发言名称已保存。");
+      await loadFeedback();
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
 
   async function submitFeedback(event) {
     event.preventDefault();
@@ -878,7 +1013,7 @@ function FeedbackView({ account }) {
     setSending(true);
     setMessage("");
     try {
-      await api.post("/api/feedback", { content, anonymous: !account.authenticated || anonymous });
+      await api.post("/api/feedback", { content });
       setContent("");
       setMessage("讨论已公开发布。");
       await loadFeedback();
@@ -928,8 +1063,7 @@ function FeedbackView({ account }) {
     if (!comment) return;
     try {
       await api.post(`/api/feedback/${id}/comments`, {
-        content: comment,
-        anonymous: !account.authenticated || Boolean(commentAnonymous[id])
+        content: comment
       });
       setCommentDrafts((current) => ({ ...current, [id]: "" }));
       setOpenCommentComposerId(null);
@@ -1003,29 +1137,36 @@ function FeedbackView({ account }) {
 
       <div className="feedback-grid">
         <div>
-          <form className="feedback-composer" onSubmit={submitFeedback}>
-            <div className="composer-author">
-              <div className="mini-avatar">{(!account.authenticated || anonymous ? "匿" : account.name || account.username || "用").slice(0, 1)}</div>
-              <span><strong>{!account.authenticated || anonymous ? "匿名用户" : account.name || account.username}</strong><small>{!account.authenticated || anonymous ? "不会展示账户资料" : account.enrollment_year ? `${account.enrollment_year}级${account.degree ? ` ${account.degree}` : ""}` : "未填写入学年份"}</small></span>
-            </div>
-            {account.authenticated && <fieldset className="identity-choice"><legend>发布身份</legend><label><input type="radio" name="feedbackIdentity" checked={!anonymous} onChange={() => setAnonymous(false)} /> 账户身份</label><label><input type="radio" name="feedbackIdentity" checked={anonymous} onChange={() => setAnonymous(true)} /> 匿名发布</label></fieldset>}
-            <textarea value={content} onChange={(e) => setContent(e.target.value)} maxLength={2000} rows={5} placeholder="发起一个讨论：描述问题、建议或希望大家补充的经验……" />
-            <div className="composer-footer"><span>{content.length}/2000 · 每小时可发起 1 个讨论</span><button className="primary" disabled={sending || !content.trim()}><Send size={15} /> {sending ? "发布中" : "发起讨论"}</button></div>
-            {message && <div className="inline-msg" role="status">{message}</div>}
-          </form>
+          {canDiscuss ? (
+            <form className="feedback-composer" onSubmit={submitFeedback}>
+              <div className="composer-author">
+                <div className="mini-avatar">{(discussionProfile.displayName || "用").slice(0, 1)}</div>
+                <span><strong>{discussionProfile.displayName || "请先设置发言名称"}</strong><small>账户标签 · {discussionProfile.publicTag || "读取中"}</small></span>
+              </div>
+              <div className="discussion-name-row">
+                <label htmlFor="discussion-name">发言名称</label>
+                <div><input id="discussion-name" value={displayNameDraft} maxLength={24} onChange={(event) => setDisplayNameDraft(event.target.value)} placeholder="设置你在讨论区的名称" /><button className="secondary" type="button" onClick={saveDiscussionName} disabled={!displayNameDraft.trim()}><Save size={14} /> 保存名称</button></div>
+              </div>
+              <textarea value={content} onChange={(e) => setContent(e.target.value)} maxLength={2000} rows={5} placeholder="发起一个讨论：描述问题、建议或希望大家补充的经验……" />
+              <div className="composer-footer"><span>{content.length}/2000 · 每小时可发起 1 个讨论</span><button className="primary" disabled={sending || !content.trim() || !discussionProfile.displayName}><Send size={15} /> {sending ? "发布中" : "发起讨论"}</button></div>
+              {message && <div className="inline-msg" role="status">{message}</div>}
+            </form>
+          ) : (
+            <div className="guest-prompt discussion-guest-prompt"><UserRound size={20} /><div><strong>游客可以阅读公开讨论</strong><p>注册或登录个人账户后，才能设置发言名称、发布主题、评论和点赞。</p></div></div>
+          )}
 
           <div className="feedback-stream" aria-live="polite">
             {items.length === 0 ? <div className="empty">还没有讨论。可以从一个具体的问题或改进建议开始。</div> : items.map((item) => (
               <article className="feedback-item" key={item.id}>
                 <header>
                   <div className="mini-avatar">{item.author_name.slice(0, 1)}</div>
-                  <div><strong>{item.author_name}</strong><span>{item.author_grade || "用户"} · {formatDate(item.created_at)}</span></div>
+                  <div><strong>{item.author_name}</strong><span>公开标签 · {item.author_tag} · {formatDate(item.created_at)}</span></div>
                   {Boolean(item.is_closed) && <span className="topic-closed-badge"><CircleStop size={13} /> 已结束</span>}
                 </header>
                 <p>{item.content}</p>
                 <div className="discussion-actions">
-                  <button className={item.liked_by_me ? "is-liked" : ""} type="button" onClick={() => toggleDiscussionLike(item.id)} aria-pressed={Boolean(item.liked_by_me)}><ThumbsUp size={15} /> {item.like_count || 0}</button>
-                  <button type="button" disabled={Boolean(item.is_closed)} onClick={() => setOpenCommentComposerId((current) => current === item.id ? null : item.id)} aria-expanded={openCommentComposerId === item.id} aria-controls={`comment-composer-${item.id}`}><MessageCircle size={15} /> {item.is_closed ? "话题已结束" : "评论"} · {item.comment_count || 0}</button>
+                  <button className={item.liked_by_me ? "is-liked" : ""} type="button" onClick={() => toggleDiscussionLike(item.id)} disabled={!canDiscuss} aria-pressed={Boolean(item.liked_by_me)}><ThumbsUp size={15} /> {item.like_count || 0}</button>
+                  <button type="button" disabled={!canDiscuss || Boolean(item.is_closed)} onClick={() => setOpenCommentComposerId((current) => current === item.id ? null : item.id)} aria-expanded={openCommentComposerId === item.id} aria-controls={`comment-composer-${item.id}`}><MessageCircle size={15} /> {item.is_closed ? "话题已结束" : "评论"} · {item.comment_count || 0}</button>
                 </div>
                 {item.admin_reply && <div className="admin-reply"><strong><ShieldCheck size={14} /> 管理员回复</strong><p>{item.admin_reply}</p><time>{formatDate(item.replied_at)}</time></div>}
                 {isAdmin && <div className="admin-topic-toolbar" aria-label="管理员话题操作">
@@ -1044,10 +1185,10 @@ function FeedbackView({ account }) {
                     <article className="discussion-comment" key={comment.id}>
                       <div className="comment-rail" aria-hidden="true"><span>{comment.author_name.slice(0, 1)}</span></div>
                       <div className="comment-body">
-                        <header><strong>{comment.author_name}</strong><span>{comment.author_grade || "用户"} · {formatDate(comment.created_at)}</span></header>
+                        <header><strong>{comment.author_name}</strong><span>公开标签 · {comment.author_tag} · {formatDate(comment.created_at)}</span></header>
                         <p>{comment.content}</p>
                         <div className="comment-actions">
-                          <button className={comment.liked_by_me ? "is-liked" : ""} type="button" onClick={() => toggleCommentLike(item.id, comment.id)} aria-pressed={Boolean(comment.liked_by_me)}><ThumbsUp size={13} /> {comment.like_count || 0}</button>
+                          <button className={comment.liked_by_me ? "is-liked" : ""} type="button" onClick={() => toggleCommentLike(item.id, comment.id)} disabled={!canDiscuss} aria-pressed={Boolean(comment.liked_by_me)}><ThumbsUp size={13} /> {comment.like_count || 0}</button>
                           {isAdmin && <button className="comment-delete" type="button" onClick={() => removeComment(comment.id)}><Trash2 size={13} /> {deleteConfirmId === `comment-${comment.id}` ? "确认删除" : "删除"}</button>}
                         </div>
                       </div>
@@ -1056,7 +1197,7 @@ function FeedbackView({ account }) {
                   {openCommentComposerId === item.id && !item.is_closed && <div className="comment-composer" id={`comment-composer-${item.id}`}>
                     <textarea rows={2} maxLength={1000} value={commentDrafts[item.id] || ""} onChange={(event) => setCommentDrafts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="补充你的看法或使用经验" />
                     <div>
-                      {account.authenticated && <label><input type="checkbox" checked={Boolean(commentAnonymous[item.id])} onChange={(event) => setCommentAnonymous((current) => ({ ...current, [item.id]: event.target.checked }))} /> 匿名评论</label>}
+                      <span className="comment-identity">{discussionProfile.displayName} · {discussionProfile.publicTag}</span>
                       <button className="secondary" type="button" disabled={!String(commentDrafts[item.id] || "").trim()} onClick={() => submitComment(item.id)}><Send size={14} /> 发表评论</button>
                     </div>
                   </div>}
@@ -1071,7 +1212,7 @@ function FeedbackView({ account }) {
   );
 }
 
-function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated }) {
+function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [topKeywords, setTopKeywords] = useState([]);
   const [visibleCount, setVisibleCount] = useState(50);
@@ -1237,7 +1378,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
         </div>
         <div className="filter-group">
           <h4>期刊</h4>
-          <div className="keyword-filter-list">
+          <div className="keyword-filter-list journal-filter-list">
             {journals.map((j) => (
               <button
                 key={j.name}
@@ -1441,13 +1582,14 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                   <button title="查看摘要" onClick={() => setSelectedArticle(article)}>
                     <ScrollText size={18} />
                   </button>
-                  <button title={article.is_read ? "取消已读" : "标记已读"} className={`action-read ${article.is_read ? "action-done" : ""}`} onClick={() => markRead(article.id)}>
+                  <button title={canPersonalize ? (article.is_read ? "取消已读" : "标记已读") : "登录个人账户后可标记已读"} className={`action-read ${article.is_read ? "action-done" : ""}`} onClick={() => markRead(article.id)} disabled={!canPersonalize}>
                     <Check size={18} />
                   </button>
                   <button
-                    title={article.is_favorite ? "取消收藏" : "收藏"}
+                    title={canPersonalize ? (article.is_favorite ? "取消收藏" : "收藏") : "登录个人账户后可收藏"}
                     className={article.is_favorite ? "selected" : ""}
                     onClick={() => toggleFavorite(article.id)}
+                    disabled={!canPersonalize}
                   >
                     {article.is_favorite ? <Star size={18} /> : <Heart size={18} />}
                   </button>
@@ -1947,7 +2089,23 @@ function StatsView({ journals, markRead, toggleFavorite }) {
   );
 }
 
-function SettingsView({ settings, availableJournals, status, onSave }) {
+function SettingsView(props) {
+  if (!props.canEdit) return <GuestSettingsView />;
+  return <SettingsEditor {...props} />;
+}
+
+function GuestSettingsView() {
+  return (
+    <section className="profile-layout" aria-labelledby="settings-account-title">
+      <div className="page-intro account-heading">
+        <div><span className="eyebrow">游客模式</span><h1 id="settings-account-title">文献推送设置</h1><p>游客可以浏览文献，但邮箱、订阅期刊和推送计划需要绑定到个人账户。</p></div>
+      </div>
+      <div className="guest-prompt"><UserRound size={20} /><div><strong>登录个人账户后管理自己的设置</strong><p>前往“游客账户”注册或登录，不会影响网页通行证。</p></div></div>
+    </section>
+  );
+}
+
+function SettingsEditor({ settings, availableJournals, status, onSave }) {
   const [selectedJournalNames, setSelectedJournalNames] = useState(
     new Set(settings.journals.map((j) => j.name))
   );

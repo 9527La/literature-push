@@ -139,6 +139,16 @@
 - **设计系统**：基于 CSS 自定义属性（Design Tokens）统一管理配色、阴影、圆角和动效，所有交互元素具备平滑过渡动画和焦点状态反馈。
 - **响应式设计**：适配桌面与移动设备。
 
+### 两层访问控制与账户
+
+网页通行证与个人账户相互独立：
+
+- **网页通行证**：只负责进入站点。默认管理员通行证为 `shenchao`，普通用户通行证为 `lhmktz`；管理员通行证可显示管理中心。
+- **个人账户**：用户自行注册唯一用户名和密码，用于保存阅读/收藏/推送设置以及公共讨论身份。个人账户不授予站点管理员权限。
+- **游客模式**：输入网页通行证后可以直接浏览文献和公开讨论，但不能发帖、评论、点赞、标记阅读、收藏或保存个人设置。
+- **会话限制**：同一个人账户同时只允许一个 IP 保持登录；从其他 IP 登录会使旧会话失效。全站最多允许 20 个不同活跃 IP，最多注册 40 个个人账户。同一 IP 可以登录多个个人账户。
+- **讨论身份**：公开标签按个人账户稳定生成，用户可自行设置发言名称；IP 仅用于会话限制，不会作为公开讨论标签。
+
 ### 定时任务
 - **文献刷新**：根据 Cron 表达式（默认每日 08:00）自动从数据源抓取最新文献。
 - **周报生成与推送**：根据 Cron 表达式（默认每周一 08:00）自动刷新数据、生成周报，并通过邮件推送（如已启用）。
@@ -147,8 +157,20 @@
 
 ## API 接口
 
+除 `/api/gate/login` 和 `/api/gate/session` 外，API 均需要网页通行证请求头 `X-Passport-Token`。个人账户相关接口另需 `X-User-Token`。
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| POST | `/api/gate/login` | 使用管理员或普通网页通行证进入站点 |
+| GET | `/api/gate/session` | 查询网页通行证会话 |
+| GET | `/api/account` | 获取当前个人账户或游客状态 |
+| POST | `/api/auth/register` | 注册个人账户并登录（最多 40 个） |
+| POST | `/api/auth/login` | 登录个人账户（同一账户同一时间仅一个 IP） |
+| GET | `/api/auth/session` | 查询个人账户会话 |
+| POST | `/api/auth/logout` | 退出个人账户 |
+| PUT | `/api/account` | 更新个人资料 |
+| GET | `/api/auth/preferences` | 读取个人远端设置 |
+| PUT | `/api/auth/preferences` | 保存个人远端设置 |
 | GET | `/api/articles` | 获取文献列表（支持 query 筛选） |
 | POST | `/api/articles/:id/read` | 标记文献为已读 |
 | POST | `/api/articles/:id/favorite` | 切换收藏状态 |
@@ -163,6 +185,13 @@
 | GET | `/api/status` | 获取系统状态（文献数、刷新记录等） |
 | POST | `/api/digests/weekly` | 生成周报 |
 | POST | `/api/digests/weekly/email` | 生成周报并邮件推送 |
+| GET | `/api/feedback` | 获取公开讨论（游客可读） |
+| GET | `/api/feedback/profile` | 获取当前账户的讨论身份 |
+| PUT | `/api/feedback/profile` | 设置讨论区发言名称 |
+| POST | `/api/feedback` | 发布讨论（需个人账户） |
+| POST | `/api/feedback/:id/comments` | 发布评论（需个人账户） |
+| POST | `/api/feedback/:id/like` | 点赞/取消点赞讨论 |
+| POST | `/api/feedback/comments/:id/like` | 点赞/取消点赞评论 |
 
 ---
 
@@ -201,6 +230,18 @@ npm run build
 npm start
 ```
 
+首次打开站点时先输入网页通行证（默认管理员 `shenchao` 或普通用户 `lhmktz`）。进入站点后，可以游客浏览；需要参与讨论或保存个人数据时，再到“游客账户”注册/登录个人账户。生产环境请通过 `.env` 修改通行证，并设置随机的 `ADMIN_TOKEN_SECRET`，不要把 `.env` 提交到仓库。
+
+### Cloudflare Tunnel 临时公网访问
+
+服务在本机 `4177` 端口启动后，可以使用 Cloudflare Quick Tunnel 临时生成公网地址：
+
+```powershell
+cloudflared tunnel --url http://127.0.0.1:4177 --no-autoupdate
+```
+
+命令输出的 `https://<随机名称>.trycloudflare.com` 即为临时地址。Quick Tunnel 无固定域名和长期在线保证，进程重启后地址可能变化。若需要固定域名，应在 Cloudflare 中创建 Named Tunnel，并将自己拥有的域名（或子域名）通过 DNS 路由到该 Tunnel。
+
 ### Windows 后台运行
 
 ```powershell
@@ -217,6 +258,13 @@ npm start
 |--------|--------|------|
 | `PORT` | `4177` | 后端服务端口 |
 | `CLIENT_ORIGIN` | `http://127.0.0.1:5173` | 前端 CORS 来源 |
+| `ADMIN_PASSPORT` | `shenchao` | 管理员网页通行证 |
+| `USER_PASSPORT` | `lhmktz` | 普通用户网页通行证 |
+| `PASSPORT_TOKEN_TTL_HOURS` | `24` | 网页通行证令牌有效期（小时） |
+| `ADMIN_TOKEN_SECRET` | （空） | 网页通行证和个人账户令牌签名密钥，生产环境必须设置随机值 |
+| `MAX_PERSONAL_ACCOUNTS` | `40` | 允许注册的个人账户总数上限 |
+| `MAX_ACTIVE_IPS` | `20` | 同时保持个人账户登录的不同 IP 数量上限 |
+| `USER_TOKEN_TTL_DAYS` | `30` | 个人账户会话有效期（天） |
 | `IEEE_API_KEY` | （空） | IEEE Xplore API 密钥（可选） |
 | `PUBLIC_DATA_SOURCES` | `crossref,openalex` | 公开数据源，逗号分隔 |
 | `CROSSREF_MAILTO` | （空） | Crossref polite pool 邮箱 |
@@ -245,6 +293,8 @@ npm start
 | `MAIL_FROM` | （空） | 发件人地址 |
 | `MAIL_TO` | （空） | 默认收件人地址 |
 
+> **安全提示**：`.env`、SQLite 数据库、个人账户会话令牌和第三方 API 密钥均属于私密数据，已由 `.gitignore` 排除，切勿提交到公开仓库。若密钥曾在聊天、日志或截图中暴露，请立即在对应服务中撤销并重新生成。
+
 ---
 
 ## 数据库结构
@@ -255,6 +305,10 @@ npm start
 - **settings**：键值对形式的系统设置（期刊列表、Cron 表达式、邮件配置等）。
 - **refresh_runs**：刷新任务运行记录，含时间、状态、新增数量。
 - **translations**：文献翻译缓存，按文章 ID + 目标语言存储标题、摘要和关键词的翻译结果。
+- **user_accounts**：个人账户凭据、资料和远端个性设置；用户名唯一，最多 40 个账户。
+- **user_sessions**：个人账户会话及登录 IP，用于单账户单 IP 和全站 20 个活跃 IP 限制。
+- **discussion_profiles**：个人账户的稳定公开讨论标签和自定义发言名称。
+- **feedback / feedback_comments**：公共讨论主题、评论及点赞数据。
 
 ---
 
@@ -273,6 +327,7 @@ npm start
 
 | 版本 | 日期 | 说明 |
 |------|------|------|
+| 0.11.0 | 2026-09-03 | 新增网页通行证与个人账户两层认证、游客只读模式、个人讨论身份、单账户单 IP、20 个活跃 IP 和 40 个账户上限；优化认证界面响应式布局 |
 | 0.10.0 | 2026-06-12 | 文献推送功能全面升级：支持每天/每周/每月推送频率，新增期刊范围选择、邮件内容自定义（附件/摘要/关键词/翻译），立即发送按钮 |
 | 0.9.0 | 2026-06-12 | 新增 5 本 Elsevier 期刊订阅（Applied Energy、Energy、IJEPES、Renewable Energy、Journal of Modern Power Systems and Clean Energy），能源类综合期刊自动筛选电气领域相关文献 |
 | 0.8.0 | 2026-06-12 | 关键词统计页新增文献详情弹窗：点击文献可查看完整摘要、关键词翻译、DOI 等信息，支持标记已读/收藏和打开原文链接 |
@@ -286,4 +341,4 @@ npm start
 
 ---
 
-*最后更新：2026-06-12*
+*最后更新：2026-09-03*

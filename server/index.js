@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,9 +30,13 @@ import {
   updateUserProfile,
   getUserAccountByUsername,
   getUserAccountById,
-  isUserAccountAdmin,
-  hasUserAccountForIp,
+  getUserAccountCount,
   createUserAccount,
+  createUserSession,
+  getActiveUserSession,
+  touchUserSession,
+  revokeUserSession,
+  deleteUserAccount,
   getAdminOverview,
   saveRemotePreferences,
   getRemotePreferences,
@@ -45,9 +50,18 @@ import {
   replyFeedback,
   closeFeedback,
   deleteFeedback,
-  deleteFeedbackComment
+  deleteFeedbackComment,
+  getDiscussionProfile,
+  updateDiscussionProfile
 } from "./db.js";
-import { createUserToken, getUserClaims, hashUserPassword, requireUser, verifyUserPassword } from "./user-auth.js";
+import {
+  createPassportToken,
+  createUserToken,
+  getPassportClaims,
+  getUserClaims,
+  hashUserPassword,
+  verifyUserPassword
+} from "./user-auth.js";
 import { crawlArticleDetails } from "./crawler.js";
 import { translateArticle } from "./translate.js";
 import { refreshArticles, rescheduleRefresh, scheduleRefresh, enrichMissingKeywords } from "./refresh.js";
@@ -58,6 +72,12 @@ import { createArticlePreparationService } from "./prepare.js";
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Cloudflare Tunnel connects to this service through the local loopback
+// interface. Trust only loopback proxies so req.ip resolves the original
+// client address without allowing direct LAN clients to spoof forwarding
+// headers.
+app.set("trust proxy", "loopback");
 
 app.use(cors({ origin: config.clientOrigin }));
 app.use(express.json());
@@ -77,6 +97,15 @@ const articlePreparation = createArticlePreparationService({
 }, {
   concurrency: pagePrepareConcurrency,
   maxItems: config.pagePrepareMaxItems
+});
+
+const publicApiPaths = new Set(["/gate/login", "/gate/session"]);
+app.use("/api", (req, res, next) => {
+  if (publicApiPaths.has(req.path)) {
+    next();
+    return;
+  }
+  requirePassport(req, res, next);
 });
 
 app.get("/api/articles", (req, res) => {
@@ -101,13 +130,13 @@ app.get("/api/articles/prepare/:jobId", (req, res) => {
   res.json(job);
 });
 
-app.post("/api/articles/:id/read", (req, res) => {
+app.post("/api/articles/:id/read", requireAccount, (req, res) => {
   const userId = getPrincipalId(req);
   const isRead = setArticleReadForUser(userId, Number(req.params.id));
   res.json({ ok: true, isRead: Boolean(isRead) });
 });
 
-app.post("/api/articles/:id/favorite", (req, res) => {
+app.post("/api/articles/:id/favorite", requireAccount, (req, res) => {
   const userId = getPrincipalId(req);
   const article = toggleArticleFavoriteForUser(userId, Number(req.params.id));
   if (!article) {
@@ -184,7 +213,7 @@ app.get("/api/settings", (req, res) => {
   res.json(getUserSettings(userId));
 });
 
-app.put("/api/settings", (req, res) => {
+app.put("/api/settings", requireAccount, (req, res) => {
   const userId = getPrincipalId(req);
   const settings = updateUserSettings(userId, req.body);
   rescheduleRefresh();
@@ -220,7 +249,7 @@ app.post("/api/digests/weekly", asyncHandler(async (req, res) => {
   res.json(result);
 }));
 
-app.post("/api/digests/weekly/email", asyncHandler(async (req, res) => {
+app.post("/api/digests/weekly/email", requireAccount, asyncHandler(async (req, res) => {
   const settings = getSettings();
   const digest = await generateWeeklyDigestMarkdown(settings);
   const sent = await sendMarkdownDigestEmail(digest.filePath, {
@@ -234,7 +263,7 @@ app.post("/api/digests/weekly/email", asyncHandler(async (req, res) => {
 }));
 
 // New push endpoint
-app.post("/api/push/send", asyncHandler(async (req, res) => {
+app.post("/api/push/send", requireAccount, asyncHandler(async (req, res) => {
   const userId = getPrincipalId(req);
   const userEmail = getUserEmail(userId);
   const settings = getUserSettings(userId);
@@ -266,17 +295,64 @@ app.post("/api/push/send", asyncHandler(async (req, res) => {
 
 // ── Helper ──
 function getClientIp(req) {
-  return req.socket.remoteAddress?.replace("::ffff:", "") || "unknown";
+  return req.ip?.replace("::ffff:", "") || "unknown";
+}
+
+function getActivePassportClaims(req) {
+  const claims = req.passportClaims || getPassportClaims(req);
+  if (claims) req.passportClaims = claims;
+  return claims;
+}
+
+function getActiveUserClaims(req) {
+  const claims = getUserClaims(req);
+  const session = claims && getActiveUserSession(claims.sessionId, claims.accountId);
+  if (!claims || !session) return null;
+  // Bind the bearer token to the IP that created the session. This prevents a
+  // copied token from silently becoming a second active IP for the account.
+  if (session.login_ip !== getClientIp(req)) return null;
+  touchUserSession(claims.sessionId);
+  return claims;
+}
+
+function requirePassport(req, res, next) {
+  const claims = getActivePassportClaims(req);
+  if (!claims) {
+    res.status(401).json({ error: "请输入网页通行证" });
+    return;
+  }
+  next();
+}
+
+function requireAccount(req, res, next) {
+  const claims = req.userClaims || getActiveUserClaims(req);
+  if (!claims) {
+    res.status(401).json({ error: "请先登录个人账户" });
+    return;
+  }
+  req.userClaims = claims;
+  next();
 }
 
 function getPrincipalId(req) {
-  const claims = getUserClaims(req);
-  return claims ? `account:${claims.accountId}` : getClientIp(req);
+  const claims = req.userClaims || getActiveUserClaims(req);
+  return claims ? `account:${claims.accountId}` : null;
+}
+
+function getDiscussionIdentity(req) {
+  const claims = req.userClaims || getActiveUserClaims(req);
+  if (!claims) return null;
+  const userId = `account:${claims.accountId}`;
+  const publicTag = crypto.createHmac("sha256", config.adminTokenSecret || "discussion-tag")
+    .update(userId)
+    .digest("hex")
+    .slice(0, 8)
+    .toUpperCase();
+  return { userId, publicTag, profile: getDiscussionProfile(userId, publicTag) };
 }
 
 function hasSiteAdminPermission(req) {
-  const claims = getUserClaims(req);
-  return Boolean(claims && isUserAccountAdmin(claims.accountId));
+  return getActivePassportClaims(req)?.role === "admin";
 }
 
 function requireSiteAdmin(req, res, next) {
@@ -287,42 +363,77 @@ function requireSiteAdmin(req, res, next) {
   next();
 }
 
+function safeEqualText(value, expected) {
+  const actual = Buffer.from(String(value || ""));
+  const target = Buffer.from(String(expected || ""));
+  return actual.length === target.length && actual.length > 0 && crypto.timingSafeEqual(actual, target);
+}
+
+function issueAccountSession(account, ip, now = Date.now()) {
+  const sessionId = crypto.randomUUID();
+  const expiresAt = now + config.userTokenTtlDays * 24 * 60 * 60 * 1000;
+  const session = createUserSession({
+    sessionId,
+    accountId: account.id,
+    loginIp: ip,
+    role: account.role || "user",
+    expiresAt,
+    now
+  });
+  if (!session.ok) return { ...session, sessionId, expiresAt };
+  return {
+    ok: true,
+    token: createUserToken(account.id, sessionId, expiresAt, now),
+    sessionId,
+    expiresAt
+  };
+}
+
 function buildAccountResponse(req) {
-  const claims = getUserClaims(req);
-  const ip = getClientIp(req);
+  const claims = getActiveUserClaims(req);
+  const passport = getActivePassportClaims(req);
   if (!claims) {
     return {
-      ...getUserProfile(ip),
       authenticated: false,
-      can_register: !hasUserAccountForIp(ip),
+      can_register: getUserAccountCount() < config.maxPersonalAccounts,
       username: "",
       role: "guest",
-      is_admin: false
+      is_admin: passport?.role === "admin",
+      passport_authenticated: Boolean(passport),
+      passport_role: passport?.role || ""
     };
   }
   const account = getUserAccountById(claims.accountId);
-  if (!account) return { ...getUserProfile(ip), authenticated: false, can_register: !hasUserAccountForIp(ip), username: "", role: "guest", is_admin: false };
+  if (!account) return { authenticated: false, can_register: getUserAccountCount() < config.maxPersonalAccounts, username: "", role: "guest", is_admin: passport?.role === "admin", passport_authenticated: Boolean(passport), passport_role: passport?.role || "" };
   return {
     ...getUserProfile(`account:${account.id}`),
     authenticated: true,
     can_register: false,
     username: account.username,
     role: account.role || "user",
-    is_admin: account.role === "super_admin",
-    preferences_updated_at: account.preferences_updated_at
+    is_admin: passport?.role === "admin",
+    passport_authenticated: Boolean(passport),
+    passport_role: passport?.role || "",
+    preferences_updated_at: account.preferences_updated_at,
+    session_ip: getActiveUserSession(claims.sessionId, claims.accountId)?.login_ip || ""
   };
 }
 
 // ── User Identity ──
 app.get("/api/me", (req, res) => {
-  res.json({ userId: getPrincipalId(req), authenticated: Boolean(getUserClaims(req)), is_admin: hasSiteAdminPermission(req) });
+  res.json({
+    userId: getPrincipalId(req),
+    authenticated: Boolean(getActiveUserClaims(req)),
+    is_admin: hasSiteAdminPermission(req),
+    passport_role: getActivePassportClaims(req)?.role || ""
+  });
 });
 
 app.get("/api/account", (req, res) => {
   res.json(buildAccountResponse(req));
 });
 
-app.put("/api/account", requireUser, (req, res) => {
+app.put("/api/account", requireAccount, (req, res) => {
   const email = String(req.body?.email ?? "").trim();
   const name = String(req.body?.name ?? "").trim();
   const enrollmentYear = Number(req.body?.enrollment_year);
@@ -335,11 +446,11 @@ app.put("/api/account", requireUser, (req, res) => {
     res.status(400).json({ error: "姓名不能超过 40 个字符" });
     return;
   }
-  if (!Number.isInteger(enrollmentYear) || enrollmentYear < 1980 || enrollmentYear > new Date().getFullYear() + 1) {
+  if (req.body?.enrollment_year !== undefined && req.body?.enrollment_year !== "" && (!Number.isInteger(enrollmentYear) || enrollmentYear < 1980 || enrollmentYear > new Date().getFullYear() + 1)) {
     res.status(400).json({ error: "请输入有效的入学年份" });
     return;
   }
-  if (!["硕士", "博士"].includes(degree)) {
+  if (degree && !["硕士", "博士"].includes(degree)) {
     res.status(400).json({ error: "学历只能选择硕士或博士" });
     return;
   }
@@ -354,6 +465,37 @@ app.put("/api/account", requireUser, (req, res) => {
 
 const userLoginAttempts = new Map();
 
+app.post("/api/gate/login", (req, res) => {
+  const passport = String(req.body?.passport || "");
+  const role = safeEqualText(passport, config.adminPassport)
+    ? "admin"
+    : safeEqualText(passport, config.userPassport)
+      ? "user"
+      : "";
+  if (!role) {
+    res.status(401).json({ error: "网页通行证错误" });
+    return;
+  }
+  const now = Date.now();
+  const expiresAt = now + config.passportTokenTtlHours * 60 * 60 * 1000;
+  res.json({
+    token: createPassportToken(role, now),
+    role,
+    isAdmin: role === "admin",
+    expiresAt: new Date(expiresAt).toISOString()
+  });
+});
+
+app.get("/api/gate/session", (req, res) => {
+  const passport = getActivePassportClaims(req);
+  res.json({
+    authenticated: Boolean(passport),
+    role: passport?.role || "",
+    isAdmin: passport?.role === "admin",
+    expiresAt: passport ? new Date(Number(passport.exp)).toISOString() : null
+  });
+});
+
 app.post("/api/auth/register", (req, res) => {
   const username = String(req.body?.username || "").trim();
   const password = String(req.body?.password || "");
@@ -366,33 +508,36 @@ app.post("/api/auth/register", (req, res) => {
     res.status(400).json({ error: "密码长度须为 8 至 72 个字符" });
     return;
   }
-  if (hasUserAccountForIp(ip)) {
-    res.status(409).json({ error: "当前 IP 已注册过账户，每个 IP 只能注册一个账户" });
-    return;
-  }
-  if (getUserAccountByUsername(username)) {
-    res.status(409).json({ error: "该用户名已被使用" });
-    return;
-  }
   const credentials = hashUserPassword(password);
+  let account;
   try {
-    const account = createUserAccount({ username, passwordHash: credentials.hash, passwordSalt: credentials.salt, registeredIp: ip });
-    const token = createUserToken(account.id);
-    res.status(201).json({
-      token,
-      account: {
-        ...getUserProfile(`account:${account.id}`),
-        authenticated: true,
-        can_register: false,
-        username: account.username,
-        role: account.role || "user",
-        is_admin: account.role === "super_admin",
-        preferences_updated_at: account.preferences_updated_at
-      }
-    });
+    account = createUserAccount({ username, passwordHash: credentials.hash, passwordSalt: credentials.salt, registeredIp: ip });
   } catch (error) {
-    res.status(409).json({ error: error.message?.includes("registered_ip") ? "当前 IP 已注册过账户" : "用户名已被使用" });
+    const message = String(error.message || "");
+    res.status(409).json({ error: message.includes("上限") ? message : "该用户名已被使用或账户无法创建" });
+    return;
   }
+  const session = issueAccountSession(account, ip);
+  if (!session.ok) {
+    deleteUserAccount(account.id);
+    res.status(409).json({ error: session.reason === "active_ip_limit" ? "当前同时登录 IP 已达到 20 个上限" : "当前 IP 无法登录该账户" });
+    return;
+  }
+  res.status(201).json({
+    token: session.token,
+    expiresAt: new Date(session.expiresAt).toISOString(),
+    account: {
+      ...getUserProfile(`account:${account.id}`),
+      authenticated: true,
+      can_register: false,
+      username: account.username,
+      role: "user",
+      is_admin: hasSiteAdminPermission(req),
+      passport_authenticated: true,
+      passport_role: getActivePassportClaims(req)?.role || "user",
+      preferences_updated_at: account.preferences_updated_at
+    }
+  });
 });
 
 app.post("/api/auth/login", (req, res) => {
@@ -412,14 +557,32 @@ app.post("/api/auth/login", (req, res) => {
     return;
   }
   userLoginAttempts.delete(ip);
-  res.json({ token: createUserToken(account.id), username: account.username, expiresInDays: config.userTokenTtlDays });
+  const session = issueAccountSession(account, ip, now);
+  if (!session.ok) {
+    const error = session.reason === "active_ip_limit"
+      ? "当前同时登录 IP 已达到 20 个上限"
+      : "当前 IP 无法登录该个人账户";
+    res.status(409).json({ error });
+    return;
+  }
+  res.json({
+    token: session.token,
+    username: account.username,
+    expiresAt: new Date(session.expiresAt).toISOString(),
+    sessionLimit: 1
+  });
 });
 
 app.get("/api/auth/session", (req, res) => {
   res.json(buildAccountResponse(req));
 });
 
-app.put("/api/auth/preferences", requireUser, (req, res) => {
+app.post("/api/auth/logout", requireAccount, (req, res) => {
+  revokeUserSession(req.userClaims.sessionId);
+  res.json({ ok: true });
+});
+
+app.put("/api/auth/preferences", requireAccount, (req, res) => {
   const preferences = req.body?.preferences;
   if (!preferences || typeof preferences !== "object" || Array.isArray(preferences)) {
     res.status(400).json({ error: "个性设置格式无效" });
@@ -432,12 +595,12 @@ app.put("/api/auth/preferences", requireUser, (req, res) => {
   res.json(saveRemotePreferences(req.userClaims.accountId, preferences));
 });
 
-app.get("/api/auth/preferences", requireUser, (req, res) => {
+app.get("/api/auth/preferences", requireAccount, (req, res) => {
   res.json(getRemotePreferences(req.userClaims.accountId));
 });
 
 // ── User Email ──
-app.post("/api/user-email", (req, res) => {
+app.post("/api/user-email", requireAccount, (req, res) => {
   const userId = getPrincipalId(req);
   const email = String(req.body?.email || "").trim();
   if (!email || !email.includes("@")) {
@@ -447,7 +610,7 @@ app.post("/api/user-email", (req, res) => {
   res.json(setUserEmail(userId, email));
 });
 
-app.get("/api/user-email", (req, res) => {
+app.get("/api/user-email", requireAccount, (req, res) => {
   const userId = getPrincipalId(req);
   const record = getUserEmail(userId);
   res.json(record || { userId, email: "" });
@@ -458,7 +621,7 @@ app.get("/api/user-emails", requireSiteAdmin, (req, res) => {
 });
 
 // ── Test Email (weekly digest to user) ──
-app.post("/api/test-email", asyncHandler(async (req, res) => {
+app.post("/api/test-email", requireAccount, asyncHandler(async (req, res) => {
   const userId = getPrincipalId(req);
   const record = getUserEmail(userId);
   if (!record?.email) {
@@ -491,11 +654,31 @@ app.post("/api/test-email", asyncHandler(async (req, res) => {
 
 // ── Public Feedback ──
 app.get("/api/feedback", (req, res) => {
-  res.json(listPublicFeedback(req.query.limit, getPrincipalId(req)));
+  const identity = getDiscussionIdentity(req);
+  res.json(listPublicFeedback(req.query.limit, identity?.userId || ""));
 });
 
-app.post("/api/feedback", (req, res) => {
-  const userId = getPrincipalId(req);
+app.get("/api/feedback/profile", (req, res) => {
+  const identity = getDiscussionIdentity(req);
+  res.json(identity?.profile || { displayName: "", publicTag: "" });
+});
+
+app.put("/api/feedback/profile", requireAccount, (req, res) => {
+  const identity = getDiscussionIdentity(req);
+  const displayName = String(req.body?.displayName || "").trim();
+  if (!displayName || displayName.length > 24) {
+    res.status(400).json({ error: "发言名称须为 1 至 24 个字符" });
+    return;
+  }
+  res.json(updateDiscussionProfile(identity.userId, identity.publicTag, displayName));
+});
+
+app.post("/api/feedback", requireAccount, (req, res) => {
+  const { userId, profile } = getDiscussionIdentity(req);
+  if (!profile.displayName) {
+    res.status(400).json({ error: "请先设置发言名称" });
+    return;
+  }
   if (getRecentFeedbackCount(userId) >= 1) {
     res.status(429).json({ error: "每小时只能提交一次反馈" });
     return;
@@ -509,13 +692,15 @@ app.post("/api/feedback", (req, res) => {
     res.status(400).json({ error: "反馈内容不能超过 2000 个字符" });
     return;
   }
-  const profile = getUserProfile(userId);
-  const isAnonymous = !getUserClaims(req) || Boolean(req.body?.anonymous);
-  res.status(201).json(addFeedback(userId, profile.email || "", content, isAnonymous));
+  res.status(201).json(addFeedback(userId, "", content, false));
 });
 
-app.post("/api/feedback/:id/comments", (req, res) => {
-  const userId = getPrincipalId(req);
+app.post("/api/feedback/:id/comments", requireAccount, (req, res) => {
+  const { userId, profile } = getDiscussionIdentity(req);
+  if (!profile.displayName) {
+    res.status(400).json({ error: "请先设置发言名称" });
+    return;
+  }
   if (getRecentFeedbackCommentCount(userId) >= 10) {
     res.status(429).json({ error: "每小时最多发布 10 条评论" });
     return;
@@ -525,8 +710,7 @@ app.post("/api/feedback/:id/comments", (req, res) => {
     res.status(400).json({ error: "评论须为 1 至 1000 个字符" });
     return;
   }
-  const isAnonymous = !getUserClaims(req) || Boolean(req.body?.anonymous);
-  const comment = addFeedbackComment(req.params.id, userId, content, isAnonymous);
+  const comment = addFeedbackComment(req.params.id, userId, content, false);
   if (!comment) {
     res.status(404).json({ error: "讨论不存在" });
     return;
@@ -538,8 +722,8 @@ app.post("/api/feedback/:id/comments", (req, res) => {
   res.status(201).json(comment);
 });
 
-app.post("/api/feedback/:id/like", (req, res) => {
-  const result = toggleFeedbackLike(req.params.id, getPrincipalId(req));
+app.post("/api/feedback/:id/like", requireAccount, (req, res) => {
+  const result = toggleFeedbackLike(req.params.id, getDiscussionIdentity(req).userId);
   if (!result) {
     res.status(404).json({ error: "讨论不存在" });
     return;
@@ -547,8 +731,8 @@ app.post("/api/feedback/:id/like", (req, res) => {
   res.json(result);
 });
 
-app.post("/api/feedback/comments/:id/like", (req, res) => {
-  const result = toggleFeedbackCommentLike(req.params.id, getPrincipalId(req));
+app.post("/api/feedback/comments/:id/like", requireAccount, (req, res) => {
+  const result = toggleFeedbackCommentLike(req.params.id, getDiscussionIdentity(req).userId);
   if (!result) {
     res.status(404).json({ error: "评论不存在" });
     return;

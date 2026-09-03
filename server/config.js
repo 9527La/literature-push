@@ -52,6 +52,12 @@ export const DEFAULT_JOURNAL_BY_NAME = new Map(DEFAULT_JOURNALS.map((journal) =>
 export const config = {
   port: Number(process.env.PORT || 4177),
   clientOrigin: process.env.CLIENT_ORIGIN || "http://127.0.0.1:5173",
+  // The passport opens the site; it is deliberately separate from personal accounts.
+  adminPassport: process.env.ADMIN_PASSPORT || "shenchao",
+  userPassport: process.env.USER_PASSPORT || "lhmktz",
+  passportTokenTtlHours: Number(process.env.PASSPORT_TOKEN_TTL_HOURS || 24),
+  maxPersonalAccounts: Number(process.env.MAX_PERSONAL_ACCOUNTS || 40),
+  maxActiveIps: Number(process.env.MAX_ACTIVE_IPS || 20),
   adminPassword: process.env.ADMIN_PASSWORD || "",
   adminTokenSecret: process.env.ADMIN_TOKEN_SECRET || process.env.ADMIN_PASSWORD || "",
   adminTokenTtlHours: Number(process.env.ADMIN_TOKEN_TTL_HOURS || 12),

@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DEFAULT_JOURNAL_BY_NAME, DEFAULT_JOURNALS, config } from "./config.js";
@@ -95,6 +96,27 @@ db.exec(`
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS user_sessions (
+    session_id TEXT PRIMARY KEY,
+    account_id INTEGER NOT NULL,
+    login_ip TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL,
+    revoked_at INTEGER,
+    FOREIGN KEY (account_id) REFERENCES user_accounts(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_user_sessions_account_active
+    ON user_sessions(account_id, revoked_at, expires_at);
+
+  CREATE TABLE IF NOT EXISTS discussion_profiles (
+    user_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL DEFAULT '',
+    public_tag TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS feedback (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id TEXT NOT NULL,
@@ -181,8 +203,9 @@ for (const migration of [
     if (!error.message?.includes("duplicate column")) throw error;
   }
 }
-db.prepare("UPDATE user_accounts SET role = 'user' WHERE role = 'super_admin' AND username <> ? COLLATE NOCASE").run(config.superAdminUsername);
-db.prepare("UPDATE user_accounts SET role = 'super_admin' WHERE username = ? COLLATE NOCASE").run(config.superAdminUsername);
+// Site administration is now granted by the separate admin web passport;
+// personal accounts never carry site-wide administrator privileges.
+db.prepare("UPDATE user_accounts SET role = 'user' WHERE role IS NULL OR role <> 'user'").run();
 db.exec("UPDATE user_emails SET updated_at = created_at WHERE updated_at IS NULL OR updated_at = ''");
 
 db.exec("UPDATE articles SET first_seen_at = fetched_at WHERE first_seen_at IS NULL OR first_seen_at = ''");
@@ -589,6 +612,10 @@ export function getUserInteractionsMap(userId, articleIds) {
 }
 
 export function getUserStatus(userId) {
+  const articleCount = db.prepare("SELECT COUNT(*) AS count FROM articles").get().count;
+  if (!userId) {
+    return { articleCount, unreadCount: 0, favoriteCount: 0, readCount: 0 };
+  }
   const unreadCount = db.prepare(`
     SELECT COUNT(*) AS count FROM articles a
     WHERE NOT EXISTS (
@@ -596,7 +623,6 @@ export function getUserStatus(userId) {
       WHERE ui.user_id = ? AND ui.article_id = a.id AND ui.is_read = 1
     )
   `).get(userId).count;
-  const articleCount = db.prepare("SELECT COUNT(*) AS count FROM articles").get().count;
   const favoriteCount = db.prepare("SELECT COUNT(*) AS count FROM user_interactions WHERE user_id = ? AND is_favorite = 1").get(userId).count;
   const readCount = db.prepare("SELECT COUNT(*) AS count FROM user_interactions WHERE user_id = ? AND is_read = 1").get(userId).count;
   return { articleCount, unreadCount, favoriteCount, readCount };
@@ -852,54 +878,110 @@ export function getUserAccountById(id) {
   return db.prepare("SELECT id, username, role, registered_ip, preferences_updated_at, created_at, updated_at FROM user_accounts WHERE id = ?").get(Number(id)) || null;
 }
 
+export function getUserAccountCount() {
+  return Number(db.prepare("SELECT COUNT(*) AS count FROM user_accounts").get()?.count || 0);
+}
+
 export function isUserAccountAdmin(id) {
   return getUserAccountById(id)?.role === "super_admin";
 }
 
 export function hasUserAccountForIp(ip) {
-  return Boolean(db.prepare("SELECT 1 FROM user_accounts WHERE registered_ip = ?").get(ip));
+  // Kept for compatibility with older callers. Registration is no longer
+  // restricted by IP, so this must never be used as an admission check.
+  return false;
+}
+
+export function createUserSession({ sessionId, accountId, loginIp, role, expiresAt, now = Date.now() }) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("DELETE FROM user_sessions WHERE expires_at <= ? OR (revoked_at IS NOT NULL AND revoked_at <= ?)").run(now, now - 7 * 24 * 60 * 60 * 1000);
+    const activeSessions = db.prepare(`
+      SELECT session_id, login_ip, created_at
+      FROM user_sessions
+      WHERE account_id = ? AND revoked_at IS NULL AND expires_at > ?
+      ORDER BY created_at ASC
+    `).all(Number(accountId), now);
+
+    // A personal account may have multiple browser sessions, but only one
+    // active IP at a time. A login from another IP takes over the account and
+    // revokes its previous sessions, so the old browser cannot keep writing.
+    if (activeSessions.some((session) => session.login_ip !== loginIp)) {
+      db.prepare("UPDATE user_sessions SET revoked_at = ? WHERE account_id = ? AND revoked_at IS NULL").run(now, Number(accountId));
+    }
+
+    // The site-wide cap is measured in distinct active IPs, not sessions.
+    const activeIpCount = Number(db.prepare(`
+      SELECT COUNT(DISTINCT login_ip) AS count
+      FROM user_sessions
+      WHERE revoked_at IS NULL AND expires_at > ?
+    `).get(now)?.count || 0);
+    const alreadyActiveFromIp = Boolean(db.prepare(`
+      SELECT 1 FROM user_sessions
+      WHERE login_ip = ? AND revoked_at IS NULL AND expires_at > ?
+      LIMIT 1
+    `).get(loginIp, now));
+    if (!alreadyActiveFromIp && activeIpCount >= config.maxActiveIps) {
+      db.exec("ROLLBACK");
+      return { ok: false, reason: "active_ip_limit" };
+    }
+
+    db.prepare(`
+      INSERT INTO user_sessions (session_id, account_id, login_ip, expires_at, created_at, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(sessionId, Number(accountId), loginIp, Number(expiresAt), now, now);
+    db.exec("COMMIT");
+    return { ok: true };
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function getActiveUserSession(sessionId, accountId, now = Date.now()) {
+  return db.prepare(`
+    SELECT session_id, account_id, login_ip, expires_at, created_at, last_seen_at
+    FROM user_sessions
+    WHERE session_id = ? AND account_id = ? AND revoked_at IS NULL AND expires_at > ?
+  `).get(String(sessionId || ""), Number(accountId), now) || null;
+}
+
+export function touchUserSession(sessionId, now = Date.now()) {
+  db.prepare("UPDATE user_sessions SET last_seen_at = ? WHERE session_id = ? AND revoked_at IS NULL").run(now, String(sessionId || ""));
+}
+
+export function revokeUserSession(sessionId, now = Date.now()) {
+  return db.prepare("UPDATE user_sessions SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL").run(now, String(sessionId || "")).changes > 0;
 }
 
 export function createUserAccount({ username, passwordHash, passwordSalt, registeredIp }) {
-  db.exec("BEGIN");
+  db.exec("BEGIN IMMEDIATE");
   try {
+    const accountCount = Number(db.prepare("SELECT COUNT(*) AS count FROM user_accounts").get()?.count || 0);
+    if (accountCount >= config.maxPersonalAccounts) {
+      throw new Error("个人账户数量已达到上限");
+    }
+    if (getUserAccountByUsername(username)) {
+      throw new Error("该用户名已被使用");
+    }
+    // registered_ip is a legacy column retained for old databases. Store a
+    // unique marker instead of a real IP so the account is never IP-bound.
+    const registrationMarker = `unbound:${crypto.randomUUID()}`;
     const result = db.prepare(`
       INSERT INTO user_accounts (username, password_hash, password_salt, registered_ip, role)
       VALUES (?, ?, ?, ?, ?)
-    `).run(username, passwordHash, passwordSalt, registeredIp,
-      String(username).toLocaleLowerCase() === String(config.superAdminUsername).toLocaleLowerCase() ? "super_admin" : "user");
+    `).run(username, passwordHash, passwordSalt, registrationMarker, "user");
     const accountId = Number(result.lastInsertRowid);
-    const principalId = `account:${accountId}`;
-    const existingProfile = getUserProfile(registeredIp);
-    updateUserProfile(principalId, existingProfile);
-    db.prepare(`
-      INSERT OR IGNORE INTO user_journals (user_id, journal_name)
-      SELECT ?, journal_name FROM user_journals WHERE user_id = ?
-    `).run(principalId, registeredIp);
-    db.prepare(`
-      INSERT OR IGNORE INTO user_interactions (user_id, article_id, is_read, is_favorite, updated_at)
-      SELECT ?, article_id, is_read, is_favorite, updated_at FROM user_interactions WHERE user_id = ?
-    `).run(principalId, registeredIp);
-    db.prepare(`
-      INSERT OR IGNORE INTO user_settings (user_id, key, value, updated_at)
-      SELECT ?, key, value, updated_at FROM user_settings WHERE user_id = ?
-    `).run(principalId, registeredIp);
-    db.prepare("UPDATE feedback SET user_id = ? WHERE user_id = ?").run(principalId, registeredIp);
-    db.prepare("UPDATE feedback_comments SET user_id = ? WHERE user_id = ?").run(principalId, registeredIp);
-    db.prepare("UPDATE OR IGNORE feedback_likes SET user_id = ? WHERE user_id = ?").run(principalId, registeredIp);
-    db.prepare("UPDATE OR IGNORE feedback_comment_likes SET user_id = ? WHERE user_id = ?").run(principalId, registeredIp);
-    db.prepare("DELETE FROM feedback_likes WHERE user_id = ?").run(registeredIp);
-    db.prepare("DELETE FROM feedback_comment_likes WHERE user_id = ?").run(registeredIp);
-    db.prepare("DELETE FROM user_interactions WHERE user_id = ?").run(registeredIp);
-    db.prepare("DELETE FROM user_journals WHERE user_id = ?").run(registeredIp);
-    db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(registeredIp);
-    db.prepare("DELETE FROM user_emails WHERE user_id = ?").run(registeredIp);
     db.exec("COMMIT");
     return getUserAccountById(accountId);
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
+}
+
+export function deleteUserAccount(accountId) {
+  return db.prepare("DELETE FROM user_accounts WHERE id = ?").run(Number(accountId)).changes > 0;
 }
 
 export function getAdminOverview() {
@@ -965,6 +1047,31 @@ export function getRemotePreferences(accountId) {
 
 // ── Feedback ──
 
+export function getDiscussionProfile(userId, publicTag) {
+  db.prepare(`
+    INSERT INTO discussion_profiles (user_id, public_tag, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET public_tag = excluded.public_tag
+  `).run(userId, publicTag);
+  const row = db.prepare("SELECT display_name, public_tag FROM discussion_profiles WHERE user_id = ?").get(userId);
+  return {
+    displayName: row?.display_name || "",
+    publicTag: row?.public_tag || publicTag
+  };
+}
+
+export function updateDiscussionProfile(userId, publicTag, displayName) {
+  db.prepare(`
+    INSERT INTO discussion_profiles (user_id, display_name, public_tag, updated_at)
+    VALUES (?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id) DO UPDATE SET
+      display_name = excluded.display_name,
+      public_tag = excluded.public_tag,
+      updated_at = datetime('now')
+  `).run(userId, displayName, publicTag);
+  return getDiscussionProfile(userId, publicTag);
+}
+
 export function getRecentFeedbackCount(userId) {
   const row = db.prepare(
     "SELECT COUNT(*) as count FROM feedback WHERE user_id = ? AND created_at > datetime('now', '-1 hour')"
@@ -989,18 +1096,13 @@ export function addFeedback(userId, email, content, isAnonymous = false) {
 export function listPublicFeedback(limit = 100, userId = "") {
   const discussions = db.prepare(`
     SELECT f.id, f.content, f.admin_reply, f.replied_at, f.created_at, f.is_closed, f.closed_at,
-      CASE WHEN f.is_anonymous = 1 THEN '匿名用户' ELSE COALESCE(NULLIF(u.name, ''), '匿名用户') END AS author_name,
-      CASE
-        WHEN f.is_anonymous = 1 THEN ''
-        WHEN u.enrollment_year IS NOT NULL AND u.degree <> '' THEN CAST(u.enrollment_year AS TEXT) || '级 ' || u.degree
-        WHEN u.enrollment_year IS NOT NULL THEN CAST(u.enrollment_year AS TEXT) || '级'
-        ELSE COALESCE(NULLIF(u.degree, ''), '')
-      END AS author_grade,
+      COALESCE(NULLIF(p.display_name, ''), '用户-' || COALESCE(NULLIF(p.public_tag, ''), '历史')) AS author_name,
+      COALESCE(NULLIF(p.public_tag, ''), '历史') AS author_tag,
       (SELECT COUNT(*) FROM feedback_likes fl WHERE fl.feedback_id = f.id) AS like_count,
       EXISTS(SELECT 1 FROM feedback_likes fl WHERE fl.feedback_id = f.id AND fl.user_id = ?) AS liked_by_me,
       (SELECT COUNT(*) FROM feedback_comments c WHERE c.feedback_id = f.id) AS comment_count
     FROM feedback f
-    LEFT JOIN user_emails u ON u.user_id = f.user_id
+    LEFT JOIN discussion_profiles p ON p.user_id = f.user_id
     ORDER BY f.created_at DESC, f.id DESC
     LIMIT ?
   `).all(userId, Math.min(Math.max(Number(limit) || 100, 1), 200));
@@ -1009,17 +1111,12 @@ export function listPublicFeedback(limit = 100, userId = "") {
   const placeholders = discussions.map(() => "?").join(",");
   const comments = db.prepare(`
     SELECT c.id, c.feedback_id, c.content, c.created_at,
-      CASE WHEN c.is_anonymous = 1 THEN '匿名用户' ELSE COALESCE(NULLIF(u.name, ''), '匿名用户') END AS author_name,
-      CASE
-        WHEN c.is_anonymous = 1 THEN ''
-        WHEN u.enrollment_year IS NOT NULL AND u.degree <> '' THEN CAST(u.enrollment_year AS TEXT) || '级 ' || u.degree
-        WHEN u.enrollment_year IS NOT NULL THEN CAST(u.enrollment_year AS TEXT) || '级'
-        ELSE COALESCE(NULLIF(u.degree, ''), '')
-      END AS author_grade,
+      COALESCE(NULLIF(p.display_name, ''), '用户-' || COALESCE(NULLIF(p.public_tag, ''), '历史')) AS author_name,
+      COALESCE(NULLIF(p.public_tag, ''), '历史') AS author_tag,
       (SELECT COUNT(*) FROM feedback_comment_likes cl WHERE cl.comment_id = c.id) AS like_count,
       EXISTS(SELECT 1 FROM feedback_comment_likes cl WHERE cl.comment_id = c.id AND cl.user_id = ?) AS liked_by_me
     FROM feedback_comments c
-    LEFT JOIN user_emails u ON u.user_id = c.user_id
+    LEFT JOIN discussion_profiles p ON p.user_id = c.user_id
     WHERE c.feedback_id IN (${placeholders})
     ORDER BY c.created_at ASC, c.id ASC
   `).all(userId, ...discussions.map((item) => item.id));
@@ -1097,6 +1194,7 @@ export function deleteFeedbackComment(id) {
 // ── User Journals (per-user subscription) ──
 
 export function getUserJournals(userId) {
+  if (!userId) return DEFAULT_JOURNALS.map((j) => j.name);
   const rows = db.prepare("SELECT journal_name FROM user_journals WHERE user_id = ?").all(userId);
   if (rows.length === 0) {
     // Return all available journals as default (first visit)
@@ -1124,7 +1222,9 @@ export function setUserJournals(userId, journalNames) {
 export function getUserSettings(userId) {
   const rows = db.prepare("SELECT key, value FROM settings").all();
   const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
-  const userRows = db.prepare("SELECT key, value FROM user_settings WHERE user_id = ?").all(userId);
+  const userRows = userId
+    ? db.prepare("SELECT key, value FROM user_settings WHERE user_id = ?").all(userId)
+    : [];
   Object.assign(values, Object.fromEntries(userRows.map((row) => [row.key, row.value])));
   
   // Get user-specific journals - use DEFAULT_JOURNALS as base
