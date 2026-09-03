@@ -163,47 +163,23 @@ async function translateWithProvider(article, targetLanguage, provider) {
         : translateLibreText;
   let title = "";
   let abstract = "";
-  let keywords = "";
 
   if (provider === "baidu") {
     title = await translateText(article.title, targetLanguage);
     await sleep(1100);
     abstract = await translateText(article.abstract, targetLanguage);
-    if (article.keywords) {
-      await sleep(1100);
-      keywords = await translateKeywords(article.keywords, translateText, targetLanguage);
-    }
   } else {
-    [title, abstract, keywords] = await Promise.all([
+    [title, abstract] = await Promise.all([
       translateText(article.title, targetLanguage),
-      translateText(article.abstract, targetLanguage),
-      article.keywords ? translateKeywords(article.keywords, translateText, targetLanguage) : Promise.resolve("")
+      translateText(article.abstract, targetLanguage)
     ]);
   }
 
   return {
     title,
     abstract,
-    keywords,
     provider
   };
-}
-
-async function translateKeywords(keywordsStr, translateText, targetLanguage) {
-  if (!keywordsStr) return "";
-  const terms = keywordsStr.split(/[;,；，]/).map((term) => term.trim()).filter(Boolean);
-  if (!terms.length) return "";
-
-  const translated = [];
-  for (const term of terms) {
-    try {
-      const result = await translateText(term, targetLanguage);
-      translated.push(result);
-    } catch {
-      translated.push(term); // Fall back to original if translation fails
-    }
-  }
-  return translated.join("; ");
 }
 
 export async function translateArticle(article, targetLanguage) {

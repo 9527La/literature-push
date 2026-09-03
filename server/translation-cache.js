@@ -2,7 +2,11 @@
 // fields may be filled at different times.  Keep the field rules in one place
 // so every caller (web UI, refresh jobs, digests and preparation jobs) uses the
 // same cache-first behaviour.
-export const TRANSLATION_FIELDS = ["title", "abstract", "keywords"];
+// Keywords remain a source-language field in the article table.  They are
+// deliberately not part of the translation cache: translating a keyword list
+// adds little value and made every article look incomplete when the provider
+// did not return term-by-term translations.
+export const TRANSLATION_FIELDS = ["title", "abstract"];
 
 function hasText(value) {
   return String(value || "").trim().length > 0;
@@ -15,8 +19,7 @@ function normalizeFields(fields) {
 
 /**
  * Return source fields that still need a translation.  A title is always
- * required; abstract and keywords are required only when the source article
- * contains that field.
+ * required; an abstract is required only when the source article contains it.
  */
 export function getMissingTranslationFields(article, translation, fields) {
   if (!article) return [];
@@ -36,6 +39,10 @@ function mergeTranslation(existing, incoming = {}) {
     ...(existing || {}),
     ...(incoming || {})
   };
+  // Keep any legacy keyword translation for backwards compatibility, but
+  // ignore provider output for that field from this point forward.
+  merged.keywords = String(existing?.keywords || "");
+  delete merged.translated_keywords;
   for (const field of TRANSLATION_FIELDS) {
     // Never replace a previously cached field with an empty response.  This is
     // important when a provider returns only the requested subset of fields.
@@ -47,11 +54,14 @@ function mergeTranslation(existing, incoming = {}) {
 
 function sourceForFields(article, fields) {
   const requested = new Set(fields);
+  // Do not pass keywords to a provider at all.  Apart from making the
+  // contract explicit, this prevents a provider implementation from
+  // accidentally translating a field that is intentionally source-only.
+  const { keywords: _keywords, translated_keywords: _translatedKeywords, ...source } = article;
   return {
-    ...article,
+    ...source,
     title: requested.has("title") ? article.title || "" : "",
-    abstract: requested.has("abstract") ? article.abstract || "" : "",
-    keywords: requested.has("keywords") ? article.keywords || "" : ""
+    abstract: requested.has("abstract") ? article.abstract || "" : ""
   };
 }
 

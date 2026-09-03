@@ -3689,3 +3689,54 @@ body { overflow-x: hidden; }
   .account-auth-card .auth-form { padding: 20px 14px; }
   .guest-prompt { padding: 16px; }
 }
+
+/* Keep the display toolbar legible at desktop widths.  Flex items otherwise
+   shrink to their min-content width and split short Chinese labels over two
+   lines when the status summary is long. */
+.display-toggles {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.display-toggles-label,
+.display-toggle {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.display-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coverage-pending {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+.coverage-pending strong { color: var(--text-secondary); font-weight: 650; }
+.run-pending { color: var(--text-secondary); }
+.run-message { color: var(--text-tertiary); }
+
+@media (max-width: 768px) {
+  .display-toggles {
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .display-toggles-label { width: auto; }
+  .display-summary {
+    flex: 1 0 100%;
+    width: 100%;
+    margin-left: 0;
+    white-space: normal;
+  }
+  .coverage-pending { align-items: flex-start; flex-direction: column; gap: 4px; }
+}

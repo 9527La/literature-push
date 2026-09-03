@@ -15,16 +15,16 @@ test("translation cache requests only missing fields and reuses the saved row", 
     },
     translateArticle: async (source) => {
       requests.push(source);
-      return { title: "", abstract: "新摘要", keywords: "新关键词", provider: "test" };
+      return { title: "", abstract: "新摘要", provider: "test" };
     }
   });
 
   const first = await service.ensureTranslation(article, "zh");
   assert.equal(first.translated, true);
-  assert.deepEqual(requests[0], { ...article, title: "", abstract: article.abstract, keywords: article.keywords });
+  assert.deepEqual(requests[0], { id: article.id, title: "", abstract: article.abstract });
   assert.equal(row.title, "已有标题");
   assert.equal(row.abstract, "新摘要");
-  assert.equal(row.keywords, "新关键词");
+  assert.equal(row.keywords, "");
 
   const second = await service.ensureTranslation(article, "zh");
   assert.equal(second.translated, false);

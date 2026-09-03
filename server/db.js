@@ -66,6 +66,8 @@ db.exec(`
     failed_abstract_count INTEGER NOT NULL DEFAULT 0,
     failed_keyword_count INTEGER NOT NULL DEFAULT 0,
     failed_translation_count INTEGER NOT NULL DEFAULT 0,
+    remaining_abstract_count INTEGER NOT NULL DEFAULT 0,
+    remaining_keyword_count INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL,
     message TEXT
   );
@@ -213,7 +215,9 @@ for (const migration of [
   "ALTER TABLE refresh_runs ADD COLUMN failed_article_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE refresh_runs ADD COLUMN failed_abstract_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE refresh_runs ADD COLUMN failed_keyword_count INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE refresh_runs ADD COLUMN failed_translation_count INTEGER NOT NULL DEFAULT 0"
+  "ALTER TABLE refresh_runs ADD COLUMN failed_translation_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN remaining_abstract_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN remaining_keyword_count INTEGER NOT NULL DEFAULT 0"
 ]) {
   try { db.exec(migration); } catch (error) {
     if (!error.message?.includes("duplicate column")) throw error;
@@ -385,8 +389,7 @@ export function listArticles(filters = {}, userId) {
         COALESCE(ui_read.is_read, 0) AS is_read,
         COALESCE(ui_fav.is_favorite, 0) AS is_favorite,
         zh.title AS translated_title,
-        zh.abstract AS translated_abstract,
-        zh.keywords AS translated_keywords
+        zh.abstract AS translated_abstract
       FROM articles a
       LEFT JOIN user_interactions ui_read ON ui_read.article_id = a.id AND ui_read.user_id = @userId AND ui_read.is_read = 1
       LEFT JOIN user_interactions ui_fav ON ui_fav.article_id = a.id AND ui_fav.user_id = @userId AND ui_fav.is_favorite = 1
@@ -402,8 +405,7 @@ export function listArticles(filters = {}, userId) {
   return db.prepare(`
     SELECT a.*,
       zh.title AS translated_title,
-      zh.abstract AS translated_abstract,
-      zh.keywords AS translated_keywords
+      zh.abstract AS translated_abstract
     FROM articles a
     LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
     ${whereFinal}
@@ -510,7 +512,9 @@ export function saveTranslation(articleId, targetLanguage, translation) {
       -- returns an empty value for the other fields.
       title = CASE WHEN length(trim(coalesce(excluded.title, ''))) > 0 THEN excluded.title ELSE translations.title END,
       abstract = CASE WHEN length(trim(coalesce(excluded.abstract, ''))) > 0 THEN excluded.abstract ELSE translations.abstract END,
-      keywords = CASE WHEN length(trim(coalesce(excluded.keywords, ''))) > 0 THEN excluded.keywords ELSE translations.keywords END,
+      -- Keep the legacy keywords column for old databases, but never create
+      -- or overwrite it as part of the title/abstract translation flow.
+      keywords = translations.keywords,
       provider = CASE WHEN length(trim(coalesce(excluded.provider, ''))) > 0 THEN excluded.provider ELSE translations.provider END,
       translated_at = excluded.translated_at
   `).run({
@@ -666,13 +670,16 @@ export function finishRefreshRun(id, {
   failedArticleCount = 0,
   failedAbstractCount = 0,
   failedKeywordCount = 0,
-  failedTranslationCount = 0
+  failedTranslationCount = 0,
+  remainingAbstractCount = 0,
+  remainingKeywordCount = 0
 }) {
   db.prepare(`
     UPDATE refresh_runs
     SET finished_at = ?, added_count = ?, status = ?, message = ?,
         enriched_abstract_count = ?, enriched_keyword_count = ?, translated_count = ?,
-        failed_article_count = ?, failed_abstract_count = ?, failed_keyword_count = ?, failed_translation_count = ?
+        failed_article_count = ?, failed_abstract_count = ?, failed_keyword_count = ?, failed_translation_count = ?,
+        remaining_abstract_count = ?, remaining_keyword_count = ?
     WHERE id = ?
   `).run(
     new Date().toISOString(),
@@ -686,6 +693,8 @@ export function finishRefreshRun(id, {
     Number(failedAbstractCount || 0),
     Number(failedKeywordCount || 0),
     Number(failedTranslationCount || 0),
+    Number(remainingAbstractCount || 0),
+    Number(remainingKeywordCount || 0),
     id
   );
 }
@@ -698,12 +707,15 @@ export function updateRefreshRunSummary(id, {
   failedArticleCount = 0,
   failedAbstractCount = 0,
   failedKeywordCount = 0,
-  failedTranslationCount = 0
+  failedTranslationCount = 0,
+  remainingAbstractCount = 0,
+  remainingKeywordCount = 0
 }) {
   db.prepare(`
     UPDATE refresh_runs
     SET enriched_abstract_count = ?, enriched_keyword_count = ?, translated_count = ?,
         failed_article_count = ?, failed_abstract_count = ?, failed_keyword_count = ?, failed_translation_count = ?,
+        remaining_abstract_count = ?, remaining_keyword_count = ?,
         message = ?
     WHERE id = ?
   `).run(
@@ -714,6 +726,8 @@ export function updateRefreshRunSummary(id, {
     Number(failedAbstractCount || 0),
     Number(failedKeywordCount || 0),
     Number(failedTranslationCount || 0),
+    Number(remainingAbstractCount || 0),
+    Number(remainingKeywordCount || 0),
     message || "",
     id
   );
@@ -742,16 +756,25 @@ export function getStatus() {
 export function listArticlesWithoutKeywords(limit = 50) {
   return db.prepare(`
     SELECT * FROM articles
-    WHERE keywords IS NULL OR keywords = ''
+    WHERE length(trim(coalesce(keywords, ''))) = 0
     ORDER BY COALESCE(published_at, fetched_at) DESC
     LIMIT ?
   `).all(limit);
 }
 
+export function countArticlesWithoutKeywords() {
+  return Number(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM articles
+    WHERE length(trim(coalesce(keywords, ''))) = 0
+  `).get()?.count || 0);
+}
+
 export function listArticlesMissingMetadata(limit = 50) {
   return db.prepare(`
     SELECT * FROM articles
-    WHERE abstract IS NULL OR abstract = '' OR keywords IS NULL OR keywords = ''
+    WHERE length(trim(coalesce(abstract, ''))) = 0
+       OR length(trim(coalesce(keywords, ''))) = 0
     ORDER BY COALESCE(first_seen_at, fetched_at) DESC
     LIMIT ?
   `).all(limit);
@@ -765,7 +788,6 @@ export function listArticlesWithoutTranslation(targetLanguage, limit = 20) {
       ON t.article_id = a.id AND t.target_language = ?
     WHERE length(trim(coalesce(t.title, ''))) = 0
       OR (length(trim(coalesce(a.abstract, ''))) > 0 AND length(trim(coalesce(t.abstract, ''))) = 0)
-      OR (length(trim(coalesce(a.keywords, ''))) > 0 AND length(trim(coalesce(t.keywords, ''))) = 0)
     ORDER BY COALESCE(a.first_seen_at, a.fetched_at) DESC, a.id DESC
     LIMIT ?
   `).all(targetLanguage, limit);
@@ -774,10 +796,25 @@ export function listArticlesWithoutTranslation(targetLanguage, limit = 20) {
 export function listArticlesMissingAbstract(limit = 50) {
   return db.prepare(`
     SELECT * FROM articles
-    WHERE abstract IS NULL OR length(trim(abstract)) = 0
+    WHERE length(trim(coalesce(abstract, ''))) = 0
     ORDER BY COALESCE(first_seen_at, fetched_at) DESC, id DESC
     LIMIT ?
   `).all(limit);
+}
+
+export function countArticlesMissingAbstract() {
+  return Number(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM articles
+    WHERE length(trim(coalesce(abstract, ''))) = 0
+  `).get()?.count || 0);
+}
+
+export function getMetadataGaps() {
+  return {
+    abstracts: countArticlesMissingAbstract(),
+    keywords: countArticlesWithoutKeywords()
+  };
 }
 
 // Return articles whose requested translated field is still missing. Keep the
@@ -1122,7 +1159,12 @@ export function getAdminOverview() {
   const abstractCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE length(trim(coalesce(abstract, ''))) > 0");
   const keywordCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE length(trim(coalesce(keywords, ''))) > 0");
   const translationCount = scalar("SELECT COUNT(*) AS count FROM translations");
+  const translatedTitleCount = scalar("SELECT COUNT(*) AS count FROM translations WHERE length(trim(coalesce(title, ''))) > 0");
   const translatedAbstractCount = scalar("SELECT COUNT(*) AS count FROM translations WHERE length(trim(coalesce(abstract, ''))) > 0");
+  const pending = {
+    abstracts: articleCount - abstractCount,
+    keywords: articleCount - keywordCount
+  };
   return {
     counts: {
       articles: articleCount,
@@ -1138,9 +1180,10 @@ export function getAdminOverview() {
     coverage: {
       abstracts: articleCount ? Math.round(abstractCount * 1000 / articleCount) / 10 : 0,
       keywords: articleCount ? Math.round(keywordCount * 1000 / articleCount) / 10 : 0,
-      translatedTitles: articleCount ? Math.round(translationCount * 1000 / articleCount) / 10 : 0,
+      translatedTitles: articleCount ? Math.round(translatedTitleCount * 1000 / articleCount) / 10 : 0,
       translatedAbstracts: articleCount ? Math.round(translatedAbstractCount * 1000 / articleCount) / 10 : 0
     },
+    pending,
     users: db.prepare(`
       SELECT a.id, a.username, a.role, a.created_at, a.updated_at,
         COALESCE(u.name, '') AS name, COALESCE(u.email, '') AS email,
@@ -1158,6 +1201,7 @@ export function getAdminOverview() {
       SELECT started_at, finished_at, added_count, task_type,
         enriched_abstract_count, enriched_keyword_count, translated_count,
         failed_article_count, failed_abstract_count, failed_keyword_count, failed_translation_count,
+        remaining_abstract_count, remaining_keyword_count,
         status, message
       FROM refresh_runs ORDER BY id DESC LIMIT 8
     `).all()

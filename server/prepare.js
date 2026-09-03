@@ -3,6 +3,10 @@ import { createTranslationCacheService } from "./translation-cache.js";
 
 const DEFAULT_JOB_TTL_MS = 10 * 60 * 1000;
 
+function hasText(value) {
+  return String(value || "").trim().length > 0;
+}
+
 function normalizeIds(ids, maxItems) {
   return [...new Set((Array.isArray(ids) ? ids : [])
     .map((id) => Number(id))
@@ -17,8 +21,12 @@ function publicJob(job) {
     total: job.total,
     completed: job.completed,
     enriched: job.enriched,
+    enrichedAbstract: job.enrichedAbstract,
+    enrichedKeywords: job.enrichedKeywords,
     translated: job.translated,
     failed: job.failed,
+    failedAbstract: job.failedAbstract,
+    failedKeywords: job.failedKeywords,
     results: [...job.results],
     errors: [...job.errors]
   };
@@ -57,18 +65,39 @@ export function createArticlePreparationService(dependencies, options = {}) {
     let article = getArticle(id);
     if (!article) throw new Error("文献不存在");
 
+    const needsAbstract = !hasText(article.abstract);
+    const needsKeywords = !hasText(article.keywords);
     let enriched = false;
+    let enrichedAbstract = 0;
+    let enrichedKeywords = 0;
+    let failedAbstract = 0;
+    let failedKeywords = 0;
     let translated = false;
     let translation = null;
     const stageErrors = [];
 
-    if (!article.abstract || !article.keywords) {
+    if (needsAbstract || needsKeywords) {
       try {
-        const before = `${article.abstract || ""}\n${article.keywords || ""}`;
         article = updateArticleDetails(id, await crawlArticleDetails(article));
-        enriched = before !== `${article.abstract || ""}\n${article.keywords || ""}`;
       } catch (error) {
-        stageErrors.push(`摘要补全：${error.message}`);
+        if (needsAbstract) stageErrors.push(`摘要补全：${error.message}`);
+        if (needsKeywords) stageErrors.push(`关键词补全：${error.message}`);
+      }
+      // A crawler can legitimately return only one field.  Check each
+      // requested field independently so a successful abstract does not hide
+      // a missing keyword (or vice versa).
+      const abstractResolved = !needsAbstract || hasText(article.abstract);
+      const keywordsResolved = !needsKeywords || hasText(article.keywords);
+      enrichedAbstract = needsAbstract && abstractResolved ? 1 : 0;
+      enrichedKeywords = needsKeywords && keywordsResolved ? 1 : 0;
+      failedAbstract = needsAbstract && !abstractResolved ? 1 : 0;
+      failedKeywords = needsKeywords && !keywordsResolved ? 1 : 0;
+      enriched = Boolean(enrichedAbstract || enrichedKeywords);
+      if (needsAbstract && !abstractResolved && !stageErrors.some((error) => error.startsWith("摘要补全："))) {
+        stageErrors.push("摘要补全：公开来源未返回摘要");
+      }
+      if (needsKeywords && !keywordsResolved && !stageErrors.some((error) => error.startsWith("关键词补全："))) {
+        stageErrors.push("关键词补全：公开来源未返回关键词");
       }
     }
 
@@ -84,10 +113,13 @@ export function createArticlePreparationService(dependencies, options = {}) {
       article: {
         ...article,
         translated_title: translation?.title || "",
-        translated_abstract: translation?.abstract || "",
-        translated_keywords: translation?.keywords || ""
+        translated_abstract: translation?.abstract || ""
       },
       enriched,
+      enrichedAbstract,
+      enrichedKeywords,
+      failedAbstract,
+      failedKeywords,
       translated,
       error: stageErrors.join("；")
     };
@@ -109,6 +141,10 @@ export function createArticlePreparationService(dependencies, options = {}) {
           const result = await prepareArticleShared(id);
           job.results.push(result.article);
           if (result.enriched) job.enriched += 1;
+          job.enrichedAbstract += result.enrichedAbstract || 0;
+          job.enrichedKeywords += result.enrichedKeywords || 0;
+          job.failedAbstract += result.failedAbstract || 0;
+          job.failedKeywords += result.failedKeywords || 0;
           if (result.translated) job.translated += 1;
           if (result.error) {
             job.failed += 1;
@@ -147,8 +183,12 @@ export function createArticlePreparationService(dependencies, options = {}) {
       total: normalizedIds.length,
       completed: 0,
       enriched: 0,
+      enrichedAbstract: 0,
+      enrichedKeywords: 0,
       translated: 0,
       failed: 0,
+      failedAbstract: 0,
+      failedKeywords: 0,
       results: [],
       errors: [],
       updatedAt: Date.now()

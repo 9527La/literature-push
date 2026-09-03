@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { config } from "./config.js";
 import { normalizeArticle } from "./ieee.js";
 import { internals } from "./sources.js";
-import { internals as crawlerInternals } from "./crawler.js";
+import { crawlArticleDetails, internals as crawlerInternals } from "./crawler.js";
 import { internals as translateInternals } from "./translate.js";
 import { internals as mailInternals } from "./mail.js";
 
@@ -72,6 +73,59 @@ test("extracts IEEE page metadata JSON", () => {
   assert.equal(metadata.title, "Example");
   assert.equal(metadata.abstract, "A useful abstract.");
   assert.equal(metadata.doi, "10.1109/example");
+});
+
+test("crawler continues to a second DOI source when the first source is partial", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousCrawlerEnabled = config.crawlerEnabled;
+  const calls = [];
+  config.crawlerEnabled = true;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    if (calls.length === 1) {
+      return {
+        ok: true,
+        json: async () => ({
+          title: "Partial source title",
+          doi: "10.1109/example",
+          keywords: [{ display_name: "Power systems" }],
+          abstract_inverted_index: null
+        })
+      };
+    }
+    if (calls.length === 2) {
+      return {
+        ok: true,
+        json: async () => ({ message: { title: ["Crossref title"], DOI: "10.1109/example" } })
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        title: "Semantic title",
+        abstract: "Abstract supplied by Semantic Scholar",
+        externalIds: { DOI: "10.1109/example" },
+        authors: []
+      })
+    };
+  };
+
+  try {
+    const details = await crawlArticleDetails({
+      id: 1,
+      title: "Original title",
+      doi: "10.1109/example",
+      url: "https://doi.org/10.1109/example",
+      abstract: "",
+      keywords: ""
+    });
+    assert.equal(details.keywords, "Power systems");
+    assert.equal(details.abstract, "Abstract supplied by Semantic Scholar");
+    assert.equal(calls.length, 3);
+  } finally {
+    globalThis.fetch = previousFetch;
+    config.crawlerEnabled = previousCrawlerEnabled;
+  }
 });
 
 test("normalizes Crossref metadata into an article record", () => {

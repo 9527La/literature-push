@@ -69,3 +69,29 @@ test("batch preparation preserves usable results when one stage fails", async ()
   assert.equal(completed.results[0].translated_title, "中文标题");
   assert.match(completed.errors[0].message, /publisher blocked/);
 });
+
+test("batch preparation reports a partial metadata response by field", async () => {
+  const articles = new Map([[4, { id: 4, title: "Partial metadata", abstract: "", keywords: "" }]]);
+  const service = createArticlePreparationService({
+    getArticle: (id) => articles.get(Number(id)),
+    updateArticleDetails: (id, details) => {
+      const next = { ...articles.get(Number(id)), ...details };
+      articles.set(Number(id), next);
+      return next;
+    },
+    crawlArticleDetails: async () => ({ abstract: "Only the abstract was returned" }),
+    ensureTranslation: async () => ({
+      translated: true,
+      translation: { title: "部分标题", abstract: "部分摘要" }
+    })
+  });
+
+  const completed = await waitForCompletion(service, service.start([4]).jobId);
+  assert.equal(completed.enriched, 1);
+  assert.equal(completed.enrichedAbstract, 1);
+  assert.equal(completed.enrichedKeywords, 0);
+  assert.equal(completed.failedAbstract, 0);
+  assert.equal(completed.failedKeywords, 1);
+  assert.equal(completed.failed, 1);
+  assert.match(completed.errors[0].message, /关键词补全/);
+});

@@ -36,6 +36,7 @@ import {
   revokeUserSession,
   deleteUserAccount,
   getAdminOverview,
+  getMetadataGaps,
   saveRemotePreferences,
   getRemotePreferences,
   getRecentFeedbackCount,
@@ -195,11 +196,16 @@ app.post("/api/enrich-keywords", requireSiteAdmin, async (req, res) => {
   const runId = createRefreshRun({ taskType: "keywords" });
   try {
     const result = await enrichMissingKeywords();
+    const gaps = getMetadataGaps();
     finishRefreshRun(runId, {
       status: "success",
+      abstractCount: result.enrichedAbstracts,
       keywordCount: result.enriched,
+      failedAbstractCount: result.failedAbstracts,
       failedKeywordCount: result.failed,
-      message: `新增文献 0 篇 · 补全摘要 0 篇 · 补全关键词 ${result.enriched || 0} 篇 · 新增翻译 0 篇 · 失败：文献 0 / 摘要 0 / 关键词 ${result.failed || 0} / 翻译 0`
+      remainingAbstractCount: gaps.abstracts,
+      remainingKeywordCount: gaps.keywords,
+      message: `新增文献 0 篇 · 补全摘要 ${result.enrichedAbstracts || 0} 篇 · 补全关键词 ${result.enriched || 0} 篇 · 新增翻译 0 篇 · 失败：文献 0 / 摘要 ${result.failedAbstracts || 0} / 关键词 ${result.failed || 0} / 翻译 0 · 待补全：摘要 ${gaps.abstracts} 篇 / 关键词 ${gaps.keywords} 篇`
     });
     res.json({ status: "success", ...result });
   } catch (error) {
@@ -212,11 +218,16 @@ app.post("/api/enrich-abstracts", requireSiteAdmin, async (req, res) => {
   const runId = createRefreshRun({ taskType: "abstracts" });
   try {
     const result = await enrichMissingAbstracts();
+    const gaps = getMetadataGaps();
     finishRefreshRun(runId, {
       status: "success",
       abstractCount: result.enriched,
+      keywordCount: result.enrichedKeywords,
       failedAbstractCount: result.failed,
-      message: `新增文献 0 篇 · 补全摘要 ${result.enriched || 0} 篇 · 补全关键词 0 篇 · 新增翻译 0 篇 · 失败：文献 0 / 摘要 ${result.failed || 0} / 关键词 0 / 翻译 0`
+      failedKeywordCount: result.failedKeywords,
+      remainingAbstractCount: gaps.abstracts,
+      remainingKeywordCount: gaps.keywords,
+      message: `新增文献 0 篇 · 补全摘要 ${result.enriched || 0} 篇 · 补全关键词 ${result.enrichedKeywords || 0} 篇 · 新增翻译 0 篇 · 失败：文献 0 / 摘要 ${result.failed || 0} / 关键词 ${result.failedKeywords || 0} / 翻译 0 · 待补全：摘要 ${gaps.abstracts} 篇 / 关键词 ${gaps.keywords} 篇`
     });
     res.json({ status: "success", ...result });
   } catch (error) {

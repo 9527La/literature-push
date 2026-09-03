@@ -2,6 +2,9 @@ import { config } from "./config.js";
 import { decodeEntities, stripTags } from "./utils.js";
 import { fetchElsevierArticleDetails } from "./elsevier.js";
 
+const CROSSREF_API = "https://api.crossref.org/works";
+const SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper";
+
 function normalizePublicationDate(value) {
   const text = stripTags(value);
   if (!text) return "";
@@ -184,14 +187,21 @@ async function fetchOpenAlexDetails(doi) {
   const normalizedDoi = String(doi || "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim();
   if (!normalizedDoi) return {};
   const params = new URLSearchParams({
-    select: "id,doi,title,publication_year,publication_date,biblio,authorships,primary_location,abstract_inverted_index,keywords,primary_topic"
+    select: "id,doi,title,publication_year,publication_date,biblio,authorships,primary_location,abstract_inverted_index,keywords,concepts,primary_topic"
   });
   if (config.crossrefMailto) params.set("mailto", config.crossrefMailto);
   const response = await fetch(`https://api.openalex.org/works/${encodeURIComponent(`https://doi.org/${normalizedDoi}`)}?${params}`);
-  if (!response.ok) throw new Error(`OpenAlex returned ${response.status}`);
+  if (response.ok === false) throw new Error(`OpenAlex returned ${response.status}`);
   const item = await response.json();
   const keywords = Array.isArray(item.keywords)
     ? item.keywords.map((keyword) => keyword?.display_name || keyword?.name || keyword).filter(Boolean).join("; ")
+    : "";
+  const conceptKeywords = Array.isArray(item.concepts)
+    ? item.concepts
+      .filter((concept) => Number(concept?.score || 0) >= 0.35)
+      .map((concept) => concept?.display_name || concept?.name || "")
+      .filter(Boolean)
+      .join("; ")
     : "";
   return {
     title: stripTags(item.title || ""),
@@ -206,7 +216,71 @@ async function fetchOpenAlexDetails(doi) {
     abstract: reconstructOpenAlexAbstract(item.abstract_inverted_index),
     url: item.primary_location?.landing_page_url || `https://doi.org/${normalizedDoi}`,
     published_at: item.publication_date || "",
-    keywords: keywords || item.primary_topic?.display_name || ""
+    keywords: keywords || conceptKeywords || item.primary_topic?.display_name || ""
+  };
+}
+
+async function fetchJson(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.crawlerTimeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (response.ok === false) throw new Error(`Metadata source returned ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchCrossrefDetails(doi) {
+  const normalizedDoi = String(doi || "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim();
+  if (!normalizedDoi) return {};
+  const url = `${CROSSREF_API}/${encodeURIComponent(normalizedDoi)}${config.crossrefMailto ? `?mailto=${encodeURIComponent(config.crossrefMailto)}` : ""}`;
+  const data = await fetchJson(url, { headers: { Accept: "application/json" } });
+  const item = data?.message || {};
+  const title = Array.isArray(item.title) ? item.title[0] : item.title;
+  const authors = Array.isArray(item.author)
+    ? item.author.map((author) => [author.given, author.family].filter(Boolean).join(" ")).filter(Boolean).join(", ")
+    : "";
+  const dateParts = item.published?.["date-parts"]?.[0] || item.issued?.["date-parts"]?.[0] || [];
+  const publishedAt = dateParts.length
+    ? [dateParts[0], dateParts[1] || 1, dateParts[2] || 1].map((value, index) => index ? String(value).padStart(2, "0") : String(value)).join("-")
+    : "";
+  const keywords = Array.isArray(item.subject)
+    ? item.subject.map((subject) => String(subject || "").trim()).filter(Boolean).join("; ")
+    : "";
+  return {
+    title: decodeEntities(stripTags(title || "")),
+    authors,
+    journal: stripTags(item["container-title"]?.[0] || ""),
+    year: Number(dateParts[0] || 0) || null,
+    volume: item.volume || "",
+    issue: item.issue || "",
+    doi: item.DOI || normalizedDoi,
+    abstract: decodeEntities(stripTags(item.abstract || "")),
+    url: item.URL || `https://doi.org/${normalizedDoi}`,
+    published_at: publishedAt,
+    keywords
+  };
+}
+
+async function fetchSemanticScholarDetails(doi) {
+  const normalizedDoi = String(doi || "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim();
+  if (!normalizedDoi) return {};
+  const fields = "title,abstract,authors,venue,year,externalIds,url";
+  const data = await fetchJson(`${SEMANTIC_SCHOLAR_API}/${encodeURIComponent(`DOI:${normalizedDoi}`)}?fields=${fields}`);
+  const authors = Array.isArray(data?.authors)
+    ? data.authors.map((author) => author?.name).filter(Boolean).join(", ")
+    : "";
+  return {
+    title: decodeEntities(stripTags(data?.title || "")),
+    authors,
+    journal: stripTags(data?.venue || ""),
+    year: Number(data?.year || 0) || null,
+    doi: data?.externalIds?.DOI || normalizedDoi,
+    abstract: decodeEntities(stripTags(data?.abstract || "")),
+    url: data?.url || `https://doi.org/${normalizedDoi}`,
+    keywords: ""
   };
 }
 
@@ -272,15 +346,19 @@ function parseElsevierMetadata(html) {
 
 function mergeDetails(primary, fallback) {
   return Object.fromEntries(
-    Object.keys({ ...fallback, ...primary }).map((key) => [key, primary[key] || fallback[key] || ""])
+    Object.keys({ ...fallback, ...primary }).map((key) => {
+      const preferred = primary?.[key];
+      const usable = typeof preferred === "string" ? preferred.trim().length > 0 : preferred !== null && preferred !== undefined && preferred !== 0;
+      return [key, usable ? preferred : fallback?.[key] || ""];
+    })
   );
 }
 
 function isElsevierArticle(article) {
-  const doi = article.doi || "";
-  const url = article.url || "";
-  return doi.includes("10.1016/") || 
-         url.includes("sciencedirect.com") || 
+  const doi = String(article.doi || "").toLowerCase();
+  const url = String(article.url || "").toLowerCase();
+  return doi.includes("10.1016/") ||
+         url.includes("sciencedirect.com") ||
          url.includes("elsevier.com");
 }
 
@@ -294,47 +372,57 @@ export async function crawlArticleDetails(article) {
     throw new Error("Article has no DOI or URL to crawl");
   }
 
-  let publisherDetails = {};
+  const needsAbstract = !String(article.abstract || "").trim();
+  const needsKeywords = !String(article.keywords || "").trim();
+  let details = { ...article };
+  let sourceFound = false;
 
-  // Prefer the official Elsevier API. OpenAlex often has topic keywords but no
-  // abstract; treating those keywords as a complete result used to bypass this
-  // API even when a valid Elsevier key was configured.
+  const mergeSource = (candidate) => {
+    if (!candidate || typeof candidate !== "object") return;
+    if (candidate.title || candidate.abstract || candidate.keywords) sourceFound = true;
+    details = mergeDetails(details, candidate);
+  };
+  const isComplete = () =>
+    (!needsAbstract || String(details.abstract || "").trim().length > 0)
+    && (!needsKeywords || String(details.keywords || "").trim().length > 0);
+
+  // Query independent DOI-level sources until both missing fields are filled.
+  // Previously OpenAlex returned as soon as it supplied *either* keywords or
+  // an abstract, so a partial response permanently hid the next fallback.
   if (config.elsevierApiKey && isElsevierArticle(article) && article.doi) {
     try {
       const elsevierDetails = await fetchElsevierArticleDetails(article.doi);
-      if (elsevierDetails.abstract || elsevierDetails.keywords) {
-        publisherDetails = {
-          title: elsevierDetails.title || "",
-          authors: elsevierDetails.authors || "",
-          journal: article.journal || "",
-          year: elsevierDetails.year || article.year || null,
-          volume: elsevierDetails.volume || "",
-          issue: elsevierDetails.issue || "",
-          doi: elsevierDetails.doi || article.doi || "",
-          abstract: elsevierDetails.abstract || "",
-          url: article.url || "",
-          published_at: elsevierDetails.published_at || "",
-          keywords: elsevierDetails.keywords || ""
-        };
-      }
+      mergeSource(elsevierDetails);
     } catch {
-      // Fall through to HTML scraping
+      // Continue with the public DOI sources.
     }
   }
 
-  // OpenAlex is the public DOI-level fallback for publishers that block HTML
-  // crawlers or when a publisher API does not cover a particular record.
-  if (article.doi) {
+  if (article.doi && !isComplete()) {
     try {
-      const openAlexDetails = await fetchOpenAlexDetails(article.doi);
-      const mergedDetails = mergeDetails(publisherDetails, openAlexDetails);
-      if (mergedDetails.abstract || mergedDetails.keywords) return mergedDetails;
+      mergeSource(await fetchOpenAlexDetails(article.doi));
     } catch {
-      // Continue with public HTML metadata.
+      // Continue with the next public DOI source.
     }
   }
 
-  if (publisherDetails.abstract || publisherDetails.keywords) return publisherDetails;
+  if (article.doi && !isComplete()) {
+    try {
+      mergeSource(await fetchCrossrefDetails(article.doi));
+    } catch {
+      // Crossref may not expose an abstract for every publisher.
+    }
+  }
+
+  if (article.doi && !isComplete()) {
+    try {
+      mergeSource(await fetchSemanticScholarDetails(article.doi));
+    } catch {
+      // Semantic Scholar is best-effort and can rate-limit anonymous calls.
+    }
+  }
+
+  if (isComplete()) return details;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.crawlerTimeoutMs);
@@ -353,13 +441,15 @@ export async function crawlArticleDetails(article) {
     const html = await response.text();
     
     // Check if this is a linkinghub redirect page (Elsevier)
-    const finalUrl = response.url;
+    const finalUrl = response.url || target;
     if (finalUrl.includes("linkinghub.elsevier.com")) {
       // Extract the actual ScienceDirect URL from meta refresh
       const refreshMatch = html.match(/content=["']2;\s*url='([^']+)["']/i);
       if (refreshMatch) {
         const redirectPath = refreshMatch[1].replace(/&amp;/g, "&");
-        const redirectUrl = `https://linkinghub.elsevier.com${redirectPath}`;
+        const redirectUrl = /^https?:\/\//i.test(redirectPath)
+          ? redirectPath
+          : `https://linkinghub.elsevier.com${redirectPath}`;
         try {
           const finalResponse = await fetch(redirectUrl, {
             redirect: "follow",
@@ -372,13 +462,10 @@ export async function crawlArticleDetails(article) {
           });
           
           const finalHtml = await finalResponse.text();
-          const details = mergeDetails(parseIeeeMetadata(finalHtml), parseHtmlMetadata(finalHtml));
-          const elsevierDetails = parseElsevierMetadata(finalHtml);
-          const merged = mergeDetails(details, elsevierDetails);
-          if (merged.abstract || merged.title) {
-            clearTimeout(timeout);
-            return merged;
-          }
+          mergeSource(mergeDetails(
+            mergeDetails(parseIeeeMetadata(finalHtml), parseHtmlMetadata(finalHtml)),
+            parseElsevierMetadata(finalHtml)
+          ));
         } catch {
           // Fall through to parse the redirect page
         }
@@ -386,15 +473,15 @@ export async function crawlArticleDetails(article) {
     }
     
     // Try IEEE metadata first, then HTML metadata, then Elsevier-specific
-    let details = mergeDetails(parseIeeeMetadata(html), parseHtmlMetadata(html));
+    const htmlDetails = mergeDetails(parseIeeeMetadata(html), parseHtmlMetadata(html));
+    mergeSource(htmlDetails);
     
     // If it's an Elsevier article and we're missing data, try Elsevier parser
-    if (isElsevierArticle(article) && (!details.abstract || !details.keywords)) {
-      const elsevierDetails = parseElsevierMetadata(html);
-      details = mergeDetails(details, elsevierDetails);
+    if (isElsevierArticle(article) && !isComplete()) {
+      mergeSource(parseElsevierMetadata(html));
     }
-    
-    if (!details.abstract && !details.title) {
+
+    if (!sourceFound) {
       throw new Error("No crawlable metadata found on the public page");
     }
     return details;
@@ -411,6 +498,9 @@ export const internals = {
   extractMetaContent,
   extractMetaContentAll,
   fetchOpenAlexDetails,
+  fetchCrossrefDetails,
+  fetchSemanticScholarDetails,
+  mergeDetails,
   normalizePublicationDate,
   isElsevierArticle
 };

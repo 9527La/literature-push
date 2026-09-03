@@ -54,9 +54,6 @@ function articleMarkdown({ article, translation }, index, options, compact = fal
     ? `\n\n**中文标题：** ${normalizeMarkdown(translation.title)}`
     : "";
   const keywords = options.includeKeywords && article.keywords ? `\n- 关键词：${article.keywords}` : "";
-  const translatedKeywords = options.includeKeywords && options.includeTranslation && translation?.keywords
-    ? `\n- 中文关键词：${translation.keywords}`
-    : "";
   const link = article.url ? `\n- 原文链接：${article.url}` : "";
   const abstract = options.includeAbstract && article.abstract
     ? compact
@@ -71,7 +68,7 @@ function articleMarkdown({ article, translation }, index, options, compact = fal
 - 期刊：${normalizeMarkdown(article.journal)}
 - 发布日期：${normalizeMarkdown(article.published_at)}
 - 首次收集：${normalizeMarkdown(article.first_seen_at)}
-- DOI：${normalizeMarkdown(article.doi)}${keywords}${translatedKeywords}${link}${abstract}${translatedAbstract}`;
+- DOI：${normalizeMarkdown(article.doi)}${keywords}${link}${abstract}${translatedAbstract}`;
 }
 
 function renderDocument(items, options = {}, compact = false) {

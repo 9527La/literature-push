@@ -1059,15 +1059,15 @@ function AdminView({ onDataChanged }) {
         setMessage(result.status === "success" ? `文献刷新完成，新增 ${result.addedCount || 0} 篇。` : result.message);
       } else if (action === "keywords") {
         const result = await api.post("/api/enrich-keywords");
-        setMessage(`关键词补全完成：成功 ${result.enriched || 0} 篇${result.failed ? `，失败 ${result.failed} 篇` : ""}。`);
+        setMessage(`关键词补全完成：本次成功 ${result.enriched || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待补全。`);
       } else if (action === "abstracts") {
         const result = await api.post("/api/enrich-abstracts");
-        setMessage(`摘要补全完成：成功 ${result.enriched || 0} 篇${result.failed ? `，失败 ${result.failed} 篇` : ""}。`);
+        setMessage(`摘要补全完成：本次成功 ${result.enriched || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待补全。`);
       } else {
         const field = action === "titles" ? "title" : "abstract";
         const label = action === "titles" ? "标题" : "摘要";
         const result = await api.post("/api/admin/translate", { field, limit: 20 });
-        setMessage(`${label}翻译完成：成功 ${result.translated || 0} 篇${result.failed ? `，失败 ${result.failed} 篇` : ""}。`);
+        setMessage(`${label}翻译完成：本次成功 ${result.translated || 0} 篇，失败 ${result.failed || 0} 篇；本次处理 ${result.processed || 0} 篇。`);
       }
       await Promise.all([loadOverview(), onDataChanged()]);
     } catch (error) {
@@ -1120,6 +1120,7 @@ function AdminView({ onDataChanged }) {
 
   const counts = overview.counts || {};
   const coverage = overview.coverage || {};
+  const pending = overview.pending || {};
   const metrics = [
     ["文献记录", counts.articles],
     ["原文摘要", counts.abstracts],
@@ -1166,6 +1167,7 @@ function AdminView({ onDataChanged }) {
         <section className="admin-panel-card coverage-panel">
           <header><div><span className="eyebrow">数据健康</span><h2>内容完整度</h2></div><Activity size={19} /></header>
           <div className="coverage-list">{coverageRows.map(([label, value]) => <div className="coverage-row" key={label}><div><span>{label}</span><strong>{Number(value || 0).toFixed(1)}%</strong></div><div className="coverage-track"><span style={{ width: `${Math.min(Number(value || 0), 100)}%` }} /></div></div>)}</div>
+          <div className="coverage-pending" role="status"><span>当前待补全</span><strong>摘要 {pending.abstracts || 0} 篇 · 关键词 {pending.keywords || 0} 篇</strong></div>
         </section>
 
         <section className="admin-panel-card refresh-panel">
@@ -1178,6 +1180,8 @@ function AdminView({ onDataChanged }) {
                   <div className="run-heading"><strong>{taskLabels[run.task_type] || "数据维护"}</strong><time>{formatDate(run.started_at)}</time></div>
                   <small>文献 +{run.added_count || 0} · 摘要 +{run.enriched_abstract_count || 0} · 关键词 +{run.enriched_keyword_count || 0} · 翻译 +{run.translated_count || 0}</small>
                   <small className="run-failures">失败：文献 {run.failed_article_count || 0} · 摘要 {run.failed_abstract_count || 0} · 关键词 {run.failed_keyword_count || 0} · 翻译 {run.failed_translation_count || 0}</small>
+                  <small className="run-pending">待补全：摘要 {run.remaining_abstract_count ?? pending.abstracts ?? 0} · 关键词 {run.remaining_keyword_count ?? pending.keywords ?? 0}</small>
+                  {run.message && <small className="run-message">{run.message}</small>}
                 </div>
               </div>
             )) : <p className="empty-compact">暂无刷新记录</p>}
@@ -1471,7 +1475,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [topKeywords, setTopKeywords] = useState([]);
   const [visibleCount, setVisibleCount] = useState(50);
-  const [preparation, setPreparation] = useState({ active: false, total: 0, completed: 0, enriched: 0, translated: 0, failed: 0, message: "" });
+  const [preparation, setPreparation] = useState({ active: false, total: 0, completed: 0, enriched: 0, enrichedAbstract: 0, enrichedKeywords: 0, translated: 0, failed: 0, failedAbstract: 0, failedKeywords: 0, message: "" });
   const attemptedPreparationIdsRef = useRef(new Set());
   const preparationJobRef = useRef("");
   const preparationTimerRef = useRef(null);
@@ -1510,9 +1514,9 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
 
   function articleNeedsPreparation(article) {
     return !article.abstract?.trim()
+      || !article.keywords?.trim()
       || !article.translated_title?.trim()
-      || (Boolean(article.abstract?.trim()) && !article.translated_abstract?.trim())
-      || (Boolean(article.keywords?.trim()) && !article.translated_keywords?.trim());
+      || (Boolean(article.abstract?.trim()) && !article.translated_abstract?.trim());
   }
 
   async function pollPreparationJob(jobId) {
@@ -1526,11 +1530,15 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
         total: job.total,
         completed: job.completed,
         enriched: job.enriched,
+        enrichedAbstract: job.enrichedAbstract,
+        enrichedKeywords: job.enrichedKeywords,
         translated: job.translated,
         failed: job.failed,
+        failedAbstract: job.failedAbstract,
+        failedKeywords: job.failedKeywords,
         message: finished
-          ? `后台补全完成：摘要 +${job.enriched}，翻译 +${job.translated}${job.failed ? `，${job.failed} 篇暂未完全补齐` : ""}；已有内容继续从本地数据库显示。`
-          : "已有内容已从本地数据库直接显示，正在后台补全缺失的摘要和中文翻译。"
+          ? `后台补全完成：摘要 +${job.enrichedAbstract || 0}，关键词 +${job.enrichedKeywords || 0}，翻译 +${job.translated || 0}；失败：摘要 ${job.failedAbstract || 0}，关键词 ${job.failedKeywords || 0}，其他 ${Math.max((job.failed || 0) - (job.failedAbstract || 0) - (job.failedKeywords || 0), 0)}。`
+          : "已有内容已从本地数据库直接显示，正在后台补全缺失的摘要、关键词和中文翻译。"
       });
       if (finished) {
         preparationJobRef.current = "";
@@ -1554,11 +1562,11 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
       : uniqueIds.filter((id) => !attemptedPreparationIdsRef.current.has(id));
     if (!selectedIds.length) return;
     selectedIds.forEach((id) => attemptedPreparationIdsRef.current.add(id));
-    setPreparation({ active: true, total: selectedIds.length, completed: 0, enriched: 0, translated: 0, failed: 0, message: `已从本地数据库直接显示已有内容，正在创建 ${selectedIds.length} 篇缺失内容的补全任务…` });
+    setPreparation({ active: true, total: selectedIds.length, completed: 0, enriched: 0, enrichedAbstract: 0, enrichedKeywords: 0, translated: 0, failed: 0, failedAbstract: 0, failedKeywords: 0, message: `已从本地数据库直接显示已有内容，正在创建 ${selectedIds.length} 篇缺失内容的补全任务…` });
     try {
       const job = await api.post("/api/articles/prepare", { ids: selectedIds });
       preparationJobRef.current = job.jobId;
-      setPreparation((current) => ({ ...current, total: job.total, message: "已有内容已从本地数据库直接显示，正在后台补全缺失的摘要和中文翻译。" }));
+      setPreparation((current) => ({ ...current, total: job.total, message: "已有内容已从本地数据库直接显示，正在后台补全缺失的摘要、关键词和中文翻译。" }));
       await pollPreparationJob(job.jobId);
     } catch (error) {
       setPreparation((current) => ({ ...current, active: false, message: `无法启动批量补全：${error.message}` }));
@@ -1611,9 +1619,9 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   const visiblePreparationKey = visibleArticles.map((article) => [
     article.id,
     Boolean(article.abstract?.trim()),
+    Boolean(article.keywords?.trim()),
     Boolean(article.translated_title?.trim()),
-    Boolean(article.translated_abstract?.trim()),
-    Boolean(article.translated_keywords?.trim())
+    Boolean(article.translated_abstract?.trim())
   ].join(":" )).join("|");
 
   useEffect(() => {
@@ -1752,10 +1760,12 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
             type="button"
             className={`display-toggle ${displayPreferences.bilingual ? "active" : ""}`}
             aria-pressed={displayPreferences.bilingual}
+            aria-label={displayPreferences.bilingual ? "隐藏中英文标题" : "显示中英文标题"}
+            title={displayPreferences.bilingual ? "隐藏中英文标题" : "显示中英文标题"}
             onClick={() => toggleDisplay("bilingual")}
           >
             {displayPreferences.bilingual ? <Eye size={14} /> : <EyeOff size={14} />}
-            中英文标题 · {displayPreferences.bilingual ? "已显示" : "已隐藏"}
+            中英文标题
           </button>
           <button type="button" className={`display-toggle ${displayPreferences.translatedAbstract ? "active" : ""}`} onClick={() => toggleDisplay("translatedAbstract")}>
             {displayPreferences.translatedAbstract ? <Eye size={14} /> : <EyeOff size={14} />} 中文摘要
@@ -1775,7 +1785,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           <div className={`preparation-bar ${preparation.active ? "active" : ""}`} role="status" aria-live="polite">
             <div className="preparation-copy">
               <strong>{preparation.active ? "正在补全当前页面缺失内容" : "当前页面后台补全结果"}</strong>
-              <span>{preparation.message || "已有内容直接来自本地数据库，仅对缺失的摘要和翻译进行补全。"}</span>
+              <span>{preparation.message || "已有内容直接来自本地数据库，仅对缺失的摘要、关键词和翻译进行补全。"}</span>
             </div>
             {preparation.active && (
               <div className="preparation-progress">
@@ -1893,13 +1903,12 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
 
 function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpdated }) {
   const [detail, setDetail] = useState(article);
-  const [enriching, setEnriching] = useState(!article.abstract);
+  const [enriching, setEnriching] = useState(!article.abstract || !article.keywords);
   const [enrichError, setEnrichError] = useState("");
   const [translation, setTranslation] = useState(() => article.translated_title ? {
     target_language: "zh",
     title: article.translated_title,
-    abstract: article.translated_abstract || "",
-    keywords: article.translated_keywords || ""
+    abstract: article.translated_abstract || ""
   } : null);
   const [translating, setTranslating] = useState("");
   const [translationError, setTranslationError] = useState("");
@@ -1911,11 +1920,10 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
     setTranslation(article.translated_title ? {
       target_language: "zh",
       title: article.translated_title,
-      abstract: article.translated_abstract || "",
-      keywords: article.translated_keywords || ""
+      abstract: article.translated_abstract || ""
     } : null);
     setTranslationError("");
-    if (article.abstract) {
+    if (article.abstract && article.keywords) {
       setEnriching(false);
       return () => {
         ignore = true;
@@ -1953,8 +1961,7 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
         const translatedArticle = {
           ...detail,
           translated_title: nextTranslation.title,
-          translated_abstract: nextTranslation.abstract || "",
-          translated_keywords: nextTranslation.keywords || ""
+          translated_abstract: nextTranslation.abstract || ""
         };
         setDetail(translatedArticle);
         onArticleUpdated?.(translatedArticle);
@@ -2005,22 +2012,12 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
                 <span className="keyword-tag" key={i}>{kw}</span>
               ))}
             </div>
-            {translation?.keywords && (
-              <>
-                <h4 style={{ marginTop: "12px" }}>{translation.target_language === "en" ? "English Keywords" : "中文关键词"}</h4>
-                <div className="keywords">
-                  {translation.keywords.split(/[;；]/).map((kw, i) => kw.trim()).filter(Boolean).map((kw, i) => (
-                    <span className="keyword-tag keyword-tag-translated" key={i}>{kw}</span>
-                  ))}
-                </div>
-              </>
-            )}
           </div>
         )}
         <div className="abstract-panel">
           <h4>摘要</h4>
           {enriching ? (
-            <p>正在从公开页面补全摘要...</p>
+            <p>正在从公开页面补全摘要和关键词...</p>
           ) : (
             <p>{detail.abstract || "公开数据源和页面爬取都暂未提供该文献摘要，可通过原文链接查看。"}</p>
           )}
