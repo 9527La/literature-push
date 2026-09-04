@@ -15,6 +15,12 @@ const VOLCENGINE_CONTENT_TYPE = "application/json";
 const VOLCENGINE_MAX_TEXT_LENGTH = 4_500;
 const VOLCENGINE_MAX_BATCH_LENGTH = 4_800;
 const VOLCENGINE_MAX_BATCH_SIZE = 16;
+const DEFAULT_PROVIDER_REQUEST_INTERVALS = {
+  volcengine: 250,
+  baidu: 125
+};
+const providerQueues = new Map();
+const providerLastRequestAt = new Map();
 
 function hasText(value) {
   return String(value || "").trim().length > 0;
@@ -176,6 +182,46 @@ function isRetryableStatus(status) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
+function canonicalProvider(provider) {
+  return provider === "volc" ? "volcengine" : String(provider || "").trim().toLowerCase();
+}
+
+function providerRequestInterval(provider) {
+  const key = canonicalProvider(provider);
+  const configured = key === "volcengine"
+    ? config.volcengineRequestIntervalMs
+    : key === "baidu"
+      ? config.baiduTranslateRequestIntervalMs
+      : DEFAULT_PROVIDER_REQUEST_INTERVALS[key];
+  const value = Number(configured);
+  return Number.isFinite(value) && value >= 0
+    ? value
+    : Number(DEFAULT_PROVIDER_REQUEST_INTERVALS[key] || 0);
+}
+
+/**
+ * Serialize requests for one provider across all callers in this process.
+ * This is intentionally outside translateArticles: page preparation, admin
+ * jobs and digest generation can all run at the same time, and each must use
+ * the same rate-limited lane.  A failed request still releases the lane.
+ */
+function enqueueProviderRequest(provider, request) {
+  const key = canonicalProvider(provider);
+  const previous = providerQueues.get(key) || Promise.resolve();
+  const queued = previous.catch(() => {}).then(async () => {
+    const interval = providerRequestInterval(key);
+    const lastStartedAt = providerLastRequestAt.get(key) || 0;
+    const waitMs = Math.max(0, interval - (Date.now() - lastStartedAt));
+    if (waitMs > 0) await sleep(waitMs);
+    providerLastRequestAt.set(key, Date.now());
+    return request();
+  });
+  // Keep the queue alive after a rejection so a failed provider request does
+  // not poison subsequent requests.
+  providerQueues.set(key, queued.catch(() => {}));
+  return queued;
+}
+
 async function fetchTranslationResponse(url, options = {}, label = "Translation service") {
   let lastError;
   for (let attempt = 0; attempt <= TRANSLATION_RETRY_LIMIT; attempt += 1) {
@@ -205,7 +251,7 @@ async function fetchTranslationResponse(url, options = {}, label = "Translation 
   throw lastError || new Error(`${label} 请求失败`);
 }
 
-async function requestVolcengineBatch(textList, targetLanguage) {
+async function requestVolcengineBatchUnthrottled(textList, targetLanguage) {
   if (!config.volcengineAccessKeyId || !config.volcengineSecretAccessKey) {
     throw new Error("Volcengine Translate requires VOLCENGINE_ACCESS_KEY_ID and VOLCENGINE_SECRET_ACCESS_KEY");
   }
@@ -260,6 +306,12 @@ async function requestVolcengineBatch(textList, targetLanguage) {
   const list = data?.TranslationList;
   if (!Array.isArray(list)) throw new Error("Volcengine Translate 未返回翻译结果");
   return list.slice(0, textList.length).map((item) => String(item?.Translation || "").trim());
+}
+
+async function requestVolcengineBatch(textList, targetLanguage) {
+  return enqueueProviderRequest("volcengine", () =>
+    requestVolcengineBatchUnthrottled(textList, targetLanguage)
+  );
 }
 
 async function translateVolcengineText(text, targetLanguage) {
@@ -472,7 +524,7 @@ function sourceLanguageForBaiduBatch(batch, targetLanguage) {
   return baiduSource(batch.map((unit) => unit.text).join("\n"), targetLanguage);
 }
 
-async function requestBaiduBatch(textList, targetLanguage, sourceLanguage) {
+async function requestBaiduBatchUnthrottled(textList, targetLanguage, sourceLanguage) {
   if (!config.baiduTranslateAppId || !config.baiduTranslateKey) {
     throw new Error("Baidu Translate requires BAIDU_TRANSLATE_APPID and BAIDU_TRANSLATE_KEY");
   }
@@ -502,6 +554,12 @@ async function requestBaiduBatch(textList, targetLanguage, sourceLanguage) {
   return Array.isArray(data.trans_result)
     ? data.trans_result.map((item) => String(item?.dst || "").trim())
     : [];
+}
+
+async function requestBaiduBatch(textList, targetLanguage, sourceLanguage) {
+  return enqueueProviderRequest("baidu", () =>
+    requestBaiduBatchUnthrottled(textList, targetLanguage, sourceLanguage)
+  );
 }
 
 function mapBaiduBatchTranslations(translations, batch) {
@@ -555,7 +613,11 @@ async function translateChunkUnitsWithProvider(units, targetLanguage, provider) 
   if (provider === "volcengine" || provider === "volc") {
     const batches = splitTranslationUnitBatches(chunkUnits, {
       maxChars: VOLCENGINE_MAX_BATCH_LENGTH,
-      maxItems: VOLCENGINE_MAX_BATCH_SIZE
+      maxItems: VOLCENGINE_MAX_BATCH_SIZE,
+      // A single request must not mix source languages.  This matters when a
+      // legacy record already contains a Chinese title while its abstract is
+      // still English.
+      groupBy: (unit) => volcengineSourceLanguage(unit.text, targetLanguage) || "same"
     });
     for (const batch of batches) {
       requests += 1;

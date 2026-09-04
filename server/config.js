@@ -78,11 +78,19 @@ export const config = {
   volcengineRegion: process.env.VOLCENGINE_REGION || "cn-north-1",
   volcengineService: process.env.VOLCENGINE_SERVICE || "translate",
   volcengineEndpoint: (process.env.VOLCENGINE_TRANSLATE_ENDPOINT || "https://translate.volcengineapi.com").replace(/\/$/, ""),
+  // Keep a single process-wide request lane for each provider.  The interval
+  // is measured between request starts, so concurrent page preparation jobs
+  // cannot burst past the provider quota.
+  volcengineRequestIntervalMs: Number(process.env.VOLCENGINE_REQUEST_INTERVAL_MS || 250),
   libreTranslateUrl: (process.env.LIBRETRANSLATE_URL || "https://libretranslate.com").replace(/\/$/, ""),
   libreTranslateApiKey: process.env.LIBRETRANSLATE_API_KEY || "",
   myMemoryEmail: process.env.MYMEMORY_EMAIL || "",
   baiduTranslateAppId: process.env.BAIDU_TRANSLATE_APPID || "",
   baiduTranslateKey: process.env.BAIDU_TRANSLATE_KEY || "",
+  // 125 ms is a conservative eight requests per second ceiling for Baidu's
+  // advanced endpoint.  Set to 0 only when the account's quota explicitly
+  // permits a higher rate.
+  baiduTranslateRequestIntervalMs: Number(process.env.BAIDU_TRANSLATE_REQUEST_INTERVAL_MS || 125),
   refreshCron: process.env.REFRESH_CRON || "0 8 * * *",
   lookbackDays: Number(process.env.LOOKBACK_DAYS || 45),
   

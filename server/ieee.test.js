@@ -292,6 +292,47 @@ test("long batch text is chunked and reassembled without translating keywords", 
   }
 });
 
+test("provider requests share one rate-limited lane across concurrent batches", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousConfig = {
+    translationProvider: config.translationProvider,
+    volcengineAccessKeyId: config.volcengineAccessKeyId,
+    volcengineSecretAccessKey: config.volcengineSecretAccessKey,
+    volcengineRequestIntervalMs: config.volcengineRequestIntervalMs
+  };
+  const starts = [];
+  Object.assign(config, {
+    translationProvider: "volcengine",
+    volcengineAccessKeyId: "AK_TEST",
+    volcengineSecretAccessKey: "SK_TEST",
+    volcengineRequestIntervalMs: 35
+  });
+  globalThis.fetch = async (_url, options) => {
+    starts.push(Date.now());
+    const payload = JSON.parse(options.body);
+    return {
+      ok: true,
+      json: async () => ({
+        TranslationList: payload.TextList.map((text) => ({ Translation: `译文:${text}` })),
+        ResponseMetadata: { Error: null }
+      })
+    };
+  };
+
+  try {
+    await Promise.all([
+      translateInternals.translateArticles([{ id: 401, title: "Title A" }], "zh", ["title"]),
+      translateInternals.translateArticles([{ id: 402, title: "Title B" }], "zh", ["title"])
+    ]);
+    assert.equal(starts.length, 2);
+    const sorted = [...starts].sort((a, b) => a - b);
+    assert.ok(sorted[1] - sorted[0] >= 30, `requests started ${sorted[1] - sorted[0]} ms apart`);
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.assign(config, previousConfig);
+  }
+});
+
 test("extracts meta content regardless of attribute order", () => {
   const html = `
     <meta content="Content-first title" property="og:title">
