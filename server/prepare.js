@@ -14,6 +14,62 @@ function normalizeIds(ids, maxItems) {
     .slice(0, maxItems);
 }
 
+// Page preparation can finish metadata lookups for several articles within a
+// short interval. Coalesce those calls into one cache/provider batch while
+// retaining the single-article promise contract used by the UI.
+function createBatchingTranslationQueue(ensureTranslations, options = {}) {
+  const maxWaitMs = Math.max(10, Number(options.maxWaitMs || 60));
+  const maxItems = Math.max(1, Number(options.maxItems || 50));
+  let pending = [];
+  let timer = null;
+
+  async function flush() {
+    const requests = pending;
+    pending = [];
+    timer = null;
+    if (!requests.length) return;
+    const groups = new Map();
+    for (const request of requests) {
+      const fields = Array.isArray(request.options?.fields) ? request.options.fields.join(",") : "";
+      const key = `${request.targetLanguage}:${fields}`;
+      const group = groups.get(key) || { requests: [], fields: request.options?.fields };
+      group.requests.push(request);
+      groups.set(key, group);
+    }
+    await Promise.all([...groups.values()].map(async (group) => {
+      try {
+        const batch = await ensureTranslations(
+          group.requests.map((request) => request.article),
+          group.requests[0].targetLanguage,
+          group.fields ? { fields: group.fields } : {}
+        );
+        const byId = new Map((batch.results || []).map((item) => [String(item.articleId), item]));
+        for (const request of group.requests) {
+          const item = byId.get(String(request.article.id));
+          if (!item) {
+            request.reject(new Error("翻译服务未返回当前文献结果"));
+          } else if (item.error) {
+            request.reject(new Error(item.error));
+          } else {
+            request.resolve(item);
+          }
+        }
+      } catch (error) {
+        for (const request of group.requests) request.reject(error);
+      }
+    }));
+  }
+
+  return (article, targetLanguage = "zh", requestOptions = {}) => new Promise((resolve, reject) => {
+    pending.push({ article, targetLanguage, options: requestOptions, resolve, reject });
+    if (pending.length >= maxItems) {
+      void flush();
+      return;
+    }
+    if (!timer) timer = setTimeout(() => void flush(), maxWaitMs);
+  });
+}
+
 function publicJob(job) {
   return {
     jobId: job.id,
@@ -41,7 +97,7 @@ export function createArticlePreparationService(dependencies, options = {}) {
     saveTranslation,
     translateArticle
   } = dependencies;
-  const ensureTranslation = dependencies.ensureTranslation || createTranslationCacheService({
+  const singleEnsureTranslation = dependencies.ensureTranslation || createTranslationCacheService({
     getArticle,
     getTranslation,
     saveTranslation,
@@ -49,6 +105,9 @@ export function createArticlePreparationService(dependencies, options = {}) {
   }).ensureTranslation;
   const concurrency = Math.max(1, Math.min(4, Number(options.concurrency || 2)));
   const maxItems = Math.max(1, Math.min(100, Number(options.maxItems || 50)));
+  const ensureTranslation = dependencies.ensureTranslations
+    ? createBatchingTranslationQueue(dependencies.ensureTranslations, { maxItems })
+    : singleEnsureTranslation;
   const maxJobs = Math.max(5, Math.min(200, Number(options.maxJobs || 50)));
   const jobTtlMs = Number(options.jobTtlMs || DEFAULT_JOB_TTL_MS);
   const jobs = new Map();
@@ -80,8 +139,11 @@ export function createArticlePreparationService(dependencies, options = {}) {
       try {
         article = updateArticleDetails(id, await crawlArticleDetails(article));
       } catch (error) {
-        if (needsAbstract) stageErrors.push(`摘要补全：${error.message}`);
-        if (needsKeywords) stageErrors.push(`关键词补全：${error.message}`);
+        if (error.details) {
+          article = updateArticleDetails(id, error.details) || article;
+        }
+        if (needsAbstract && !hasText(article.abstract)) stageErrors.push(`摘要补全：${error.message}`);
+        if (needsKeywords && !hasText(article.keywords)) stageErrors.push(`关键词补全：${error.message}`);
       }
       // A crawler can legitimately return only one field.  Check each
       // requested field independently so a successful abstract does not hide

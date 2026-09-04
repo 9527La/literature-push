@@ -271,7 +271,7 @@ function HelpView() {
           <li><strong>筛选</strong>：左侧面板提供多维度筛选条件，包括期刊（多选）、关键词频次（多选）、时间范围、仅未读、仅收藏。不同筛选条件之间为"且"关系，同一条件内多选为"或"关系。</li>
           <li><strong>排序</strong>：支持按发布时间（升序/降序）和按相关性排序。相关性排序根据搜索词在标题（权重 3）、关键词（权重 2）、摘要（权重 1）中出现的次数计算。</li>
           <li><strong>收藏与阅读</strong>：点击心形图标收藏文献，点击文献卡片可展开查看详情，同时自动标记为已读。</li>
-          <li><strong>显示控制</strong>：可通过主页面顶部开关控制作者、关键词、摘要以及中英文标题的可见性。</li>
+          <li><strong>显示控制</strong>：可通过主页面顶部开关控制作者、关键词、摘要以及中文标题的可见性。</li>
         </ul>
       </section>
 
@@ -1059,15 +1059,21 @@ function AdminView({ onDataChanged }) {
         setMessage(result.status === "success" ? `文献刷新完成，新增 ${result.addedCount || 0} 篇。` : result.message);
       } else if (action === "keywords") {
         const result = await api.post("/api/enrich-keywords");
-        setMessage(`关键词补全完成：本次成功 ${result.enriched || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待补全。`);
+        const state = result.status === "error" ? "失败" : result.status === "partial" ? "部分完成" : "完成";
+        const detail = result.errors?.[0]?.message ? ` 首条失败：${result.errors[0].message}` : "";
+        setMessage(`关键词补全${state}：本次处理 ${result.processed || 0} 篇，成功 ${result.enriched || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待补全。${detail}`);
       } else if (action === "abstracts") {
         const result = await api.post("/api/enrich-abstracts");
-        setMessage(`摘要补全完成：本次成功 ${result.enriched || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待补全。`);
+        const state = result.status === "error" ? "失败" : result.status === "partial" ? "部分完成" : "完成";
+        const detail = result.errors?.[0]?.message ? ` 首条失败：${result.errors[0].message}` : "";
+        setMessage(`摘要补全${state}：本次处理 ${result.processed || 0} 篇，成功 ${result.enriched || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待补全。${detail}`);
       } else {
         const field = action === "titles" ? "title" : "abstract";
         const label = action === "titles" ? "标题" : "摘要";
         const result = await api.post("/api/admin/translate", { field, limit: 20 });
-        setMessage(`${label}翻译完成：本次成功 ${result.translated || 0} 篇，失败 ${result.failed || 0} 篇；本次处理 ${result.processed || 0} 篇。`);
+        const state = result.status === "error" ? "失败" : result.status === "partial" ? "部分完成" : "完成";
+        const detail = result.errors?.[0]?.message ? ` 首条失败：${result.errors[0].message}` : "";
+        setMessage(`${label}翻译${state}：本次处理 ${result.processed || 0} 篇，成功 ${result.translated || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待翻译。${detail}`);
       }
       await Promise.all([loadOverview(), onDataChanged()]);
     } catch (error) {
@@ -1142,6 +1148,12 @@ function AdminView({ onDataChanged }) {
     translate_title: "翻译标题",
     translate_abstract: "翻译摘要"
   };
+  const taskStatusLabels = {
+    success: "完成",
+    partial: "部分完成",
+    error: "失败",
+    running: "进行中"
+  };
 
   return (
     <section className="admin-dashboard" aria-labelledby="admin-title">
@@ -1175,12 +1187,14 @@ function AdminView({ onDataChanged }) {
           <div className="refresh-ledger">
             {overview.recentRefreshes.length ? overview.recentRefreshes.map((run, index) => (
               <div key={`${run.started_at}-${index}`}>
-                <span className={`run-state ${run.status}`}>{run.status === "success" ? "完成" : run.status}</span>
+                <span className={`run-state ${run.status}`}>{taskStatusLabels[run.status] || run.status}</span>
                 <div className="run-details">
                   <div className="run-heading"><strong>{taskLabels[run.task_type] || "数据维护"}</strong><time>{formatDate(run.started_at)}</time></div>
                   <small>文献 +{run.added_count || 0} · 摘要 +{run.enriched_abstract_count || 0} · 关键词 +{run.enriched_keyword_count || 0} · 翻译 +{run.translated_count || 0}</small>
+                  {(run.translation_unit_count || run.translation_request_count || run.translated_title_count || run.translated_abstract_count) && <small>翻译单元 {run.translation_unit_count || 0}（标题 {run.translated_title_count || 0} · 摘要 {run.translated_abstract_count || 0}） · API 请求 {run.translation_request_count || 0} 次</small>}
                   <small className="run-failures">失败：文献 {run.failed_article_count || 0} · 摘要 {run.failed_abstract_count || 0} · 关键词 {run.failed_keyword_count || 0} · 翻译 {run.failed_translation_count || 0}</small>
                   <small className="run-pending">待补全：摘要 {run.remaining_abstract_count ?? pending.abstracts ?? 0} · 关键词 {run.remaining_keyword_count ?? pending.keywords ?? 0}</small>
+                  {(run.task_type === "translate_title" || run.task_type === "translate_abstract") && <small className="run-pending">待翻译：{run.remaining_translation_count ?? 0} 篇</small>}
                   {run.message && <small className="run-message">{run.message}</small>}
                 </div>
               </div>
@@ -1760,12 +1774,12 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
             type="button"
             className={`display-toggle ${displayPreferences.bilingual ? "active" : ""}`}
             aria-pressed={displayPreferences.bilingual}
-            aria-label={displayPreferences.bilingual ? "隐藏中英文标题" : "显示中英文标题"}
-            title={displayPreferences.bilingual ? "隐藏中英文标题" : "显示中英文标题"}
+            aria-label={displayPreferences.bilingual ? "隐藏中文标题" : "显示中文标题"}
+            title={displayPreferences.bilingual ? "隐藏中文标题" : "显示中文标题"}
             onClick={() => toggleDisplay("bilingual")}
           >
             {displayPreferences.bilingual ? <Eye size={14} /> : <EyeOff size={14} />}
-            中英文标题
+            中文标题
           </button>
           <button type="button" className={`display-toggle ${displayPreferences.translatedAbstract ? "active" : ""}`} onClick={() => toggleDisplay("translatedAbstract")}>
             {displayPreferences.translatedAbstract ? <Eye size={14} /> : <EyeOff size={14} />} 中文摘要
@@ -1773,7 +1787,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           <span className="display-summary" role="status">
             {`数据库已载入 ${visibleReadyCount} 篇`}
             {visiblePendingCount > 0 && ` · ${visiblePendingCount} 篇待补全`}
-            {displayPreferences.bilingual && ` · ${visibleTranslatedCount} 篇有中文译题`}
+            {displayPreferences.bilingual && ` · ${visibleTranslatedCount} 篇有中文标题`}
             {displayPreferences.abstract && ` · ${visibleAbstractCount} 篇有摘要`}
             {displayPreferences.translatedAbstract && ` · ${visibleTranslatedAbstractCount} 篇有中文摘要`}
           </span>
@@ -1934,6 +1948,7 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
         if (!ignore) {
           const mergedArticle = { ...article, ...nextArticle };
           setDetail(mergedArticle);
+          if (nextArticle.enrichment_error) setEnrichError(nextArticle.enrichment_error);
           onArticleUpdated?.(mergedArticle);
         }
       })

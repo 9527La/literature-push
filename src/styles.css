@@ -3433,6 +3433,8 @@ mark {
 .run-details .run-failures { color: var(--danger, #b54747); }
 .run-state { min-width: 42px; padding: 3px 6px; text-align: center; color: var(--text-secondary); background: var(--bg-tertiary); border-radius: var(--radius-sm); }
 .run-state.success { color: var(--accent-hover); background: var(--accent-light); }
+.run-state.partial { color: #9a6700; background: #fff4cc; }
+.run-state.error { color: var(--danger, #b54747); background: #fde8e8; }
 .empty-compact { color: var(--text-tertiary); font-size: 13px; }
 
 .admin-table-card { padding: 0; overflow: hidden; }

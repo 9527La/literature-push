@@ -47,6 +47,251 @@ test("extracts fallback html metadata for crawler", () => {
   assert.equal(metadata.doi, "10.1109/example");
 });
 
+test("crawler reports missing requested metadata while preserving partial fields", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousCrawlerEnabled = config.crawlerEnabled;
+  config.crawlerEnabled = true;
+  globalThis.fetch = async () => ({
+    ok: true,
+    url: "https://publisher.example/article",
+    text: async () => '<meta name="citation_title" content="Partial title">'
+  });
+
+  try {
+    await assert.rejects(
+      crawlArticleDetails({
+        id: 99,
+        title: "Original title",
+        url: "https://publisher.example/article",
+        abstract: "",
+        keywords: ""
+      }),
+      (error) => {
+        assert.match(error.message, /摘要、关键词/);
+        assert.equal(error.details.title, "Original title");
+        return true;
+      }
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
+    config.crawlerEnabled = previousCrawlerEnabled;
+  }
+});
+
+test("translation provider only requests the selected field", async () => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return {
+      ok: true,
+      json: async () => ({ translatedText: "中文标题" })
+    };
+  };
+
+  try {
+    const result = await translateInternals.translateWithProvider(
+      { title: "English title", abstract: "English abstract" },
+      "zh",
+      "libretranslate",
+      ["title"]
+    );
+    assert.equal(result.title, "中文标题");
+    assert.equal(result.abstract, "");
+    assert.equal(calls.length, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("Volcengine translation uses V4 signing and JSON request fields", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousConfig = {
+    volcengineAccessKeyId: config.volcengineAccessKeyId,
+    volcengineSecretAccessKey: config.volcengineSecretAccessKey,
+    volcengineEndpoint: config.volcengineEndpoint,
+    volcengineRegion: config.volcengineRegion,
+    volcengineService: config.volcengineService
+  };
+  const requests = [];
+  Object.assign(config, {
+    volcengineAccessKeyId: "AK_TEST",
+    volcengineSecretAccessKey: "SK_TEST",
+    volcengineEndpoint: "https://translate.volcengineapi.com",
+    volcengineRegion: "cn-north-1",
+    volcengineService: "translate"
+  });
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url: String(url), options });
+    return {
+      ok: true,
+      json: async () => ({
+        TranslationList: [{ Translation: "中文标题" }],
+        ResponseMetadata: { Error: null }
+      })
+    };
+  };
+
+  try {
+    const result = await translateInternals.translateWithProvider(
+      { title: "English title", abstract: "English abstract" },
+      "zh",
+      "volcengine",
+      ["title"]
+    );
+    assert.equal(result.title, "中文标题");
+    assert.equal(result.abstract, "");
+    assert.equal(requests.length, 1);
+    assert.match(requests[0].url, /Action=TranslateText&Version=2020-06-01/);
+    const payload = JSON.parse(requests[0].options.body);
+    assert.deepEqual(payload.TextList, ["English title"]);
+    assert.equal(payload.TargetLanguage, "zh");
+    assert.equal(payload.SourceLanguage, "en");
+    assert.match(requests[0].options.headers.Authorization, /^HMAC-SHA256 Credential=AK_TEST\/\d{8}\/cn-north-1\/translate\/request/);
+    assert.equal(requests[0].options.headers["Content-Type"], "application/json");
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.assign(config, previousConfig);
+  }
+});
+
+test("batch translation packs multiple article fields and maps them by order", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousConfig = {
+    translationProvider: config.translationProvider,
+    volcengineAccessKeyId: config.volcengineAccessKeyId,
+    volcengineSecretAccessKey: config.volcengineSecretAccessKey,
+    baiduTranslateAppId: config.baiduTranslateAppId,
+    baiduTranslateKey: config.baiduTranslateKey
+  };
+  const requests = [];
+  Object.assign(config, {
+    translationProvider: "volcengine",
+    volcengineAccessKeyId: "AK_TEST",
+    volcengineSecretAccessKey: "SK_TEST",
+    baiduTranslateAppId: "",
+    baiduTranslateKey: ""
+  });
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url: String(url), options });
+    const payload = JSON.parse(options.body);
+    return {
+      ok: true,
+      json: async () => ({
+        TranslationList: payload.TextList.map((text) => ({ Translation: `译文:${text}` })),
+        ResponseMetadata: { Error: null }
+      })
+    };
+  };
+
+  try {
+    const result = await translateInternals.translateArticles([
+      { id: 101, title: "Title A", abstract: "Abstract A", keywords: "keyword A" },
+      { id: 102, title: "Title B", abstract: "Abstract B", keywords: "keyword B" }
+    ], "zh", ["title", "abstract", "keywords"]);
+    assert.equal(result.requests, 1);
+    assert.equal(result.translatedUnits, 4);
+    assert.equal(result.failed.length, 0);
+    assert.deepEqual(result.results.map((item) => `${item.articleId}:${item.field}`), [
+      "101:title", "101:abstract", "102:title", "102:abstract"
+    ]);
+    assert.equal(JSON.parse(requests[0].options.body).TextList.length, 4);
+    assert.equal(JSON.parse(requests[0].options.body).keywords, undefined);
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.assign(config, previousConfig);
+  }
+});
+
+test("batch translation falls back to Baidu with a provider-specific payload", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousConfig = {
+    translationProvider: config.translationProvider,
+    volcengineAccessKeyId: config.volcengineAccessKeyId,
+    volcengineSecretAccessKey: config.volcengineSecretAccessKey,
+    baiduTranslateAppId: config.baiduTranslateAppId,
+    baiduTranslateKey: config.baiduTranslateKey
+  };
+  const calls = [];
+  Object.assign(config, {
+    translationProvider: "auto",
+    volcengineAccessKeyId: "AK_TEST",
+    volcengineSecretAccessKey: "SK_TEST",
+    baiduTranslateAppId: "BAIDU_TEST",
+    baiduTranslateKey: "BAIDU_SECRET"
+  });
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    calls.push(value);
+    if (value.includes("translate.volcengineapi.com")) {
+      return { ok: false, status: 400, text: async () => "invalid request" };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        trans_result: [{ dst: "百度标题" }, { dst: "百度摘要" }]
+      })
+    };
+  };
+
+  try {
+    const result = await translateInternals.translateArticles([
+      { id: 201, title: "English title", abstract: "English abstract" }
+    ], "zh", ["title", "abstract"]);
+    assert.equal(result.translatedUnits, 2);
+    assert.equal(result.failed.length, 0);
+    assert.ok(result.results.every((item) => item.provider === "baidu"));
+    assert.equal(calls.filter((url) => url.includes("translate.volcengineapi.com")).length, 1);
+    assert.equal(calls.filter((url) => url.includes("fanyi-api.baidu.com")).length, 1);
+    const baiduUrl = calls.find((url) => url.includes("fanyi-api.baidu.com"));
+    assert.match(decodeURIComponent(new URL(baiduUrl).searchParams.get("q")), /English title\nEnglish abstract/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.assign(config, previousConfig);
+  }
+});
+
+test("long batch text is chunked and reassembled without translating keywords", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousConfig = {
+    translationProvider: config.translationProvider,
+    volcengineAccessKeyId: config.volcengineAccessKeyId,
+    volcengineSecretAccessKey: config.volcengineSecretAccessKey
+  };
+  const batches = [];
+  Object.assign(config, {
+    translationProvider: "volcengine",
+    volcengineAccessKeyId: "AK_TEST",
+    volcengineSecretAccessKey: "SK_TEST"
+  });
+  globalThis.fetch = async (_url, options) => {
+    const payload = JSON.parse(options.body);
+    batches.push(payload.TextList);
+    return {
+      ok: true,
+      json: async () => ({
+        TranslationList: payload.TextList.map((text) => ({ Translation: `[${text.slice(0, 8)}]` })),
+        ResponseMetadata: { Error: null }
+      })
+    };
+  };
+
+  try {
+    const result = await translateInternals.translateArticles([
+      { id: 301, title: "Short title", abstract: `${"Long sentence. ".repeat(400)}`, keywords: "never translate" }
+    ], "zh", ["title", "abstract", "keywords"]);
+    assert.equal(result.failed.length, 0);
+    assert.equal(result.translatedUnits, 2);
+    assert.ok(batches.length >= 2);
+    assert.ok(batches.every((batch) => batch.length <= 16 && batch.reduce((sum, item) => sum + item.length, 0) <= 4800));
+    assert.ok(result.results.find((item) => item.field === "abstract")?.translated.includes("]"));
+    assert.equal(result.results.some((item) => item.field === "keywords"), false);
+  } finally {
+    globalThis.fetch = previousFetch;
+    Object.assign(config, previousConfig);
+  }
+});
+
 test("extracts meta content regardless of attribute order", () => {
   const html = `
     <meta content="Content-first title" property="og:title">

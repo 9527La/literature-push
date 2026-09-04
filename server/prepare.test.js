@@ -95,3 +95,66 @@ test("batch preparation reports a partial metadata response by field", async () 
   assert.equal(completed.failed, 1);
   assert.match(completed.errors[0].message, /关键词补全/);
 });
+
+test("batch preparation keeps a partial crawler result when the other field fails", async () => {
+  const article = { id: 5, title: "Partial title", abstract: "", keywords: "" };
+  const nextArticle = { ...article };
+  const service = createArticlePreparationService({
+    getArticle: () => nextArticle,
+    updateArticleDetails: (_id, details) => Object.assign(nextArticle, details),
+    crawlArticleDetails: async () => {
+      const error = new Error("publisher returned no keywords");
+      error.details = { abstract: "Saved abstract" };
+      throw error;
+    },
+    ensureTranslation: async () => ({ translated: false, translation: null })
+  });
+
+  const completed = await waitForCompletion(service, service.start([5]).jobId);
+  assert.equal(completed.enrichedAbstract, 1);
+  assert.equal(completed.enrichedKeywords, 0);
+  assert.equal(completed.failedAbstract, 0);
+  assert.equal(completed.failedKeywords, 1);
+  assert.equal(nextArticle.abstract, "Saved abstract");
+  assert.match(completed.errors[0].message, /关键词补全/);
+  assert.doesNotMatch(completed.errors[0].message, /摘要补全/);
+});
+
+test("page preparation coalesces concurrent article translations", async () => {
+  const articles = new Map([
+    [6, { id: 6, title: "Title 6", abstract: "Abstract 6", keywords: "keyword 6" }],
+    [7, { id: 7, title: "Title 7", abstract: "Abstract 7", keywords: "keyword 7" }]
+  ]);
+  let calls = 0;
+  const service = createArticlePreparationService({
+    getArticle: (id) => articles.get(Number(id)),
+    updateArticleDetails: (id, details) => {
+      const next = { ...articles.get(Number(id)), ...details };
+      articles.set(Number(id), next);
+      return next;
+    },
+    crawlArticleDetails: async () => ({}),
+    ensureTranslations: async (batch) => {
+      calls += 1;
+      return {
+        results: batch.map((article) => ({
+          articleId: article.id,
+          translation: { title: `译题 ${article.id}`, abstract: `译文 ${article.id}` },
+          translated: true,
+          fields: ["title", "abstract"],
+          error: ""
+        })),
+        failed: 0,
+        translated: batch.length,
+        requests: 1
+      };
+    }
+  }, { concurrency: 2, maxWaitMs: 10 });
+
+  const completed = await waitForCompletion(service, service.start([6, 7]).jobId);
+  assert.equal(calls, 1);
+  assert.equal(completed.translated, 2);
+  assert.equal(completed.failed, 0);
+  assert.equal(completed.results.find((item) => item.id === 6)?.translated_title, "译题 6");
+  assert.equal(completed.results.find((item) => item.id === 7)?.translated_abstract, "译文 7");
+});

@@ -66,8 +66,13 @@ db.exec(`
     failed_abstract_count INTEGER NOT NULL DEFAULT 0,
     failed_keyword_count INTEGER NOT NULL DEFAULT 0,
     failed_translation_count INTEGER NOT NULL DEFAULT 0,
+    translated_title_count INTEGER NOT NULL DEFAULT 0,
+    translated_abstract_count INTEGER NOT NULL DEFAULT 0,
+    translation_unit_count INTEGER NOT NULL DEFAULT 0,
+    translation_request_count INTEGER NOT NULL DEFAULT 0,
     remaining_abstract_count INTEGER NOT NULL DEFAULT 0,
     remaining_keyword_count INTEGER NOT NULL DEFAULT 0,
+    remaining_translation_count INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL,
     message TEXT
   );
@@ -216,8 +221,13 @@ for (const migration of [
   "ALTER TABLE refresh_runs ADD COLUMN failed_abstract_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE refresh_runs ADD COLUMN failed_keyword_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE refresh_runs ADD COLUMN failed_translation_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN translated_title_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN translated_abstract_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN translation_unit_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN translation_request_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE refresh_runs ADD COLUMN remaining_abstract_count INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE refresh_runs ADD COLUMN remaining_keyword_count INTEGER NOT NULL DEFAULT 0"
+  "ALTER TABLE refresh_runs ADD COLUMN remaining_keyword_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE refresh_runs ADD COLUMN remaining_translation_count INTEGER NOT NULL DEFAULT 0"
 ]) {
   try { db.exec(migration); } catch (error) {
     if (!error.message?.includes("duplicate column")) throw error;
@@ -529,6 +539,45 @@ export function saveTranslation(articleId, targetLanguage, translation) {
   return getTranslation(articleId, targetLanguage);
 }
 
+// Persist several field-level translation results atomically.  A provider can
+// return title and abstract results in one request, so committing the whole
+// batch together prevents a partially written response from being mistaken
+// for a complete translation run.
+export function saveTranslations(entries = []) {
+  const values = Array.isArray(entries) ? entries.filter((entry) => entry?.articleId && entry?.targetLanguage) : [];
+  if (!values.length) return [];
+  const statement = db.prepare(`
+    INSERT INTO translations (article_id, target_language, title, abstract, keywords, provider, translated_at)
+    VALUES (@articleId, @targetLanguage, @title, @abstract, @keywords, @provider, @translatedAt)
+    ON CONFLICT(article_id, target_language) DO UPDATE SET
+      title = CASE WHEN length(trim(coalesce(excluded.title, ''))) > 0 THEN excluded.title ELSE translations.title END,
+      abstract = CASE WHEN length(trim(coalesce(excluded.abstract, ''))) > 0 THEN excluded.abstract ELSE translations.abstract END,
+      keywords = translations.keywords,
+      provider = CASE WHEN length(trim(coalesce(excluded.provider, ''))) > 0 THEN excluded.provider ELSE translations.provider END,
+      translated_at = excluded.translated_at
+  `);
+  db.exec("BEGIN");
+  try {
+    for (const entry of values) {
+      const translation = entry.translation || {};
+      statement.run({
+        articleId: entry.articleId,
+        targetLanguage: entry.targetLanguage,
+        title: translation.title || "",
+        abstract: translation.abstract || "",
+        keywords: "",
+        provider: translation.provider || "",
+        translatedAt: new Date().toISOString()
+      });
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw error;
+  }
+  return values.map((entry) => getTranslation(entry.articleId, entry.targetLanguage));
+}
+
 export function insertArticles(articles) {
   const exists = db.prepare("SELECT 1 FROM articles WHERE external_id = ?");
   const getId = db.prepare("SELECT id FROM articles WHERE external_id = ?");
@@ -671,15 +720,21 @@ export function finishRefreshRun(id, {
   failedAbstractCount = 0,
   failedKeywordCount = 0,
   failedTranslationCount = 0,
+  translatedTitleCount = 0,
+  translatedAbstractCount = 0,
+  translationUnitCount = 0,
+  translationRequestCount = 0,
   remainingAbstractCount = 0,
-  remainingKeywordCount = 0
+  remainingKeywordCount = 0,
+  remainingTranslationCount = 0
 }) {
   db.prepare(`
     UPDATE refresh_runs
     SET finished_at = ?, added_count = ?, status = ?, message = ?,
         enriched_abstract_count = ?, enriched_keyword_count = ?, translated_count = ?,
         failed_article_count = ?, failed_abstract_count = ?, failed_keyword_count = ?, failed_translation_count = ?,
-        remaining_abstract_count = ?, remaining_keyword_count = ?
+        translated_title_count = ?, translated_abstract_count = ?, translation_unit_count = ?, translation_request_count = ?,
+        remaining_abstract_count = ?, remaining_keyword_count = ?, remaining_translation_count = ?
     WHERE id = ?
   `).run(
     new Date().toISOString(),
@@ -693,8 +748,13 @@ export function finishRefreshRun(id, {
     Number(failedAbstractCount || 0),
     Number(failedKeywordCount || 0),
     Number(failedTranslationCount || 0),
+    Number(translatedTitleCount || 0),
+    Number(translatedAbstractCount || 0),
+    Number(translationUnitCount || 0),
+    Number(translationRequestCount || 0),
     Number(remainingAbstractCount || 0),
     Number(remainingKeywordCount || 0),
+    Number(remainingTranslationCount || 0),
     id
   );
 }
@@ -708,14 +768,20 @@ export function updateRefreshRunSummary(id, {
   failedAbstractCount = 0,
   failedKeywordCount = 0,
   failedTranslationCount = 0,
+  translatedTitleCount = 0,
+  translatedAbstractCount = 0,
+  translationUnitCount = 0,
+  translationRequestCount = 0,
   remainingAbstractCount = 0,
-  remainingKeywordCount = 0
+  remainingKeywordCount = 0,
+  remainingTranslationCount = 0
 }) {
   db.prepare(`
     UPDATE refresh_runs
     SET enriched_abstract_count = ?, enriched_keyword_count = ?, translated_count = ?,
         failed_article_count = ?, failed_abstract_count = ?, failed_keyword_count = ?, failed_translation_count = ?,
-        remaining_abstract_count = ?, remaining_keyword_count = ?,
+        translated_title_count = ?, translated_abstract_count = ?, translation_unit_count = ?, translation_request_count = ?,
+        remaining_abstract_count = ?, remaining_keyword_count = ?, remaining_translation_count = ?,
         message = ?
     WHERE id = ?
   `).run(
@@ -726,8 +792,13 @@ export function updateRefreshRunSummary(id, {
     Number(failedAbstractCount || 0),
     Number(failedKeywordCount || 0),
     Number(failedTranslationCount || 0),
+    Number(translatedTitleCount || 0),
+    Number(translatedAbstractCount || 0),
+    Number(translationUnitCount || 0),
+    Number(translationRequestCount || 0),
     Number(remainingAbstractCount || 0),
     Number(remainingKeywordCount || 0),
+    Number(remainingTranslationCount || 0),
     message || "",
     id
   );
@@ -808,6 +879,19 @@ export function countArticlesMissingAbstract() {
     FROM articles
     WHERE length(trim(coalesce(abstract, ''))) = 0
   `).get()?.count || 0);
+}
+
+export function countArticlesMissingTranslation(field = "title", targetLanguage = "zh") {
+  const sourceColumn = field === "abstract" ? "abstract" : "title";
+  const translatedColumn = field === "abstract" ? "abstract" : "title";
+  return Number(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM articles a
+    LEFT JOIN translations t
+      ON t.article_id = a.id AND t.target_language = ?
+    WHERE length(trim(coalesce(a.${sourceColumn}, ''))) > 0
+      AND length(trim(coalesce(t.${translatedColumn}, ''))) = 0
+  `).get(targetLanguage)?.count || 0);
 }
 
 export function getMetadataGaps() {
@@ -1163,7 +1247,9 @@ export function getAdminOverview() {
   const translatedAbstractCount = scalar("SELECT COUNT(*) AS count FROM translations WHERE length(trim(coalesce(abstract, ''))) > 0");
   const pending = {
     abstracts: articleCount - abstractCount,
-    keywords: articleCount - keywordCount
+    keywords: articleCount - keywordCount,
+    translatedTitles: countArticlesMissingTranslation("title", "zh"),
+    translatedAbstracts: countArticlesMissingTranslation("abstract", "zh")
   };
   return {
     counts: {
@@ -1201,7 +1287,8 @@ export function getAdminOverview() {
       SELECT started_at, finished_at, added_count, task_type,
         enriched_abstract_count, enriched_keyword_count, translated_count,
         failed_article_count, failed_abstract_count, failed_keyword_count, failed_translation_count,
-        remaining_abstract_count, remaining_keyword_count,
+        translated_title_count, translated_abstract_count, translation_unit_count, translation_request_count,
+        remaining_abstract_count, remaining_keyword_count, remaining_translation_count,
         status, message
       FROM refresh_runs ORDER BY id DESC LIMIT 8
     `).all()

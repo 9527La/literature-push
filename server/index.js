@@ -37,6 +37,7 @@ import {
   deleteUserAccount,
   getAdminOverview,
   getMetadataGaps,
+  countArticlesMissingTranslation,
   saveRemotePreferences,
   getRemotePreferences,
   getRecentFeedbackCount,
@@ -69,7 +70,7 @@ import { generateWeeklyDigestMarkdown } from "./digest.js";
 import { sendMarkdownDigestEmail } from "./mail.js";
 import { calculatePushDays } from "./utils.js";
 import { createArticlePreparationService } from "./prepare.js";
-import { ensureTranslation } from "./translation-cache.js";
+import { ensureTranslation, ensureTranslations } from "./translation-cache.js";
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -85,14 +86,17 @@ app.use(express.json());
 
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const pagePrepareConcurrency = config.translationProvider === "baidu"
-  || (config.translationProvider === "auto" && config.baiduTranslateAppId && config.baiduTranslateKey)
+  || (config.translationProvider === "auto"
+    && !(config.volcengineAccessKeyId && config.volcengineSecretAccessKey)
+    && config.baiduTranslateAppId && config.baiduTranslateKey)
   ? 1
   : config.pagePrepareConcurrency;
 const articlePreparation = createArticlePreparationService({
   getArticle,
   updateArticleDetails,
   crawlArticleDetails,
-  ensureTranslation
+  ensureTranslation,
+  ensureTranslations
 }, {
   concurrency: pagePrepareConcurrency,
   maxItems: config.pagePrepareMaxItems
@@ -162,7 +166,15 @@ app.get("/api/articles/:id/enrich", async (req, res) => {
     const details = await crawlArticleDetails(article);
     res.json(updateArticleDetails(req.params.id, details));
   } catch (error) {
-    res.status(502).json({ error: error.message, article });
+    const partial = error.details ? updateArticleDetails(req.params.id, error.details) : article;
+    const hasPartialMetadata = ["abstract", "keywords"].some((field) =>
+      String(partial?.[field] || "").trim() && !String(article?.[field] || "").trim()
+    );
+    if (hasPartialMetadata) {
+      res.json({ ...partial, enrichment_error: error.message });
+      return;
+    }
+    res.status(502).json({ error: error.message, article: partial });
   }
 });
 
@@ -198,7 +210,7 @@ app.post("/api/enrich-keywords", requireSiteAdmin, async (req, res) => {
     const result = await enrichMissingKeywords();
     const gaps = getMetadataGaps();
     finishRefreshRun(runId, {
-      status: "success",
+      status: result.failed ? (result.enriched ? "partial" : "error") : "success",
       abstractCount: result.enrichedAbstracts,
       keywordCount: result.enriched,
       failedAbstractCount: result.failedAbstracts,
@@ -207,7 +219,7 @@ app.post("/api/enrich-keywords", requireSiteAdmin, async (req, res) => {
       remainingKeywordCount: gaps.keywords,
       message: `新增文献 0 篇 · 补全摘要 ${result.enrichedAbstracts || 0} 篇 · 补全关键词 ${result.enriched || 0} 篇 · 新增翻译 0 篇 · 失败：文献 0 / 摘要 ${result.failedAbstracts || 0} / 关键词 ${result.failed || 0} / 翻译 0 · 待补全：摘要 ${gaps.abstracts} 篇 / 关键词 ${gaps.keywords} 篇`
     });
-    res.json({ status: "success", ...result });
+    res.json({ status: result.failed ? (result.enriched ? "partial" : "error") : "success", ...result });
   } catch (error) {
     finishRefreshRun(runId, { status: "error", message: `补全关键词失败：${error.message}` });
     res.status(500).json({ status: "error", message: error.message });
@@ -220,7 +232,7 @@ app.post("/api/enrich-abstracts", requireSiteAdmin, async (req, res) => {
     const result = await enrichMissingAbstracts();
     const gaps = getMetadataGaps();
     finishRefreshRun(runId, {
-      status: "success",
+      status: result.failed ? (result.enriched ? "partial" : "error") : "success",
       abstractCount: result.enriched,
       keywordCount: result.enrichedKeywords,
       failedAbstractCount: result.failed,
@@ -229,7 +241,7 @@ app.post("/api/enrich-abstracts", requireSiteAdmin, async (req, res) => {
       remainingKeywordCount: gaps.keywords,
       message: `新增文献 0 篇 · 补全摘要 ${result.enriched || 0} 篇 · 补全关键词 ${result.enrichedKeywords || 0} 篇 · 新增翻译 0 篇 · 失败：文献 0 / 摘要 ${result.failed || 0} / 关键词 ${result.failedKeywords || 0} / 翻译 0 · 待补全：摘要 ${gaps.abstracts} 篇 / 关键词 ${gaps.keywords} 篇`
     });
-    res.json({ status: "success", ...result });
+    res.json({ status: result.failed ? (result.enriched ? "partial" : "error") : "success", ...result });
   } catch (error) {
     finishRefreshRun(runId, { status: "error", message: `补全摘要失败：${error.message}` });
     res.status(500).json({ status: "error", message: error.message });
@@ -247,15 +259,21 @@ app.post("/api/admin/translate", requireSiteAdmin, asyncHandler(async (req, res)
   try {
     const result = await translateMissingArticles(field, "zh", limit);
     const gaps = getMetadataGaps();
+    const remainingTranslationCount = countArticlesMissingTranslation(field, "zh");
     finishRefreshRun(runId, {
-      status: "success",
+      status: result.failed ? (result.translated ? "partial" : "error") : "success",
       translatedCount: result.translated,
+      translatedTitleCount: result.translatedTitleCount,
+      translatedAbstractCount: result.translatedAbstractCount,
+      translationUnitCount: result.translatedUnits,
+      translationRequestCount: result.requests,
       failedTranslationCount: result.failed,
       remainingAbstractCount: gaps.abstracts,
       remainingKeywordCount: gaps.keywords,
-      message: `新增文献 0 篇 · 补全摘要 0 篇 · 补全关键词 0 篇 · 新增翻译 ${result.translated || 0} 篇 · 失败：文献 0 / 摘要 0 / 关键词 0 / 翻译 ${result.failed || 0} · 待补全：摘要 ${gaps.abstracts} 篇 / 关键词 ${gaps.keywords} 篇`
+      remainingTranslationCount,
+      message: `新增文献 0 篇 · 补全摘要 0 篇 · 补全关键词 0 篇 · 新增翻译 ${result.translated || 0} 篇 · 翻译单元 ${result.translatedUnits || 0} · API 请求 ${result.requests || 0} 次 · 失败：文献 0 / 摘要 0 / 关键词 0 / 翻译 ${result.failed || 0} · 待补全：摘要 ${gaps.abstracts} 篇 / 关键词 ${gaps.keywords} 篇 · 待翻译 ${remainingTranslationCount} 篇`
     });
-    res.json({ status: "success", ...result });
+    res.json({ status: result.failed ? (result.translated ? "partial" : "error") : "success", ...result });
   } catch (error) {
     finishRefreshRun(runId, { status: "error", message: `翻译${field === "title" ? "标题" : "摘要"}失败：${error.message}` });
     throw error;

@@ -9,6 +9,7 @@ import {
   getMetadataGaps,
   insertArticles,
   countArticlesMissingAbstract,
+  countArticlesMissingTranslation,
   countArticlesWithoutKeywords,
   listArticlesMissingAbstract,
   listArticlesMissingTranslation,
@@ -19,12 +20,11 @@ import {
 } from "./db.js";
 import { fetchJournalArticles } from "./sources.js";
 import { crawlArticleDetails } from "./crawler.js";
-import { ensureTranslation } from "./translation-cache.js";
+import { ensureTranslations } from "./translation-cache.js";
 import { generateWeeklyDigestMarkdown } from "./digest.js";
 import { sendMarkdownDigestEmail } from "./mail.js";
 import { calculatePushDays, sleep } from "./utils.js";
 
-const TRANSLATE_DELAY_MS = 1000;
 const TRANSLATE_BATCH_LIMIT = 20;
 const ENRICH_BATCH_LIMIT = 50;
 const ENRICH_DELAY_MS = 500;
@@ -62,12 +62,17 @@ function formatTaskMessage({
   abstractCount = 0,
   keywordCount = 0,
   translatedCount = 0,
+  translatedTitleCount = 0,
+  translatedAbstractCount = 0,
+  translationUnitCount = 0,
+  translationRequestCount = 0,
   failedArticleCount = 0,
   failedAbstractCount = 0,
   failedKeywordCount = 0,
   failedTranslationCount = 0,
   remainingAbstractCount = 0,
-  remainingKeywordCount = 0
+  remainingKeywordCount = 0,
+  remainingTranslationCount = 0
 }) {
   const additions = [
     `新增文献 ${Number(addedCount || 0)} 篇`,
@@ -81,7 +86,8 @@ function formatTaskMessage({
     `关键词 ${Number(failedKeywordCount || 0)}`,
     `翻译 ${Number(failedTranslationCount || 0)}`
   ];
-  return `${additions.join(" · ")} · 失败：${failures.join(" / ")} · 待补全：摘要 ${Number(remainingAbstractCount || 0)} / 关键词 ${Number(remainingKeywordCount || 0)}`;
+  const fieldSummary = `标题 ${Number(translatedTitleCount || 0)} / 摘要 ${Number(translatedAbstractCount || 0)}`;
+  return `${additions.join(" · ")} · 翻译单元 ${Number(translationUnitCount || 0)}（${fieldSummary}） · API 请求 ${Number(translationRequestCount || 0)} 次 · 失败：${failures.join(" / ")} · 待补全：摘要 ${Number(remainingAbstractCount || 0)} / 关键词 ${Number(remainingKeywordCount || 0)} · 待翻译 ${Number(remainingTranslationCount || 0)}`;
 }
 
 export async function refreshArticles() {
@@ -120,25 +126,37 @@ export async function refreshArticles() {
     if (addedArticles.length) {
       void (async () => {
         const selected = addedArticles.slice(0, TRANSLATE_BATCH_LIMIT);
-        const enriched = await enrichArticles(selected);
+        const enrichment = await enrichArticles(selected);
+        const enriched = enrichment.articles;
         const metadata = countMetadataAdditions(selected, enriched);
         const translationResult = await autoTranslateArticles(enriched);
         const remaining = getMetadataGaps();
+        const remainingTranslationCount = countArticlesMissingTranslation(config.weeklyDigestTranslationLanguage || "zh");
         updateRefreshRunSummary(runId, {
           ...metadata,
           translatedCount: translationResult.translated,
+          translatedTitleCount: translationResult.translatedTitleCount,
+          translatedAbstractCount: translationResult.translatedAbstractCount,
+          translationUnitCount: translationResult.translatedUnits,
+          translationRequestCount: translationResult.requests,
           failedArticleCount: errors.length,
           failedTranslationCount: translationResult.failed,
           remainingAbstractCount: remaining.abstracts,
           remainingKeywordCount: remaining.keywords,
+          remainingTranslationCount,
           message: formatTaskMessage({
             addedCount,
             ...metadata,
             translatedCount: translationResult.translated,
+            translatedTitleCount: translationResult.translatedTitleCount,
+            translatedAbstractCount: translationResult.translatedAbstractCount,
+            translationUnitCount: translationResult.translatedUnits,
+            translationRequestCount: translationResult.requests,
             failedArticleCount: errors.length,
             failedTranslationCount: translationResult.failed,
             remainingAbstractCount: remaining.abstracts,
-            remainingKeywordCount: remaining.keywords
+            remainingKeywordCount: remaining.keywords,
+            remainingTranslationCount
           })
         });
       })().catch((error) => {
@@ -157,6 +175,7 @@ export async function refreshArticles() {
         );
         const translationResult = await autoTranslateArticles(backlog);
         const remaining = getMetadataGaps();
+        const remainingTranslationCount = countArticlesMissingTranslation(config.weeklyDigestTranslationLanguage || "zh");
         const abstractCount = (abstractResult.enrichedAbstracts ?? abstractResult.enriched ?? 0)
           + (keywordResult.enrichedAbstracts || 0);
         const keywordCount = (abstractResult.enrichedKeywords || 0)
@@ -169,23 +188,33 @@ export async function refreshArticles() {
           abstractCount,
           keywordCount,
           translatedCount: translationResult.translated,
+          translatedTitleCount: translationResult.translatedTitleCount,
+          translatedAbstractCount: translationResult.translatedAbstractCount,
+          translationUnitCount: translationResult.translatedUnits,
+          translationRequestCount: translationResult.requests,
           failedArticleCount: errors.length,
           failedAbstractCount,
           failedKeywordCount,
           failedTranslationCount: translationResult.failed,
           remainingAbstractCount: remaining.abstracts,
           remainingKeywordCount: remaining.keywords,
+          remainingTranslationCount,
           message: formatTaskMessage({
             addedCount,
             abstractCount,
             keywordCount,
             translatedCount: translationResult.translated,
+            translatedTitleCount: translationResult.translatedTitleCount,
+            translatedAbstractCount: translationResult.translatedAbstractCount,
+            translationUnitCount: translationResult.translatedUnits,
+            translationRequestCount: translationResult.requests,
             failedArticleCount: errors.length,
             failedAbstractCount,
             failedKeywordCount,
             failedTranslationCount: translationResult.failed,
             remainingAbstractCount: remaining.abstracts,
-            remainingKeywordCount: remaining.keywords
+            remainingKeywordCount: remaining.keywords,
+            remainingTranslationCount
           })
         });
       })().catch((error) => {
@@ -210,20 +239,39 @@ export async function refreshArticles() {
   }
 }
 
-async function enrichArticles(articles) {
-  const results = [];
-  for (const article of articles) {
+function metadataFieldLabel(field) {
+  return field === "abstract" ? "摘要" : "关键词";
+}
+
+async function enrichArticles(articles, fields = ["abstract", "keywords"]) {
+  const requestedFields = [...new Set(fields.filter((field) => field === "abstract" || field === "keywords"))];
+  const results = new Array(articles.length);
+  const errors = [];
+  for (const [index, article] of articles.entries()) {
     try {
-      const details = await crawlArticleDetails(article);
-      results.push(updateArticleDetails(article.id, details));
+      const details = await crawlArticleDetails(article, { fields: requestedFields });
+      results[index] = updateArticleDetails(article.id, details) || article;
       console.log(`[enrich] #${article.id} metadata updated`);
     } catch (error) {
-      results.push(article);
+      // The crawler attaches any fields collected before the failure. Save
+      // that partial result so one unavailable field does not discard a usable
+      // abstract/keyword returned by another source.
+      results[index] = error.details
+        ? (updateArticleDetails(article.id, error.details) || article)
+        : article;
+      const missing = requestedFields.filter((field) => !hasText(results[index]?.[field]));
+      errors.push({
+        id: article.id,
+        fields: missing,
+        message: missing.length
+          ? `${missing.map(metadataFieldLabel).join("、")}：${error.message}`
+          : error.message
+      });
       console.warn(`[enrich] #${article.id} failed: ${error.message}`);
     }
     await sleep(ENRICH_DELAY_MS);
   }
-  return results;
+  return { articles: results, errors };
 }
 
 export async function enrichMissingKeywords() {
@@ -237,10 +285,12 @@ export async function enrichMissingKeywords() {
       failedKeywords: 0,
       enrichedAbstracts: 0,
       failedAbstracts: 0,
-      remaining: countArticlesWithoutKeywords()
+      remaining: countArticlesWithoutKeywords(),
+      errors: []
     };
   }
-  const results = await enrichArticles(articles);
+  const enrichment = await enrichArticles(articles, ["keywords"]);
+  const results = enrichment.articles;
   const enrichedKeywords = results.filter((article, index) =>
     hasText(article.keywords) && !hasText(articles[index].keywords)
   ).length;
@@ -259,7 +309,8 @@ export async function enrichMissingKeywords() {
     failedKeywords,
     enrichedAbstracts,
     failedAbstracts,
-    remaining: countArticlesWithoutKeywords()
+    remaining: countArticlesWithoutKeywords(),
+    errors: enrichment.errors
   };
 }
 
@@ -274,10 +325,12 @@ export async function enrichMissingAbstracts() {
       failedAbstracts: 0,
       enrichedKeywords: 0,
       failedKeywords: 0,
-      remaining: countArticlesMissingAbstract()
+      remaining: countArticlesMissingAbstract(),
+      errors: []
     };
   }
-  const results = await enrichArticles(articles);
+  const enrichment = await enrichArticles(articles, ["abstract"]);
+  const results = enrichment.articles;
   const enrichedAbstracts = results.filter((article, index) =>
     hasText(article.abstract) && !hasText(articles[index].abstract)
   ).length;
@@ -296,7 +349,8 @@ export async function enrichMissingAbstracts() {
     failedAbstracts,
     enrichedKeywords,
     failedKeywords,
-    remaining: countArticlesMissingAbstract()
+    remaining: countArticlesMissingAbstract(),
+    errors: enrichment.errors
   };
 }
 
@@ -310,54 +364,44 @@ export async function translateMissingArticles(field, targetLanguage = "zh", lim
   }
 
   const articles = listArticlesMissingTranslation(field, targetLanguage, limit);
-  let translated = 0;
-  let failed = 0;
-  const errors = [];
-
-  for (const article of articles) {
-    let requested = false;
-    try {
-      const result = await ensureTranslation(article, targetLanguage, { fields: [field] });
-      requested = Boolean(result.translated);
-      if (requested) translated += 1;
-    } catch (error) {
-      failed += 1;
-      errors.push({ id: article.id, message: error.message });
-    }
-    if (requested) await sleep(TRANSLATE_DELAY_MS);
-  }
+  const batch = await ensureTranslations(articles, targetLanguage, { fields: [field] });
+  const translated = batch.translated || 0;
+  const failed = batch.failed || 0;
 
   return {
     field,
     targetLanguage,
     processed: articles.length,
     translated,
+    translatedTitleCount: field === "title" ? batch.translatedUnits || 0 : 0,
+    translatedAbstractCount: field === "abstract" ? batch.translatedUnits || 0 : 0,
     failed,
-    errors
+    translatedUnits: batch.translatedUnits || 0,
+    requests: batch.requests || 0,
+    providers: batch.providers || [],
+    errors: batch.errors || [],
+    remaining: countArticlesMissingTranslation(field, targetLanguage)
   };
 }
 
 export async function autoTranslateArticles(articles) {
   const targetLanguage = config.weeklyDigestTranslationLanguage || "zh";
-  let translated = 0;
-  let failed = 0;
-  for (const article of articles) {
-    if (!article.id) continue;
-    let requested = false;
-    try {
-      const result = await ensureTranslation(article, targetLanguage);
-      requested = Boolean(result.translated);
-      if (requested) {
-        translated += 1;
-        console.log(`[translate] #${article.id} translated and saved`);
-      }
-    } catch (error) {
-      failed += 1;
-      console.warn(`[translate] #${article.id} failed: ${error.message}`);
-    }
-    if (requested) await sleep(TRANSLATE_DELAY_MS);
+  const selected = (Array.isArray(articles) ? articles : []).filter((article) => article?.id);
+  const batch = await ensureTranslations(selected, targetLanguage);
+  for (const item of batch.results || []) {
+    if (item.translated) console.log(`[translate] #${item.articleId} translated and saved (${item.fields.join(",")})`);
+    if (item.error) console.warn(`[translate] #${item.articleId} failed: ${item.error}`);
   }
-  return { translated, failed };
+  return {
+    translated: batch.translated || 0,
+    failed: batch.failed || 0,
+    translatedUnits: batch.translatedUnits || 0,
+    translatedTitleCount: (batch.results || []).filter((item) => item.field === "title").length,
+    translatedAbstractCount: (batch.results || []).filter((item) => item.field === "abstract").length,
+    requests: batch.requests || 0,
+    providers: batch.providers || [],
+    errors: batch.errors || []
+  };
 }
 
 async function createAndSendDigest(settings, recipients, days) {

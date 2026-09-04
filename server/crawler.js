@@ -190,9 +190,7 @@ async function fetchOpenAlexDetails(doi) {
     select: "id,doi,title,publication_year,publication_date,biblio,authorships,primary_location,abstract_inverted_index,keywords,concepts,primary_topic"
   });
   if (config.crossrefMailto) params.set("mailto", config.crossrefMailto);
-  const response = await fetch(`https://api.openalex.org/works/${encodeURIComponent(`https://doi.org/${normalizedDoi}`)}?${params}`);
-  if (response.ok === false) throw new Error(`OpenAlex returned ${response.status}`);
-  const item = await response.json();
+  const item = await fetchJson(`https://api.openalex.org/works/${encodeURIComponent(`https://doi.org/${normalizedDoi}`)}?${params}`);
   const keywords = Array.isArray(item.keywords)
     ? item.keywords.map((keyword) => keyword?.display_name || keyword?.name || keyword).filter(Boolean).join("; ")
     : "";
@@ -362,7 +360,21 @@ function isElsevierArticle(article) {
          url.includes("elsevier.com");
 }
 
-export async function crawlArticleDetails(article) {
+function normalizeRequestedFields(fields) {
+  const requested = Array.isArray(fields) && fields.length ? fields : ["abstract", "keywords"];
+  return new Set(requested.filter((field) => field === "abstract" || field === "keywords"));
+}
+
+function missingRequestedFields(details, requestedFields) {
+  return [...requestedFields].filter((field) => !String(details?.[field] || "").trim());
+}
+
+export async function crawlArticleDetails(article, options = {}) {
+  const requestedFields = normalizeRequestedFields(options.fields);
+  const needsAbstract = requestedFields.has("abstract") && !String(article.abstract || "").trim();
+  const needsKeywords = requestedFields.has("keywords") && !String(article.keywords || "").trim();
+  if (!needsAbstract && !needsKeywords) return { ...article };
+
   if (!config.crawlerEnabled) {
     throw new Error("Crawler is disabled");
   }
@@ -372,8 +384,6 @@ export async function crawlArticleDetails(article) {
     throw new Error("Article has no DOI or URL to crawl");
   }
 
-  const needsAbstract = !String(article.abstract || "").trim();
-  const needsKeywords = !String(article.keywords || "").trim();
   let details = { ...article };
   let sourceFound = false;
 
@@ -482,9 +492,23 @@ export async function crawlArticleDetails(article) {
     }
 
     if (!sourceFound) {
-      throw new Error("No crawlable metadata found on the public page");
+      const error = new Error("No crawlable metadata found on the public page");
+      error.details = details;
+      throw error;
+    }
+    const missing = missingRequestedFields(details, requestedFields);
+    if (missing.length) {
+      const error = new Error(`公开来源未返回${missing.map((field) => field === "abstract" ? "摘要" : "关键词").join("、")}`);
+      error.details = details;
+      throw error;
     }
     return details;
+  } catch (error) {
+    // Preserve fields collected by an earlier DOI/API source even when the
+    // publisher page itself is unavailable. Callers can save the usable
+    // portion and report only the field(s) that are still missing.
+    if (!error.details) error.details = details;
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
@@ -501,6 +525,8 @@ export const internals = {
   fetchCrossrefDetails,
   fetchSemanticScholarDetails,
   mergeDetails,
+  normalizeRequestedFields,
+  missingRequestedFields,
   normalizePublicationDate,
   isElsevierArticle
 };

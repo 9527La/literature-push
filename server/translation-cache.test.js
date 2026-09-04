@@ -58,3 +58,56 @@ test("concurrent requests for one article share one translation call", async () 
   assert.equal(left.translation.title, "并发标题");
   assert.equal(right.translation.abstract, "并发摘要");
 });
+
+test("batch cache service saves only missing fields in one provider call", async () => {
+  const articles = new Map([
+    [11, { id: 11, title: "Title 11", abstract: "Abstract 11", keywords: "keyword 11" }],
+    [12, { id: 12, title: "Title 12", abstract: "Abstract 12", keywords: "keyword 12" }]
+  ]);
+  const translations = new Map([
+    [11, { article_id: 11, target_language: "zh", title: "已有标题", abstract: "", keywords: "" }]
+  ]);
+  let calls = 0;
+  let request;
+  const service = createTranslationCacheService({
+    getArticle: (id) => articles.get(Number(id)),
+    getTranslation: (id) => translations.get(Number(id)) || null,
+    saveTranslations: (entries) => {
+      for (const entry of entries) {
+        const previous = translations.get(Number(entry.articleId)) || { article_id: Number(entry.articleId), target_language: entry.targetLanguage };
+        translations.set(Number(entry.articleId), { ...previous, ...entry.translation });
+      }
+      return entries.map((entry) => translations.get(Number(entry.articleId)));
+    },
+    saveTranslation: () => { throw new Error("batch save should be used"); },
+    translateArticles: async (sources, targetLanguage, fields) => {
+      calls += 1;
+      request = { sources, targetLanguage, fields };
+      return {
+        results: [
+          { articleId: 11, field: "abstract", translated: "新摘要 11", provider: "test" },
+          { articleId: 12, field: "title", translated: "新标题 12", provider: "test" },
+          { articleId: 12, field: "abstract", translated: "新摘要 12", provider: "test" }
+        ],
+        failed: [],
+        errors: [],
+        translatedUnits: 3,
+        requests: 1,
+        providers: [{ provider: "test", requests: 1 }]
+      };
+    }
+  });
+
+  const result = await service.ensureTranslations([...articles.values()], "zh");
+  assert.equal(calls, 1);
+  assert.deepEqual(request.fields, ["abstract", "title"]);
+  assert.equal(request.sources[0].title, "");
+  assert.equal(request.sources[0].abstract, "Abstract 11");
+  assert.equal(request.sources[0].keywords, undefined);
+  assert.equal(result.translated, 2);
+  assert.equal(result.translatedUnits, 3);
+  assert.equal(result.requests, 1);
+  assert.equal(translations.get(11).title, "已有标题");
+  assert.equal(translations.get(11).abstract, "新摘要 11");
+  assert.equal(translations.get(12).title, "新标题 12");
+});
