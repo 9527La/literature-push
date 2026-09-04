@@ -1,9 +1,12 @@
 import { config } from "./config.js";
-import { decodeEntities, stripTags } from "./utils.js";
+import { decodeEntities, stripTags, sleep } from "./utils.js";
 import { fetchElsevierArticleDetails } from "./elsevier.js";
 
 const CROSSREF_API = "https://api.crossref.org/works";
 const SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper";
+const DEFAULT_SEMANTIC_SCHOLAR_INTERVAL_MS = 1100;
+let semanticScholarQueue = Promise.resolve();
+let semanticScholarLastStartedAt = 0;
 
 function normalizePublicationDate(value) {
   const text = stripTags(value);
@@ -223,11 +226,57 @@ async function fetchJson(url, options = {}) {
   const timeout = setTimeout(() => controller.abort(), config.crawlerTimeoutMs);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
-    if (response.ok === false) throw new Error(`Metadata source returned ${response.status}`);
+    if (response.ok === false) {
+      const error = new Error(`Metadata source returned ${response.status}`);
+      error.status = response.status;
+      error.retryAfter = Number(response.headers?.get?.("retry-after")) || 0;
+      throw error;
+    }
     return await response.json();
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function semanticScholarIntervalMs() {
+  const configured = Number(config.semanticScholarRequestIntervalMs);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_SEMANTIC_SCHOLAR_INTERVAL_MS;
+}
+
+function enqueueSemanticScholarRequest(request) {
+  const run = semanticScholarQueue.catch(() => {}).then(async () => {
+    const waitMs = Math.max(0, semanticScholarIntervalMs() - (Date.now() - semanticScholarLastStartedAt));
+    if (waitMs > 0) await sleep(waitMs);
+    semanticScholarLastStartedAt = Date.now();
+    return request();
+  });
+  semanticScholarQueue = run.catch(() => {});
+  return run;
+}
+
+async function fetchSemanticScholarJson(url) {
+  return enqueueSemanticScholarRequest(async () => {
+    let lastError;
+    for (let attempt = 0; attempt <= 2; attempt += 1) {
+      try {
+        return await fetchJson(url, {
+          headers: {
+            Accept: "application/json",
+            "User-Agent": "literature-push/1.0 (metadata crawler)"
+          }
+        });
+      } catch (error) {
+        lastError = error;
+        const retryable = error?.status === 408 || error?.status === 425 || error?.status === 429 || error?.status >= 500;
+        if (!retryable || attempt >= 2) throw error;
+        const retryAfter = Number(error.retryAfter) > 0 ? Number(error.retryAfter) * 1000 : 1000 * (attempt + 1);
+        await sleep(Math.min(5000, retryAfter));
+      }
+    }
+    throw lastError || new Error("Semantic Scholar request failed");
+  });
 }
 
 async function fetchCrossrefDetails(doi) {
@@ -266,7 +315,7 @@ async function fetchSemanticScholarDetails(doi) {
   const normalizedDoi = String(doi || "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim();
   if (!normalizedDoi) return {};
   const fields = "title,abstract,authors,venue,year,externalIds,url";
-  const data = await fetchJson(`${SEMANTIC_SCHOLAR_API}/${encodeURIComponent(`DOI:${normalizedDoi}`)}?fields=${fields}`);
+  const data = await fetchSemanticScholarJson(`${SEMANTIC_SCHOLAR_API}/${encodeURIComponent(`DOI:${normalizedDoi}`)}?fields=${fields}`);
   const authors = Array.isArray(data?.authors)
     ? data.authors.map((author) => author?.name).filter(Boolean).join(", ")
     : "";

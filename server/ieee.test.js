@@ -414,6 +414,57 @@ test("crawler continues to a second DOI source when the first source is partial"
   }
 });
 
+test("crawler retries Semantic Scholar rate limits before marking an abstract missing", async () => {
+  const previousFetch = globalThis.fetch;
+  const previousCrawlerEnabled = config.crawlerEnabled;
+  const previousSemanticInterval = config.semanticScholarRequestIntervalMs;
+  let semanticCalls = 0;
+  config.crawlerEnabled = true;
+  config.semanticScholarRequestIntervalMs = 0;
+  globalThis.fetch = async (url) => {
+    const value = String(url);
+    if (value.includes("api.openalex.org")) {
+      return { ok: true, json: async () => ({ abstract_inverted_index: null, keywords: [] }) };
+    }
+    if (value.includes("api.crossref.org")) {
+      return { ok: true, json: async () => ({ message: {} }) };
+    }
+    if (value.includes("api.semanticscholar.org")) {
+      semanticCalls += 1;
+      if (semanticCalls === 1) {
+        return { ok: false, status: 429, headers: { get: () => "" }, text: async () => "rate limited" };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          title: "Semantic title",
+          abstract: "Recovered abstract",
+          externalIds: { DOI: "10.1109/example" },
+          authors: []
+        })
+      };
+    }
+    return { ok: true, url: value, text: async () => "" };
+  };
+
+  try {
+    const details = await crawlArticleDetails({
+      id: 2,
+      title: "Original title",
+      doi: "10.1109/example",
+      url: "https://doi.org/10.1109/example",
+      abstract: "",
+      keywords: "existing keyword"
+    }, { fields: ["abstract"] });
+    assert.equal(details.abstract, "Recovered abstract");
+    assert.equal(semanticCalls, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+    config.crawlerEnabled = previousCrawlerEnabled;
+    config.semanticScholarRequestIntervalMs = previousSemanticInterval;
+  }
+});
+
 test("normalizes Crossref metadata into an article record", () => {
   const article = internals.normalizeCrossrefItem(
     {

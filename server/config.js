@@ -72,6 +72,7 @@ export const config = {
   crossrefMailto: process.env.CROSSREF_MAILTO || "",
   crawlerEnabled: String(process.env.CRAWLER_ENABLED || "true").toLowerCase() === "true",
   crawlerTimeoutMs: Number(process.env.CRAWLER_TIMEOUT_MS || 12000),
+  semanticScholarRequestIntervalMs: Number(process.env.SEMANTIC_SCHOLAR_REQUEST_INTERVAL_MS || 1100),
   translationProvider: String(process.env.TRANSLATION_PROVIDER || "auto").trim().toLowerCase(),
   volcengineAccessKeyId: process.env.VOLCENGINE_ACCESS_KEY_ID || "",
   volcengineSecretAccessKey: process.env.VOLCENGINE_SECRET_ACCESS_KEY || "",
