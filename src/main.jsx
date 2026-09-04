@@ -1773,9 +1773,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           <span className="display-summary" role="status">
             {`数据库已载入 ${visibleReadyCount} 篇`}
             {visiblePendingCount > 0 && ` · ${visiblePendingCount} 篇待补全`}
-            {displayPreferences.bilingual
-              ? ` · ${visibleTranslatedCount} 篇有中文译题`
-              : "中文译题已隐藏"}
+            {displayPreferences.bilingual && ` · ${visibleTranslatedCount} 篇有中文译题`}
             {displayPreferences.abstract && ` · ${visibleAbstractCount} 篇有摘要`}
             {displayPreferences.translatedAbstract && ` · ${visibleTranslatedAbstractCount} 篇有中文摘要`}
           </span>
