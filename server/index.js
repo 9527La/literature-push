@@ -54,7 +54,8 @@ import {
   getDiscussionProfile,
   updateDiscussionProfile,
   createRefreshRun,
-  finishRefreshRun
+  finishRefreshRun,
+  updateRefreshRunSummary
 } from "./db.js";
 import {
   createPassportToken,
@@ -65,7 +66,7 @@ import {
   verifyUserPassword
 } from "./user-auth.js";
 import { crawlArticleDetails } from "./crawler.js";
-import { refreshArticles, rescheduleRefresh, scheduleRefresh, enrichMissingKeywords, enrichMissingAbstracts, translateMissingArticles } from "./refresh.js";
+import { refreshArticles, rescheduleRefresh, scheduleRefresh, enrichMissingKeywords, enrichMissingAbstracts, enrichAllMissingMetadata, translateMissingArticles } from "./refresh.js";
 import { generateWeeklyDigestMarkdown } from "./digest.js";
 import { sendMarkdownDigestEmail } from "./mail.js";
 import { calculatePushDays } from "./utils.js";
@@ -247,6 +248,48 @@ app.post("/api/enrich-abstracts", requireSiteAdmin, async (req, res) => {
     res.status(500).json({ status: "error", message: error.message });
   }
 });
+
+app.post("/api/enrich-metadata", requireSiteAdmin, asyncHandler(async (req, res) => {
+  const runId = createRefreshRun({ taskType: "metadata" });
+  const formatMessage = (summary, remaining, running = true) =>
+    `摘要 +${summary.enrichedAbstracts || 0} · 关键词 +${summary.enrichedKeywords || 0} · `
+    + `失败：摘要 ${summary.failedAbstracts || 0} / 关键词 ${summary.failedKeywords || 0} · `
+    + `待补全：摘要 ${remaining.abstracts || 0} / 关键词 ${remaining.keywords || 0}`
+    + (running ? " · 处理中" : "");
+  const updateProgress = ({ summary, gaps }) => {
+    updateRefreshRunSummary(runId, {
+      abstractCount: summary.enrichedAbstracts,
+      keywordCount: summary.enrichedKeywords,
+      failedAbstractCount: summary.failedAbstracts,
+      failedKeywordCount: summary.failedKeywords,
+      remainingAbstractCount: gaps.abstracts,
+      remainingKeywordCount: gaps.keywords,
+      message: formatMessage(summary, gaps)
+    });
+  };
+
+  try {
+    const result = await enrichAllMissingMetadata({ onProgress: updateProgress });
+    const status = result.complete
+      ? "success"
+      : (result.enrichedAbstracts || result.enrichedKeywords ? "partial" : "error");
+    const message = formatMessage(result, result.remaining, false);
+    finishRefreshRun(runId, {
+      status,
+      abstractCount: result.enrichedAbstracts,
+      keywordCount: result.enrichedKeywords,
+      failedAbstractCount: result.failedAbstracts,
+      failedKeywordCount: result.failedKeywords,
+      remainingAbstractCount: result.remaining.abstracts,
+      remainingKeywordCount: result.remaining.keywords,
+      message
+    });
+    res.json({ status, ...result, message });
+  } catch (error) {
+    finishRefreshRun(runId, { status: "error", message: `摘要和关键词补全失败：${error.message}` });
+    throw error;
+  }
+}));
 
 app.post("/api/admin/translate", requireSiteAdmin, asyncHandler(async (req, res) => {
   const field = String(req.body?.field || "").trim().toLowerCase();

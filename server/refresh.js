@@ -24,6 +24,7 @@ import { ensureTranslations } from "./translation-cache.js";
 import { generateWeeklyDigestMarkdown } from "./digest.js";
 import { sendMarkdownDigestEmail } from "./mail.js";
 import { calculatePushDays, sleep } from "./utils.js";
+import { enrichAllMissingMetadata as runMetadataBackfill } from "./metadata-backfill.js";
 
 const TRANSLATE_BATCH_LIMIT = 20;
 const ENRICH_BATCH_LIMIT = 50;
@@ -352,6 +353,19 @@ export async function enrichMissingAbstracts() {
     remaining: countArticlesMissingAbstract(),
     errors: enrichment.errors
   };
+}
+
+// Stable coordinator for the administrator's "摘要和关键词" maintenance
+// path.  Keep the field-specific functions above small so they remain useful
+// for targeted retries, while this wrapper owns ordering, bounded retries and
+// aggregate task statistics.
+export async function enrichAllMissingMetadata(options = {}) {
+  return runMetadataBackfill({
+    enrichAbstracts: enrichMissingAbstracts,
+    enrichKeywords: enrichMissingKeywords,
+    getGaps: getMetadataGaps,
+    ...options
+  });
 }
 
 // Translate one missing field at a time so the administrator can repair a

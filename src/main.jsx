@@ -1067,6 +1067,11 @@ function AdminView({ onDataChanged }) {
         const state = result.status === "error" ? "失败" : result.status === "partial" ? "部分完成" : "完成";
         const detail = result.errors?.[0]?.message ? ` 首条失败：${result.errors[0].message}` : "";
         setMessage(`摘要补全${state}：本次处理 ${result.processed || 0} 篇，成功 ${result.enriched || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待补全。${detail}`);
+      } else if (action === "metadata") {
+        const result = await api.post("/api/enrich-metadata");
+        const state = result.status === "error" ? "失败" : result.status === "partial" ? "部分完成" : "完成";
+        const detail = result.errors?.[0]?.message ? ` 首条失败：${result.errors[0].message}` : "";
+        setMessage(`摘要和关键词补全${state}：摘要 +${result.enrichedAbstracts || 0}，关键词 +${result.enrichedKeywords || 0}；失败：摘要 ${result.failedAbstracts || 0}、关键词 ${result.failedKeywords || 0}；剩余摘要 ${result.remaining?.abstracts || 0}、关键词 ${result.remaining?.keywords || 0}。${detail}`);
       } else {
         const field = action === "titles" ? "title" : "abstract";
         const label = action === "titles" ? "标题" : "摘要";
@@ -1145,6 +1150,7 @@ function AdminView({ onDataChanged }) {
     refresh: "刷新文献",
     abstracts: "补全摘要",
     keywords: "补全关键词",
+    metadata: "补全摘要和关键词",
     translate_title: "翻译标题",
     translate_abstract: "翻译摘要"
   };
@@ -1164,6 +1170,7 @@ function AdminView({ onDataChanged }) {
           <button className="primary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("refresh")}><RefreshCw size={15} className={runningAction === "refresh" ? "spin" : ""} /> {runningAction === "refresh" ? "刷新中…" : "刷新文献数据"}</button>
           <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("keywords")}><Activity size={15} className={runningAction === "keywords" ? "spin" : ""} /> {runningAction === "keywords" ? "补全中…" : "补全关键词"}</button>
           <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("abstracts")}><FileText size={15} className={runningAction === "abstracts" ? "spin" : ""} /> {runningAction === "abstracts" ? "摘要补全中…" : "补全摘要"}</button>
+          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("metadata")}><Database size={15} className={runningAction === "metadata" ? "spin" : ""} /> {runningAction === "metadata" ? "摘要和关键词补全中…" : "补全摘要和关键词"}</button>
           <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("titles")}><Languages size={15} className={runningAction === "titles" ? "spin" : ""} /> {runningAction === "titles" ? "标题翻译中…" : "翻译标题"}</button>
           <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("translate-abstracts")}><Languages size={15} className={runningAction === "translate-abstracts" ? "spin" : ""} /> {runningAction === "translate-abstracts" ? "摘要翻译中…" : "翻译摘要"}</button>
         </div>
