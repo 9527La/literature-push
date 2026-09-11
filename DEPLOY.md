@@ -92,7 +92,11 @@ sc_job_start(label="literature-service", python_env=false):
   Set-Location 'E:\SC\文献推送'; & 'E:\SC\文献推送\.runtime\node\node.exe' --no-warnings=ExperimentalWarning '.\server\index.js'
 ```
 
-用 `sc_job_status` / `sc_job_logs` 确认端口 4177 已在监听、日志里出现“电力文献服务器运行在 …”。
+用 `sc_job_status` 确认任务处于 `running`，再用步骤 6 的 `-VerifyOnly` 确认端口 4177 已在监听、接口可访问。
+
+注意：服务任务（`node`）的 `sc_job_logs` 常常 **stdout 与 stderr 同时为空**，这是托管子进程没有把控制台刷进任务日志所致，不代表启动失败。
+**不要**据此判断服务是否起来了，一律以 `-VerifyOnly` 的端口与接口检查为准。
+想确认端口持有者时用 `Get-Process node | Select-Object Id,StartTime`，其 `StartTime` 应与任务的 `StartedAt` 一致（同时也能证明上一次被取消的任务没有留下僵尸进程）。
 
 ### 步骤 5 — 重启隧道任务
 
