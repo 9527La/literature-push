@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
 $projectRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")

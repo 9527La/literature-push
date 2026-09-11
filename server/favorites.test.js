@@ -9,6 +9,7 @@ test('favorite picker stores a selected and default group', async () => {
   const workdir = mkdtempSync(path.join(tmpdir(), 'literature-favorites-'));
   let mod;
   process.chdir(workdir);
+  process.env.LITERATURE_DATA_DIR = workdir;
   try {
     mod = await import(`./db.js?favorite-test=${Date.now()}`);
     mod.db.prepare(`INSERT INTO articles (external_id,title,fetched_at,first_seen_at) VALUES ('test:1','Research article',datetime('now'),datetime('now'))`).run();
@@ -21,6 +22,7 @@ test('favorite picker stores a selected and default group', async () => {
     assert.equal(mod.getUserFavorites('user-1').defaultGroupId, group.id);
   } finally {
     try { mod?.db?.close(); } catch {}
+    delete process.env.LITERATURE_DATA_DIR;
     process.chdir(originalCwd);
     rmSync(workdir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
@@ -31,6 +33,7 @@ test('new personal accounts receive a default favorite group', async () => {
   const workdir = mkdtempSync(path.join(tmpdir(), 'literature-default-favorites-'));
   let mod;
   process.chdir(workdir);
+  process.env.LITERATURE_DATA_DIR = workdir;
   try {
     mod = await import(`./db.js?default-favorite-test=${Date.now()}`);
     const account = mod.createUserAccount({
@@ -52,6 +55,7 @@ test('new personal accounts receive a default favorite group', async () => {
     assert.equal(favorite.group_name, '默认收藏夹');
   } finally {
     try { mod?.db?.close(); } catch {}
+    delete process.env.LITERATURE_DATA_DIR;
     process.chdir(originalCwd);
     rmSync(workdir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }

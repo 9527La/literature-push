@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { getTranslation, listRecentArticlesForDigest, updateArticleDetails } from "./db.js";
 import { crawlArticleDetails } from "./crawler.js";
 import { ensureTranslation, isTranslationComplete } from "./translation-cache.js";
+import { resolveFromRoot } from "./paths.js";
 
 async function prepareArticle(article, targetLanguage, options = {}) {
   let enrichedArticle = article;
@@ -144,7 +145,9 @@ export async function generateWeeklyDigestMarkdown(settings = {}, options = {}) 
   const items = maxItems > 0 ? eligibleItems.slice(0, maxItems) : eligibleItems;
   const omittedCompleteCount = eligibleItems.length - items.length;
 
-  const digestDir = path.resolve(config.weeklyDigestDir);
+  const digestDir = path.isAbsolute(config.weeklyDigestDir)
+    ? config.weeklyDigestDir
+    : resolveFromRoot(config.weeklyDigestDir);
   await fs.mkdir(digestDir, { recursive: true });
   const range = digestRange(days);
   const frequency = settings.pushFrequency || "weekly";

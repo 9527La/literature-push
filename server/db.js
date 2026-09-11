@@ -4,10 +4,11 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DEFAULT_JOURNAL_BY_NAME, DEFAULT_JOURNALS, config } from "./config.js";
+import { resolveDataDirectory } from "./paths.js";
 import { containsChineseText, escapeLike, decodeEntities, isNonResearchTitle, isUsableMetadataText } from "./utils.js";
 
 const DEFAULT_FAVORITE_GROUP_NAME = "默认收藏夹";
-const dataDir = path.resolve("data");
+const dataDir = resolveDataDirectory();
 fs.mkdirSync(dataDir, { recursive: true });
 
 export const db = new DatabaseSync(path.join(dataDir, "literature.sqlite"));

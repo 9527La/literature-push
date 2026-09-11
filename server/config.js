@@ -1,4 +1,11 @@
-import "dotenv/config";
+import path from "node:path";
+import dotenv from "dotenv";
+import { projectRoot } from "./paths.js";
+
+// 显式从仓库根目录读取 .env，不再依赖进程的工作目录；否则服务被以其它
+// CWD 启动时读不到 ADMIN_TOKEN_SECRET 等密钥，登录接口会返回 500。
+dotenv.config({ path: path.join(projectRoot, ".env") });
+
 export { DEFAULT_JOURNALS, DEFAULT_JOURNAL_BY_NAME } from "./journals.js";
 
 export const config = {

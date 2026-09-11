@@ -27,6 +27,7 @@ test("translation coverage excludes Chinese source text with Latin abbreviations
   try {
     const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
       cwd: workingDirectory,
+      env: { ...process.env, LITERATURE_DATA_DIR: workingDirectory },
       encoding: "utf8"
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);

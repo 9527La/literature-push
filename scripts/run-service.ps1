@@ -1,5 +1,6 @@
-$ErrorActionPreference = "Stop"
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
+﻿$ErrorActionPreference = "Stop"
+# 非交互宿主（后台任务/无控制台）下设置输出编码会抛异常，这里必须容错。
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 
 $projectRoot = Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")
 $bundledNode = Join-Path $projectRoot ".runtime\node\node.exe"
