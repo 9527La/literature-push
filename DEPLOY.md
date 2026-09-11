@@ -28,7 +28,7 @@
 | 坑 | 现象 | 处理 |
 | --- | --- | --- |
 | 后台任务忽略工作目录 | 远端命令实际在 `C:\Windows\System32\spool\drivers\x64\3` 下执行 | 命令第一条必须是 `Set-Location 'E:\SC\文献推送'`；`scripts\redeploy.ps1` 已内置 |
-| 后台任务阻塞同步 | `Cannot synchronize while a background job is running for this project` | 先 `sc_job_list` 找出本项目全部任务（服务 + 隧道），逐个 `sc_job_cancel` |
+| 后台任务阻塞同步 | `Cannot synchronize while a background job is running for this project` | 先 `sc_job_list` 找出本项目全部任务（服务 + 隧道），逐个 `sc_job_cancel`。**该门禁只在「确有文件要传」时触发**：零增量同步会提前返回（仅刷新基线），不被拦截，任务在跑也可安全执行 |
 | 脚本编码 | PowerShell 5.1 把无 BOM 的 UTF-8 `.ps1` 当 ANSI 读，含中文时报语法错误（例如在 `}` 行失败） | 仓库内 `.ps1` 一律保存为 **UTF-8 with BOM** |
 
 附带注意：
@@ -55,12 +55,22 @@ git push origin main
 ### 步骤 2 — 同步代码
 
 ```
-sc_project_sync(local_path=".", remote_project="文献推送", conflict_policy="fail", delete_removed=false, timeout_seconds=0)
+sc_project_sync(
+  local_path="E:\\Users\\admin\\文档\\文献推送",
+  remote_project="文献推送",
+  conflict_policy="fail",
+  delete_removed=false,
+  timeout_seconds=0
+)
 ```
 
+用**绝对路径**而不是 `local_path="."`：`"."` 是相对连接器的第一个本地根目录解析的，写错根目录会把别的目录同步进来。
 保持默认的 `conflict_policy=fail` 与 `delete_removed=false`：前者保护远端 `data/`、`.env`，后者不会误删远端独有文件。
 
-### 步骤 3 — 远端构建 + 测试 + 自检
+若报 `Remote project has changes that would be overwritten ... : version.json`，说明远端那份被远端改过（通常是上一次部署写回的版本信息）。
+先备份再决定：把远端文件复制到 `E:\SC\.sc-remote-runner\temp\`，确认本地版本更新后再用 `conflict_policy="local_wins"` 重跑。
+
+### 步骤 3 — 远端构建 + 测试
 
 ```
 sc_run: Set-Location 'E:\SC\文献推送'; powershell -NoProfile -ExecutionPolicy Bypass -File scripts\redeploy.ps1 -NoRestart
@@ -68,6 +78,12 @@ sc_run: Set-Location 'E:\SC\文献推送'; powershell -NoProfile -ExecutionPolic
 
 这一步完成 `npm run build`、`npm test` 与 `dist\index.html` 校验，并把过程写进 `data\logs\redeploy.log`。
 `package.json` / `package-lock.json` 有变化时加 `-InstallDeps`（执行 `npm ci`）。
+
+因为步骤 1 已经把托管任务停掉，此时 4177 端口是空的：脚本会输出
+「端口 4177 未监听：-NoRestart 模式不重启服务，跳过冒烟自检」并**以 0 退出**，
+这是预期行为，真正的冒烟自检放在步骤 6。
+
+只想跑构建与测试、完全跳过端口等待时，改用 `-SkipVerify`（跳过端口等待与冒烟自检，不跳过构建和测试）。
 
 ### 步骤 4 — 重启服务任务
 
@@ -127,8 +143,9 @@ sc_run: Set-Location 'E:\SC\文献推送'; powershell -NoProfile -ExecutionPolic
 | 现象 | 根因 | 处理 |
 | --- | --- | --- |
 | 登录返回 500「外部服务暂时不可用」 | 服务进程读不到 `.env`（工作目录不对或文件缺失），`ADMIN_TOKEN_SECRET` 为空 | 确认服务以仓库根为工作目录启动（`server/paths.js` 已按模块路径解析 `.env` 与 `data/`）；检查远端 `.env` 的 `ADMIN_TOKEN_SECRET` / `ADMIN_PASSWORD` |
-| `Cannot synchronize while a background job is running for this project.` | 本项目还有 running 的任务 | `sc_job_list` + `sc_job_cancel` |
+| `Cannot synchronize while a background job is running for this project.` | 本项目还有 running 的任务**且本次确有文件要传** | `sc_job_list` + `sc_job_cancel`；若只是零增量（`uploadedFiles: 0`）同步，不会触发此拦截 |
 | `'node' 不是内部或外部命令` | npm 子进程没继承 Node 路径 | PATH 前置 `.runtime\node;node_modules\.bin`，或直接跑 `scripts\redeploy.ps1` |
+| `!!! 端口 4177 在 60 秒内没有监听`（脚本以 1 退出） | 步骤 1 已停掉托管任务，`-NoRestart` 又不会把服务拉起来 | 升级后的脚本在 `-NoRestart` 下会跳过自检并以 0 退出；若仍报错说明是旧脚本，重新同步 `scripts\redeploy.ps1` 后再跑 |
 | 远端命令在 `C:\Windows\System32\spool\drivers\x64\3` 下执行 | 后台任务忽略了 workdir | 显式 `Set-Location 'E:\SC\文献推送'` |
 | `.ps1` 报语法错误、`)` 或 `}` 不匹配 | 无 BOM 的 UTF-8 被当作 ANSI 解析 | 重新保存为 UTF-8 with BOM |
 | 首页 200 但静态资源 404 | 同步后没有重新 `npm run build` | 执行步骤 3 |

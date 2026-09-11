@@ -29,6 +29,7 @@ param(
   [switch]$SkipTests,
   [switch]$NoRestart,
   [switch]$VerifyOnly,
+  [switch]$SkipVerify,
   [int]$Port = 4177,
   [int]$WaitSeconds = 60
 )
@@ -72,8 +73,8 @@ $baseUrl = "http://127.0.0.1:$Port"
 Write-Step "部署目录 $projectRoot"
 Write-Ok ("node       : " + $(if ($nodeExe) { $nodeExe } else { (Get-Command node -ErrorAction SilentlyContinue).Source }))
 Write-Ok ("npm        : $npmCmd")
-Write-Ok ("VerifyOnly : $VerifyOnly  SkipBuild: $SkipBuild  SkipTests: $SkipTests  NoRestart: $NoRestart")
-Write-Log "redeploy start (VerifyOnly=$VerifyOnly SkipBuild=$SkipBuild SkipTests=$SkipTests NoRestart=$NoRestart ExpectedSha=$ExpectedSha)"
+Write-Ok ("VerifyOnly : $VerifyOnly  SkipBuild: $SkipBuild  SkipTests: $SkipTests  NoRestart: $NoRestart  SkipVerify: $SkipVerify")
+Write-Log "redeploy start (VerifyOnly=$VerifyOnly SkipBuild=$SkipBuild SkipTests=$SkipTests NoRestart=$NoRestart SkipVerify=$SkipVerify ExpectedSha=$ExpectedSha)"
 
 # ---------------- 提交号校验（有 .git 时严格校验） ----------------
 if ($ExpectedSha) {
@@ -135,13 +136,33 @@ if ($VerifyOnly -or $NoRestart) {
 }
 
 # ---------------- 等待端口 ----------------
+# -SkipVerify：只做「依赖 / 构建 / 测试」，完全跳过端口等待与冒烟自检。
+# 这与 -NoRestart 的区别是：-NoRestart 仍会尝试自检，只是不负责重启。
+$ownerPid = $null
+$versionJson = $null
+$smokeSkipped = $false
+if ($SkipVerify) {
+  Write-Step "跳过端口等待与冒烟自检（-SkipVerify）"
+  Write-Log "verify skipped (SkipVerify)"
+  $smokeSkipped = $true
+} else {
 Write-Step "等待端口 $Port 就绪（最多 $WaitSeconds 秒）"
 $ready = $false
 for ($i = 0; $i -lt $WaitSeconds; $i++) {
   if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) { $ready = $true; break }
   Start-Sleep -Seconds 1
 }
-if (-not $ready) { Fail "端口 $Port 在 $WaitSeconds 秒内没有监听，请检查 data\logs\redeploy.log 与任务日志" }
+if (-not $ready) {
+  # -NoRestart 表示服务由后台任务托管，本脚本不负责重启，端口此刻空着是正常的。
+  # 典型流程是「停任务 -> 同步 -> 构建 -> 重启任务 -> -VerifyOnly 复检」，此处不能判失败。
+  if ($NoRestart) {
+    Write-Note "端口 $Port 未监听：-NoRestart 模式不重启服务，跳过冒烟自检；重启任务后请用 -VerifyOnly 复检"
+    Write-Log "port $Port not listening; smoke skipped (NoRestart)"
+    $smokeSkipped = $true
+  } else {
+    Fail "端口 $Port 在 $WaitSeconds 秒内没有监听，请检查 data\logs\redeploy.log 与任务日志"
+  }
+} else {
 $ownerPid = (Get-NetTCPConnection -LocalPort $Port -State Listen | Select-Object -First 1).OwningProcess
 Write-Ok "端口 $Port 已监听 (PID $ownerPid)"
 
@@ -206,7 +227,13 @@ if ([int]$statusJson.articleCount -le 0) {
   Fail "articleCount 为 0，数据目录可能未就绪（检查 LITERATURE_DATA_DIR 与 data 目录）"
 }
 Write-Ok ("articleCount = {0}" -f $statusJson.articleCount)
+}
+}
 # ---------------- 汇总 ----------------
+if (-not $versionJson) {
+  # 跳过自检时从文件读取版本号，保证汇总与日志里始终有版本信息。
+  $versionJson = Get-Content -LiteralPath (Join-Path $projectRoot "version.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+}
 $lanIp = "127.0.0.1"
 $nets = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.PrefixOrigin -ne "WellKnown" -and $_.IPAddress -ne "127.0.0.1" })
 foreach ($pattern in @('^192\.168\.', '^10\.', '^172\.(1[6-9]|2[0-9]|3[01])\.')) {
@@ -215,10 +242,17 @@ foreach ($pattern in @('^192\.168\.', '^10\.', '^172\.(1[6-9]|2[0-9]|3[01])\.'))
 }
 
 Write-Host ""
-Write-Host "部署完成" -ForegroundColor Green
-Write-Host ("  本机访问  : {0}" -f $baseUrl)
-Write-Host ("  局域网访问: http://{0}:{1}" -f $lanIp, $Port)
-Write-Host ("  部署版本  : {0}" -f $versionJson.version)
-Write-Host ("  部署日志  : {0}" -f $logFile)
-Write-Log "redeploy done (version=$($versionJson.version) lan=$lanIp pid=$ownerPid)"
+if ($smokeSkipped) {
+  Write-Host "构建与测试完成（未做冒烟自检）" -ForegroundColor Green
+  Write-Host ("  部署版本  : {0}" -f $versionJson.version)
+  Write-Host ("  部署日志  : {0}" -f $logFile)
+  Write-Host "  下一步    : 重启托管任务后再执行 scripts\redeploy.ps1 -VerifyOnly 复检"
+} else {
+  Write-Host "部署完成" -ForegroundColor Green
+  Write-Host ("  本机访问  : {0}" -f $baseUrl)
+  Write-Host ("  局域网访问: http://{0}:{1}" -f $lanIp, $Port)
+  Write-Host ("  部署版本  : {0}" -f $versionJson.version)
+  Write-Host ("  部署日志  : {0}" -f $logFile)
+}
+Write-Log "redeploy done (version=$($versionJson.version) lan=$lanIp pid=$ownerPid smokeSkipped=$smokeSkipped)"
 exit 0
