@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Check, Globe, Heart, Languages, ScrollText, Star } from "lucide-react";
 import Highlight from "./Highlight.jsx";
-import { formatDate, isChineseJournalArticle } from "../lib/format.js";
+import { formatDate, formatRelativeDate, isChineseJournalArticle } from "../lib/format.js";
 
 function ArticleCard({
   article,
@@ -14,20 +14,39 @@ function ArticleCard({
   markRead,
   toggleFavorite,
   requestPreparation,
+  onSelectKeyword,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
   isCursor = false
 }) {
   const showTranslatedAbstract = displayPreferences.translatedAbstract
     && !isChineseJournalArticle(article, journals);
   const prepare = () => requestPreparation([article.id], { force: true });
+  const absoluteDate = formatDate(article.published_at);
 
   return (
-    <article className={`article ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}${isCursor ? " is-cursor" : ""}`}>
+    <article className={`article ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}${isCursor ? " is-cursor" : ""}${selected ? " is-selected" : ""}${selectable ? " has-select" : ""}`}>
+      {selectable && (
+        <label className="article-select" title="选中后可批量操作">
+          <input
+            type="checkbox"
+            checked={selected}
+            aria-label={`选择《${article.title}》`}
+            onChange={() => onToggleSelect?.(article.id)}
+          />
+        </label>
+      )}
       <div className="article-main">
         <div className="article-meta">
           <span>{article.journal || "未知期刊"}</span>
-          <span>{formatDate(article.published_at)}</span>
+          {/* Relative time answers "is this new?" at a glance; the exact date
+              stays available on hover and for anything older than a month. */}
+          <time dateTime={absoluteDate} title={absoluteDate}>{formatRelativeDate(article.published_at)}</time>
           {article.year && <span>{article.year}</span>}
-          {article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : <span className="article-status-badge unread-badge">未读</span>}
+          {/* Unread is already carried by the 3px colour bar and the title
+              weight, so only the exceptions (已读 / 收藏) get a badge. */}
+          {article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : null}
           {article.is_favorite ? <span className="article-status-badge fav-badge"><Star size={11} /> 收藏</span> : null}
         </div>
         <button className="title-button" onClick={() => onOpen(article)}>
@@ -45,9 +64,15 @@ function ArticleCard({
         {displayPreferences.keywords && article.keywords && (
           <div className="keywords">
             {article.keywords.split(/[;；]/).map((kw) => kw.trim()).filter(Boolean).map((kw, i) => (
-              <span className={`keyword-tag ${highlightTerms.some((t) => kw.toLowerCase().includes(t.toLowerCase())) ? "keyword-tag-highlight" : ""}`} key={i}>
+              <button
+                type="button"
+                className={`keyword-tag ${highlightTerms.some((t) => kw.toLowerCase().includes(t.toLowerCase())) ? "keyword-tag-highlight" : ""}`}
+                key={i}
+                title={`按关键词「${kw}」筛选`}
+                onClick={() => onSelectKeyword?.(kw)}
+              >
                 <Highlight text={kw} terms={highlightTerms} />
-              </span>
+              </button>
             ))}
           </div>
         )}

@@ -43,10 +43,14 @@ import {
   UserRound,
   X
 } from "lucide-react";
+import "./fonts.css";
 import "./styles.css";
 import Modal from "./components/Modal.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import InternalUseNotice from "./components/InternalUseNotice.jsx";
+import SkeletonList from "./components/SkeletonCard.jsx";
+import Toast from "./components/Toast.jsx";
+import useToast from "./hooks/useToast.js";
 import AccountView from "./features/account/AccountView.jsx";
 import FavoritesView from "./features/favorites/FavoritesView.jsx";
 import Feed from "./features/feed/Feed.jsx";
@@ -57,6 +61,29 @@ import { ARTICLE_PAGE_SIZE, ARTICLE_RELEVANCE_PAGE_SIZE, DEFAULT_FILTERS, DISPLA
 import { renderMarkdown } from "./lib/markdown.jsx";
 import { normalizeDisplayPreferences } from "./lib/preferences.js";
 import { clearAccountToken, disableAccountAutoLogin, getUserToken, readAccountLoginSettings, readLocalPersonalization, saveAccountLoginSettings, setAccountToken } from "./lib/storage.js";
+
+const VIEWS = ["feed", "stats", "favorites", "settings", "feedback", "account", "admin", "help"];
+
+// The hash is the single source of truth for "which view am I on", so browser
+// back/forward works and a filtered list can be shared as a link.
+function parseHash(hash) {
+  const raw = String(hash || "").replace(/^#/, "");
+  const [view, query = ""] = raw.split("?");
+  return { view, params: new URLSearchParams(query) };
+}
+
+function filtersFromParams(params) {
+  const next = { ...DEFAULT_FILTERS };
+  if (params.has("journal")) next.journal = params.get("journal").split(",").filter(Boolean);
+  if (params.has("keyword")) next.keyword = params.get("keyword").split(",").filter(Boolean);
+  if (params.has("q")) next.q = params.get("q");
+  if (params.has("unread")) next.unread = params.get("unread") === "true";
+  if (params.has("favorite")) next.favorite = params.get("favorite") === "true";
+  if (params.has("from")) next.from = params.get("from");
+  if (params.has("to")) next.to = params.get("to");
+  if (params.has("sort")) next.sort = params.get("sort") || DEFAULT_FILTERS.sort;
+  return next;
+}
 
 // Heavy views load on demand: the admin console, the keyword statistics page
 // (word cloud / co-occurrence maths) and the long help document.
@@ -140,17 +167,21 @@ function App() {
   const [availableJournals, setAvailableJournals] = useState([]);
   const [autoSavePersonalization, setAutoSavePersonalization] = useState(() => localStorage.getItem("autoSavePersonalization") === "true");
   const localPersonalization = useMemo(() => localStorage.getItem("autoSavePersonalization") === "true" ? readLocalPersonalization() : null, []);
-  const [filters, setFilters] = useState(() => ({ ...DEFAULT_FILTERS, ...(localPersonalization?.filters || {}) }));
+  const [filters, setFilters] = useState(() => {
+    const { view, params } = parseHash(window.location.hash);
+    if (view === "feed" && params.toString()) return filtersFromParams(params);
+    return { ...DEFAULT_FILTERS, ...(localPersonalization?.filters || {}) };
+  });
   const [displayPreferences, setDisplayPreferences] = useState(() => normalizeDisplayPreferences(localPersonalization));
   const [activeView, setActiveView] = useState(() => {
-    const requested = window.location.hash.slice(1);
-    return ["feed", "stats", "favorites", "settings", "feedback", "account", "admin", "help"].includes(requested) ? requested : "feed";
+    const { view } = parseHash(window.location.hash);
+    return VIEWS.includes(view) ? view : "feed";
   });
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [gateAuthenticated, setGateAuthenticated] = useState(false);
   const [gateRole, setGateRole] = useState("");
-  const [message, setMessage] = useState("");
+  const { toasts, notify, dismiss: dismissToast } = useToast();
   const [versionInfo, setVersionInfo] = useState(null);
   const [account, setAccount] = useState({ authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" });
   const autoLoginAttemptRef = useRef("");
@@ -202,9 +233,31 @@ function App() {
     localStorage.setItem("personalizationSnapshot", JSON.stringify(getPersonalizationSnapshot()));
   }, [autoSavePersonalization, initialLoading, filters, displayPreferences, settings]);
 
+  // Write the current view (+ feed filters) into the hash. pushState (rather
+  // than replaceState) is what makes the browser Back button return to the
+  // previous view instead of leaving the site.
   useEffect(() => {
-    window.history.replaceState(null, "", `#${activeView}`);
-  }, [activeView]);
+    const suffix = activeView === "feed" && debouncedQuery ? `?${debouncedQuery}` : "";
+    const next = `#${activeView}${suffix}`;
+    if (window.location.hash === next) return;
+    window.history.pushState(null, "", next);
+  }, [activeView, debouncedQuery]);
+
+  // Read the hash back: Back/Forward and pasted links both land here.
+  useEffect(() => {
+    function applyLocation() {
+      const { view, params } = parseHash(window.location.hash);
+      const nextView = VIEWS.includes(view) ? view : "feed";
+      setActiveView((current) => (current === nextView ? current : nextView));
+      if (nextView === "feed") setFilters(filtersFromParams(params));
+    }
+    window.addEventListener("hashchange", applyLocation);
+    window.addEventListener("popstate", applyLocation);
+    return () => {
+      window.removeEventListener("hashchange", applyLocation);
+      window.removeEventListener("popstate", applyLocation);
+    };
+  }, []);
 
   function dismissVersion() {
     if (versionInfo) localStorage.setItem("dismissedVersion", versionInfo.version);
@@ -349,7 +402,7 @@ function App() {
       setAccount({ authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" });
       return;
     }
-    setMessage(error.message);
+    notify(error.message, { type: "error" });
   }
 
   useEffect(() => {
@@ -410,16 +463,17 @@ function App() {
 
   async function refresh() {
     setLoading(true);
-    setMessage("");
     try {
       const result = await api.post("/api/refresh");
-      setMessage(result.status === "success" ? `刷新完成，新增 ${result.addedCount} 篇文献。` : result.message);
-      setTimeout(() => setMessage(""), 3000);
+      const succeeded = result.status === "success";
+      notify(
+        succeeded ? `刷新完成，新增 ${result.addedCount} 篇文献。` : result.message,
+        { type: succeeded ? "success" : "info" }
+      );
       articleCacheRef.current.clear();
       await loadAll({ forceArticles: true });
     } catch (error) {
-      setMessage(error.message);
-      setTimeout(() => setMessage(""), 5000);
+      notify(error.message, { type: "error" });
       await api.get("/api/status").then(setStatus).catch(() => {});
     } finally {
       setLoading(false);
@@ -449,12 +503,12 @@ function App() {
       clearAccountToken();
       return;
     }
-    setMessage(`状态已保存，但列表刷新失败：${error.message}`);
+    notify(`状态已保存，但列表刷新失败：${error.message}`, { type: "error" });
   }
 
   async function markRead(id) {
     if (!account.authenticated) {
-      setMessage("游客模式只能浏览，请先登录个人账户保存阅读状态。");
+      notify("游客模式只能浏览，请先登录个人账户保存阅读状态。", { type: "info" });
       setActiveView("account");
       return;
     }
@@ -485,7 +539,7 @@ function App() {
         unreadCount: previous ? -1 : 1,
         readCount: previous ? 1 : -1
       });
-      setMessage(`阅读状态保存失败：${error.message}`);
+      notify(`阅读状态保存失败：${error.message}`, { type: "error" });
     } finally {
       interactionPendingRef.current.delete(pendingKey);
     }
@@ -493,7 +547,7 @@ function App() {
 
   async function toggleFavorite(id) {
     if (!account.authenticated) {
-      setMessage("游客模式不能收藏文献，请先登录个人账户。");
+      notify("游客模式不能收藏文献，请先登录个人账户。", { type: "info" });
       setActiveView("account");
       return;
     }
@@ -508,7 +562,7 @@ function App() {
         const options = await api.get("/api/favorites/options");
         setFavoritePicker({ article, groups: options.groups || [], groupId: options.defaultGroupId == null ? "ungrouped" : String(options.defaultGroupId), setDefault: false, saving: false, error: "" });
       } catch (error) {
-        setMessage(`无法读取收藏分组：${error.message}`);
+        notify(`无法读取收藏分组：${error.message}`, { type: "error" });
       } finally {
         interactionPendingRef.current.delete(pendingKey);
       }
@@ -532,7 +586,7 @@ function App() {
       updateLocalArticleInteraction(id, { is_favorite: Number(previous) }, {
         favoriteCount: previous ? 1 : -1
       });
-      setMessage(`收藏状态保存失败：${error.message}`);
+      notify(`收藏状态保存失败：${error.message}`, { type: "error" });
     } finally {
       interactionPendingRef.current.delete(pendingKey);
     }
@@ -546,7 +600,7 @@ function App() {
       const result = await api.post(`/api/articles/${article.id}/favorite`, { groupId: groupId === "ungrouped" ? null : Number(groupId), setDefault });
       updateLocalArticleInteraction(article.id, { is_favorite: Number(Boolean(result.is_favorite)) }, { favoriteCount: 1 });
       setFavoritePicker(null);
-      setMessage(`已加入收藏${result.group_name ? `：${result.group_name}` : "（未分组）"}。`);
+      notify(`已加入收藏${result.group_name ? `：${result.group_name}` : "（未分组）"}。`, { type: "success" });
       void reloadArticlesAndStatus().catch(reportInteractionRefreshError);
     } catch (error) {
       setFavoritePicker((current) => ({ ...current, saving: false, error: error.message }));
@@ -556,7 +610,7 @@ function App() {
   async function saveSettings(nextSettings) {
     const saved = await api.put("/api/settings", nextSettings);
     setSettings(saved);
-    setMessage("设置已保存。");
+    notify("设置已保存。", { type: "success" });
   }
 
   async function saveAccount(nextAccount) {
@@ -686,12 +740,13 @@ function App() {
     <div className="app-shell">
       <a className="skip-link" href="#main-content">跳到主要内容</a>
       <header className="topbar">
+        <div className="topbar-row-main">
         <div className="topbar-left">
           <div className="brand">
             <BookOpen size={22} />
             <span>电力文献</span>
           </div>
-          <nav className="nav">
+          <nav className="nav" aria-label="主导航">
             <button className={activeView === "feed" ? "active" : ""} onClick={() => setActiveView("feed")}>
               <Bell size={16} /> 最新文献
               {status?.unreadCount > 0 && <span className="nav-badge" aria-label={`${status.unreadCount} 篇未读`}>{status.unreadCount}</span>}
@@ -721,50 +776,38 @@ function App() {
           </nav>
         </div>
         <div className="topbar-right">
-          <div className="topbar-stats">
-            <span>总文献 <strong>{status?.articleCount ?? 0}</strong></span>
-            {status?.unreadCount > 0 && (
-              <span className="stat-badge stat-badge-unread">未读 <strong>{status.unreadCount}</strong></span>
-            )}
-            {status?.readCount > 0 && (
-              <span>已读 <strong>{status.readCount}</strong></span>
-            )}
-            {status?.favoriteCount > 0 && (
-              <span className="stat-badge stat-badge-fav">收藏 <strong>{status.favoriteCount}</strong></span>
-            )}
-            <span className="stat-badge stat-badge-new" title="按首次进入数据库的时间统计">
-              最近一周新增 <strong>{status?.newArticleCount7d ?? 0}</strong>
-            </span>
-            <span className="stat-badge stat-badge-new stat-badge-new-month" title="按首次进入数据库的时间统计">
-              最近一月新增 <strong>{status?.newArticleCount30d ?? 0}</strong>
-            </span>
-          </div>
           {account.is_admin && <button className="primary" onClick={refresh} disabled={loading}>
             <RefreshCw size={16} className={loading ? "spin" : ""} />
             {loading ? "刷新中" : "立即刷新"}
           </button>}
           <button className="secondary topbar-exit" type="button" onClick={leaveWebsite}>退出网页</button>
         </div>
+        </div>
+        {/* Progress counters get their own row: hiding them on 1280–1339px
+            laptops removed the only global signal that anything was new. */}
+        <div className="topbar-row-stats">
+          <div className="topbar-stats" aria-label="文献统计">
+            <span className="stat-chip">总文献 <strong>{status?.articleCount ?? 0}</strong></span>
+            <span className="stat-chip stat-badge stat-badge-unread">未读 <strong>{status?.unreadCount ?? 0}</strong></span>
+            <span className="stat-chip">已读 <strong>{status?.readCount ?? 0}</strong></span>
+            <span className="stat-chip stat-badge stat-badge-fav">收藏 <strong>{status?.favoriteCount ?? 0}</strong></span>
+            <span className="stat-chip stat-badge stat-badge-new" title="按首次进入数据库的时间统计">
+              最近一周新增 <strong>{status?.newArticleCount7d ?? 0}</strong>
+            </span>
+            <span className="stat-chip stat-badge stat-badge-new stat-badge-new-month" title="按首次进入数据库的时间统计">
+              最近一月新增 <strong>{status?.newArticleCount30d ?? 0}</strong>
+            </span>
+          </div>
+        </div>
       </header>
 
-      {message && <div className="message">{message}</div>}
+      <Toast toasts={toasts} onDismiss={dismissToast} />
 
       <main className="main" id="main-content">
         <ErrorBoundary>
-        <Suspense fallback={(
-          <div className="loading-skeleton">
-            <div className="skeleton" style={{ height: 40, marginBottom: 16 }} />
-            <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
-            <div className="skeleton" style={{ height: 120 }} />
-          </div>
-        )}>
+        <Suspense fallback={<SkeletonList count={6} />}>
         {initialLoading ? (
-          <div className="loading-skeleton">
-            <div className="skeleton" style={{ height: 40, marginBottom: 16 }} />
-            <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
-            <div className="skeleton" style={{ height: 120, marginBottom: 12 }} />
-            <div className="skeleton" style={{ height: 120 }} />
-          </div>
+          <SkeletonList count={6} />
         ) : activeView === "feed" ? (
           <Feed
             articles={articles}
@@ -781,6 +824,11 @@ function App() {
             onLoadMore={loadMoreArticles}
             hasMoreArticles={articlesHasMore}
             loadingMoreArticles={loadingMoreArticles}
+            queryKey={debouncedQuery}
+            notify={notify}
+            onRefresh={account.is_admin ? refresh : null}
+            refreshing={loading}
+            onDataChanged={() => loadAll({ forceArticles: true })}
           />
         ) : activeView === "settings" ? (
           <SettingsView

@@ -20,6 +20,31 @@ export function formatDateTime(value) {
   }).format(date).replace(/\//g, "-");
 }
 
+const HOUR_MS = 3600000;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * Relative publication time.
+ *
+ * "3 天前" answers "should I read this now?" far better than an absolute date,
+ * but past a month the exact date matters again, and past a year the month is
+ * all that is still meaningful.
+ */
+export function formatRelativeDate(value, now = Date.now()) {
+  if (!value) return "未知日期";
+  const raw = String(value);
+  const date = new Date(/^\d{8}$/.test(raw) ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6)}T00:00:00` : raw);
+  if (Number.isNaN(date.getTime())) return formatDate(value);
+
+  const elapsed = now - date.getTime();
+  if (elapsed < 0) return formatDate(value);
+  if (elapsed < HOUR_MS) return "刚刚";
+  if (elapsed < DAY_MS) return `${Math.floor(elapsed / HOUR_MS)} 小时前`;
+  if (elapsed < 7 * DAY_MS) return `${Math.floor(elapsed / DAY_MS)} 天前`;
+  if (elapsed < 30 * DAY_MS) return formatDate(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export function isChineseSourceText(value) {
   const text = String(value || "").trim();
   return Boolean(text) && /[\u3400-\u9fff]/u.test(text);

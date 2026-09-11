@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownUp, ChevronDown, Eye, EyeOff, Filter, RefreshCw, Search, X } from "lucide-react";
+import { ArrowDownUp, Check, ChevronDown, Download, Eye, EyeOff, Filter, Inbox, Keyboard, RefreshCw, Search, SearchX, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
-import { ARTICLE_PAGE_SIZE } from "../../lib/constants.js";
+import { ARTICLE_PAGE_SIZE, DEFAULT_FILTERS } from "../../lib/constants.js";
+import { downloadTextFile, toBibtex, toRis } from "../../lib/export.js";
 import { isChineseJournalArticle, isChineseSourceText } from "../../lib/format.js";
 import ArticleCard from "../../components/ArticleCard.jsx";
+import EmptyState from "../../components/EmptyState.jsx";
 import useListShortcuts from "../../hooks/useListShortcuts.js";
 import ArticleDialog from "./ArticleDialog.jsx";
 
-function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, onLoadMore, hasMoreArticles, loadingMoreArticles }) {
+function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, onLoadMore, hasMoreArticles, loadingMoreArticles, queryKey = "", notify, onRefresh = null, refreshing = false, onDataChanged = null }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [filterOpen, setFilterOpen] = useState(true);
   const [collapsedFilterGroups, setCollapsedFilterGroups] = useState({
@@ -21,6 +23,9 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   const [topKeywords, setTopKeywords] = useState([]);
   const [visibleCount, setVisibleCount] = useState(50);
   const [cursorIndex, setCursorIndex] = useState(-1);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [batchBusy, setBatchBusy] = useState("");
   const searchInputRef = useRef(null);
   const sentinelRef = useRef(null);
   const preparationHandlersRef = useRef({});
@@ -38,7 +43,13 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     }).catch(() => {});
   }, []);
 
-  useEffect(() => setVisibleCount(50), [filters]);
+  // Reset pagination (and any batch selection) only when the *query* changes.
+  // Depending on the `filters` object reset the list on every keystroke,
+  // because setFilters re-creates that object even when nothing moved.
+  useEffect(() => {
+    setVisibleCount(50);
+    setSelectedIds((current) => (current.size ? new Set() : current));
+  }, [queryKey]);
 
   useEffect(() => {
     preparationMountedRef.current = true;
@@ -290,6 +301,77 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     onFocusSearch: focusSearchInput
   });
 
+  const selectedArticles = useMemo(
+    () => sortedArticles.filter((article) => selectedIds.has(article.id)),
+    [sortedArticles, selectedIds]
+  );
+
+  const toggleSelect = useCallback((id) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // One click on a keyword turns browsing into a focused search, which is the
+  // fastest path into the topic the reader actually cares about.
+  const selectKeyword = useCallback((keyword) => {
+    setFilters((current) => {
+      const active = Array.isArray(current.keyword) ? current.keyword : [];
+      return {
+        ...current,
+        keyword: active.includes(keyword) ? active.filter((item) => item !== keyword) : [...active, keyword]
+      };
+    });
+    setFilterOpen(true);
+  }, [setFilters]);
+
+  async function runBatch(action) {
+    const targets = selectedArticles.filter((article) => (action === "read" ? !article.is_read : !article.is_favorite));
+    if (!targets.length) {
+      setSelectedIds(new Set());
+      notify?.(`选中的 ${selectedArticles.length} 篇已经是目标状态。`, { type: "info" });
+      return;
+    }
+    setBatchBusy(action);
+    const patches = [];
+    let failed = 0;
+    for (const article of targets) {
+      try {
+        if (action === "read") {
+          await api.post(`/api/articles/${article.id}/read`);
+          patches.push({ id: article.id, is_read: 1 });
+        } else {
+          await api.post(`/api/articles/${article.id}/favorite`);
+          patches.push({ id: article.id, is_favorite: 1 });
+        }
+      } catch {
+        failed += 1;
+      }
+    }
+    if (patches.length) onArticleUpdated(patches);
+    setBatchBusy("");
+    setSelectedIds(new Set());
+    const label = action === "read" ? "标记已读" : "加入收藏";
+    notify?.(
+      failed ? `已完成 ${patches.length} 篇${label}，${failed} 篇失败。` : `已${label} ${patches.length} 篇。`,
+      { type: failed ? "warning" : "success" }
+    );
+    await onDataChanged?.();
+  }
+
+  function exportSelection(format) {
+    if (!selectedArticles.length) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadTextFile(
+      `电力文献-${stamp}-${selectedArticles.length}篇.${format === "ris" ? "ris" : "bib"}`,
+      format === "ris" ? toRis(selectedArticles) : toBibtex(selectedArticles)
+    );
+    notify?.(`已导出 ${selectedArticles.length} 篇文献（${format === "ris" ? "RIS" : "BibTeX"}）。`, { type: "success" });
+  }
+
   const activeFilterCount = filters.journal.length + filters.keyword.length
     + (filters.q ? 1 : 0) + (filters.from ? 1 : 0) + (filters.to ? 1 : 0)
     + (filters.unread ? 1 : 0) + (filters.favorite ? 1 : 0);
@@ -305,13 +387,24 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
         <div className={`filter-group ${collapsedFilterGroups.search ? "is-collapsed" : ""}`}>
           {filterGroupHeader("search", "搜索", <Search size={14} aria-hidden="true" />)}
           <div className="filter-group-content" id="feed-filter-group-search" hidden={collapsedFilterGroups.search}>
-            <input
-              className="search-input"
-              ref={searchInputRef}
-              value={filters.q}
-              onChange={(event) => setFilters({ ...filters, q: event.target.value })}
-              placeholder="搜索标题、摘要、作者或关键词"
-            />
+            <div className="search-field">
+              <Search size={14} className="search-field-icon" aria-hidden="true" />
+              <input
+                className="search-input"
+                ref={searchInputRef}
+                value={filters.q}
+                aria-label="搜索标题、摘要、作者或关键词"
+                onChange={(event) => setFilters({ ...filters, q: event.target.value })}
+                placeholder="搜索标题、摘要、作者或关键词"
+              />
+              {filters.q ? (
+                <button className="search-clear" type="button" aria-label="清除搜索" onClick={() => setFilters({ ...filters, q: "" })}>
+                  <X size={14} />
+                </button>
+              ) : (
+                <kbd className="search-kbd" title="按 / 键聚焦搜索框">/</kbd>
+              )}
+            </div>
           </div>
         </div>
         <div className={`filter-group ${collapsedFilterGroups.journal ? "is-collapsed" : ""}`}>
@@ -423,6 +516,9 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
             <Filter size={15} /> {filterOpen ? "收起筛选" : "打开筛选"}
             {activeFilterCount > 0 && <span className="filter-count-badge">{activeFilterCount}</span>}
           </button>
+          <button className="secondary shortcuts-toggle" type="button" aria-expanded={shortcutsOpen} aria-controls="feed-shortcuts" onClick={() => setShortcutsOpen((current) => !current)}>
+            <Keyboard size={15} /> 快捷键
+          </button>
         <div className="display-toggles">
           <span className="display-toggles-label">显示内容</span>
           <button type="button" className={`display-toggle ${displayPreferences.authors ? "active" : ""}`} onClick={() => toggleDisplay("authors")}>
@@ -458,6 +554,25 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
         </div>
         </div>
 
+        {shortcutsOpen && (
+          <div className="shortcuts-panel" id="feed-shortcuts">
+            <div className="shortcuts-panel-head">
+              <strong>键盘快捷键</strong>
+              <button className="icon-button" type="button" aria-label="关闭快捷键说明" onClick={() => setShortcutsOpen(false)}><X size={16} /></button>
+            </div>
+            <dl className="shortcuts-list">
+              <div><dt><kbd>j</kbd> / <kbd>↓</kbd></dt><dd>移动到下一条</dd></div>
+              <div><dt><kbd>k</kbd> / <kbd>↑</kbd></dt><dd>移动到上一条</dd></div>
+              <div><dt><kbd>Enter</kbd></dt><dd>打开当前条摘要</dd></div>
+              <div><dt><kbd>r</kbd></dt><dd>切换已读</dd></div>
+              <div><dt><kbd>f</kbd></dt><dd>切换收藏</dd></div>
+              <div><dt><kbd>/</kbd></dt><dd>聚焦搜索框</dd></div>
+              <div><dt><kbd>Esc</kbd></dt><dd>取消当前选中</dd></div>
+            </dl>
+            <p className="shortcuts-note">在输入框内按上面的字母不会触发快捷键；带 Ctrl / Meta / Alt 的组合键也不会被拦截。</p>
+          </div>
+        )}
+
         {(preparation.active || preparation.message) && (
           <div className={`preparation-bar ${preparation.active ? "active" : ""}`} role="status" aria-live="polite">
             <div className="preparation-copy">
@@ -483,15 +598,53 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           </div>
         )}
 
-        <div className="article-count">
+        <div className="article-count" role="status" aria-live="polite">
           共 <strong>{sortedArticles.length}</strong> 篇文献
           {counts.read > 0 && <>，已读 <strong>{counts.read}</strong> 篇</>}
           {counts.favorite > 0 && <>，收藏 <strong>{counts.favorite}</strong> 篇</>}
         </div>
 
+        {selectedIds.size > 0 && (
+          <div className="batch-bar" role="region" aria-label="批量操作">
+            <span className="batch-bar-count">已选 <strong>{selectedIds.size}</strong> 篇</span>
+            {batchBusy && <span className="batch-bar-busy" role="status" aria-live="polite">正在处理…</span>}
+            <button className="secondary compact" type="button" disabled={Boolean(batchBusy)} onClick={() => runBatch("read")}>
+              <Check size={14} /> 全部标记已读
+            </button>
+            <button className="secondary compact" type="button" disabled={Boolean(batchBusy)} onClick={() => runBatch("favorite")}>
+              <Star size={14} /> 批量收藏
+            </button>
+            <button className="secondary compact" type="button" disabled={Boolean(batchBusy)} onClick={() => exportSelection("ris")}>
+              <Download size={14} /> 导出 RIS
+            </button>
+            <button className="secondary compact" type="button" disabled={Boolean(batchBusy)} onClick={() => exportSelection("bibtex")}>
+              <Download size={14} /> 导出 BibTeX
+            </button>
+            <button className="link-button batch-bar-clear" type="button" onClick={() => setSelectedIds(new Set())}>取消选择</button>
+          </div>
+        )}
+
         <div className="article-list">
           {sortedArticles.length === 0 ? (
-            <div className="empty">暂无文献。点击刷新从公开数据源获取，或调整筛选条件。</div>
+            activeFilterCount > 0 ? (
+              <EmptyState
+                icon={SearchX}
+                title="没有符合当前条件的文献"
+                description="期刊、关键词、时间范围、未读与收藏筛选的组合没有命中任何记录。清空条件即可回到完整列表。"
+                action={<button className="secondary" type="button" onClick={() => setFilters({ ...DEFAULT_FILTERS })}>清除全部筛选条件</button>}
+              />
+            ) : (
+              <EmptyState
+                icon={Inbox}
+                title="还没有文献数据"
+                description="数据库中暂时没有可显示的文献，可以立即从公开数据源刷新获取。"
+                action={onRefresh ? (
+                  <button className="primary" type="button" disabled={refreshing} onClick={() => onRefresh()}>
+                    <RefreshCw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "刷新中" : "立即刷新"}
+                  </button>
+                ) : null}
+              />
+            )
           ) : (
             visibleArticles.map((article, index) => (
               <ArticleCard
@@ -507,6 +660,10 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                 markRead={markRead}
                 toggleFavorite={toggleFavorite}
                 requestPreparation={requestPreparation}
+                onSelectKeyword={selectKeyword}
+                selectable={canPersonalize}
+                selected={selectedIds.has(article.id)}
+                onToggleSelect={toggleSelect}
               />
             ))
           )}

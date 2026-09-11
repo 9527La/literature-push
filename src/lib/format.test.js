@@ -1,6 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatDate, formatDateTime, isChineseJournalArticle, isChineseSourceText } from "./format.js";
+import { formatDate, formatDateTime, formatRelativeDate, isChineseJournalArticle, isChineseSourceText } from "./format.js";
+
+const NOW = new Date("2026-09-11T12:00:00+08:00").getTime();
+
+test("formatRelativeDate 按时间跨度选择相对或绝对表述", () => {
+  assert.equal(formatRelativeDate("2026-09-11T11:30:00+08:00", NOW), "刚刚");
+  assert.equal(formatRelativeDate("2026-09-11T06:00:00+08:00", NOW), "6 小时前");
+  assert.equal(formatRelativeDate("2026-09-08T12:00:00+08:00", NOW), "3 天前");
+  assert.equal(formatRelativeDate("2026-08-20T12:00:00+08:00", NOW), "2026-08-20");
+  assert.equal(formatRelativeDate("2025-03-04T12:00:00+08:00", NOW), "2025-03");
+  assert.equal(formatRelativeDate("20250304", NOW), "2025-03");
+  assert.equal(formatRelativeDate("", NOW), "未知日期");
+});
 
 test("formatDate 处理紧凑日期与 ISO 日期", () => {
   assert.equal(formatDate("20240915"), "2024-09-15");

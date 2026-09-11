@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, ExternalLink, Filter, Search, X } from "lucide-react";
+import { BarChart3, Cloud, ExternalLink, Filter, Search, Share2, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { formatDate, isChineseJournalArticle } from "../../lib/format.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
+import EmptyState from "../../components/EmptyState.jsx";
 import WordCloud from "./WordCloud.jsx";
 import CooccurrenceView from "./CooccurrenceView.jsx";
 
@@ -101,7 +102,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
 
       {stats && (
         <>
-          <div className="stats-summary">
+          <div className="stats-summary" role="status" aria-live="polite">
             共 <strong>{stats.totalArticles}</strong> 篇文献，提取出 <strong>{stats.keywords.length}</strong> 个不重复关键词
             {keywordSearch && <>，匹配 <strong>{filteredKeywords.length}</strong> 个</>}
           </div>
@@ -117,13 +118,13 @@ function StatsView({ journals, markRead, toggleFavorite }) {
               className={`stats-view-btn ${viewMode === "wordcloud" ? "active" : ""}`}
               onClick={() => setViewMode("wordcloud")}
             >
-              <span style={{fontSize: '14px'}}>☁</span> 词云
+              <Cloud size={14} /> 词云
             </button>
             <button 
               className={`stats-view-btn ${viewMode === "cooccurrence" ? "active" : ""}`}
               onClick={() => setViewMode("cooccurrence")}
             >
-              <span style={{fontSize: '14px'}}>🔗</span> 共现
+              <Share2 size={14} /> 共现
             </button>
           </div>
 
@@ -155,7 +156,11 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                 <CooccurrenceView data={cooccurrenceData} loading={loading} />
               ) : (
                 filteredKeywords.length === 0 ? (
-                  <div className="empty">所选条件下没有关键词数据。</div>
+                  <EmptyState
+                    icon={Search}
+                    title="所选条件下没有关键词"
+                    description="换一个期刊或放宽时间范围，通常会带回可统计的关键词。"
+                  />
                 ) : (
                   filteredKeywords.map((item, i) => (
                     <button
@@ -185,30 +190,33 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                   <span className="keyword-articles-count">
                     {(stats.keywords.find((k) => k.keyword === selectedKeyword)?.articles || []).length} 篇文献
                   </span>
-                  <button className="icon-button" onClick={() => setSelectedKeyword(null)}>
+                  <button className="icon-button" aria-label="关闭关键词文献列表" onClick={() => setSelectedKeyword(null)}>
                     <X size={18} />
                   </button>
                 </div>
                 <div className="keyword-articles-list">
                   {(stats.keywords.find((k) => k.keyword === selectedKeyword)?.articles || []).map((article) => (
-                    <button className="keyword-article-card" key={article.id} onClick={() => openArticle(article)}>
-                      <div className="keyword-article-meta">
-                        <span>{article.journal}</span>
-                        <span>{formatDate(article.published_at)}</span>
-                      </div>
-                      <div className="keyword-article-title">{article.title}</div>
+                    /* A button may not contain a link: split the card into a
+                       "open abstract" button plus a separate source link. */
+                    <div className="keyword-article-card" key={article.id}>
+                      <button type="button" className="keyword-article-open" onClick={() => openArticle(article)}>
+                        <div className="keyword-article-meta">
+                          <span>{article.journal}</span>
+                          <span>{formatDate(article.published_at)}</span>
+                        </div>
+                        <div className="keyword-article-title">{article.title}</div>
+                      </button>
                       {article.url && (
                         <a
                           href={article.url}
                           target="_blank"
                           rel="noreferrer"
                           className="keyword-article-link"
-                          onClick={(e) => e.stopPropagation()}
                         >
                           <ExternalLink size={12} /> 原文链接
                         </a>
                       )}
-                    </button>
+                    </div>
                   ))}
                 </div>
               </div>
