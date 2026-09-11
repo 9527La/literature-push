@@ -1,3 +1,5 @@
+import { containsChineseText } from "./utils.js";
+
 // Translation is stored as one row per article/language, but the individual
 // fields may be filled at different times.  Keep the field rules in one place
 // so every caller (web UI, refresh jobs, digests and preparation jobs) uses the
@@ -12,6 +14,17 @@ function hasText(value) {
   return String(value || "").trim().length > 0;
 }
 
+function isChineseSource(value) {
+  const text = String(value || "").trim();
+  return Boolean(text) && containsChineseText(text);
+}
+
+function normalizeTargetLanguage(targetLanguage) {
+  const value = String(targetLanguage || "zh").trim().toLowerCase();
+  if (value !== "zh" && value !== "zh-cn") throw new Error("当前仅支持英文翻译为中文");
+  return "zh";
+}
+
 function normalizeFields(fields) {
   const requested = Array.isArray(fields) && fields.length ? fields : TRANSLATION_FIELDS;
   return [...new Set(requested.filter((field) => TRANSLATION_FIELDS.includes(field)))];
@@ -24,8 +37,9 @@ function normalizeFields(fields) {
 export function getMissingTranslationFields(article, translation, fields) {
   if (!article) return [];
   return normalizeFields(fields).filter((field) => {
-    if (field === "title") return !hasText(translation?.title);
+    if (field === "title") return !isChineseSource(article.title) && !hasText(translation?.title);
     if (!hasText(article[field])) return false;
+    if (isChineseSource(article[field])) return false;
     return !hasText(translation?.[field]);
   });
 }
@@ -103,7 +117,8 @@ export function createTranslationCacheService(dependencies = {}) {
     if (!Number.isInteger(articleId) || articleId <= 0) {
       throw new Error("文献不存在");
     }
-    const key = `${articleId}:${String(targetLanguage || "zh")}`;
+    const normalizedTargetLanguage = normalizeTargetLanguage(targetLanguage);
+    const key = `${articleId}:${normalizedTargetLanguage}`;
     const requestedFields = normalizeFields(options.fields);
 
     // If another user is already translating this article, wait for that
@@ -111,7 +126,7 @@ export function createTranslationCacheService(dependencies = {}) {
     // that was not part of the first caller's requested subset.
     if (inFlight.has(key)) {
       await inFlight.get(key);
-      return ensureTranslation(articleOrId, targetLanguage, options);
+      return ensureTranslation(articleOrId, normalizedTargetLanguage, options);
     }
 
     const task = (async () => {
@@ -123,15 +138,15 @@ export function createTranslationCacheService(dependencies = {}) {
       const article = readArticle(articleId) || suppliedArticle;
       if (!article) throw new Error("文献不存在");
 
-      const existing = readTranslation(articleId, targetLanguage) || null;
+      const existing = readTranslation(articleId, normalizedTargetLanguage) || null;
       const missingFields = getMissingTranslationFields(article, existing, requestedFields);
       if (!missingFields.length) {
         return { translation: existing, translated: false, fields: [], cached: true };
       }
 
-      const result = await requestTranslation(sourceForFields(article, missingFields), targetLanguage, missingFields);
+      const result = await requestTranslation(sourceForFields(article, missingFields), normalizedTargetLanguage, missingFields);
       const merged = mergeTranslation(existing, result);
-      const saved = writeTranslation(articleId, targetLanguage, merged);
+      const saved = writeTranslation(articleId, normalizedTargetLanguage, merged);
       const stillMissing = getMissingTranslationFields(article, saved, missingFields);
       if (stillMissing.length) {
         const providerErrors = Array.isArray(result?.errors) && result.errors.length
@@ -162,6 +177,7 @@ export function createTranslationCacheService(dependencies = {}) {
    * only successfully completed fields are written back.
    */
   async function ensureTranslations(articleOrIds, targetLanguage = "zh", options = {}) {
+    const normalizedTargetLanguage = normalizeTargetLanguage(targetLanguage);
     const suppliedArticles = Array.isArray(articleOrIds) ? articleOrIds : [articleOrIds];
     const resolved = await resolveDependencies();
     const readArticle = resolved.getArticle;
@@ -181,7 +197,7 @@ export function createTranslationCacheService(dependencies = {}) {
         invalid.push({ id: articleId, message: "文献不存在" });
         continue;
       }
-      const existing = readTranslation(articleId, targetLanguage) || null;
+      const existing = readTranslation(articleId, normalizedTargetLanguage) || null;
       const missingFields = getMissingTranslationFields(article, existing, options.fields);
       if (!missingFields.length) {
         results.push({
@@ -212,7 +228,7 @@ export function createTranslationCacheService(dependencies = {}) {
     const sourceArticles = entries.map((entry) => sourceForFields(entry.article, entry.missingFields));
     let batch;
     if (resolved.translateArticles) {
-      batch = await resolved.translateArticles(sourceArticles, targetLanguage, requestedFields);
+      batch = await resolved.translateArticles(sourceArticles, normalizedTargetLanguage, requestedFields);
     } else {
       // Test doubles and older integrations may only provide the single-item
       // translator. Keep them functional while the default service uses the
@@ -223,7 +239,7 @@ export function createTranslationCacheService(dependencies = {}) {
       for (const source of sourceArticles) {
         const entry = entries.find((item) => item.articleId === source.id);
         try {
-          const translation = await resolved.translateArticle(source, targetLanguage, entry?.missingFields);
+          const translation = await resolved.translateArticle(source, normalizedTargetLanguage, entry?.missingFields);
           for (const field of entry?.missingFields || []) {
             if (hasText(translation?.[field])) {
               translatedResults.push({ articleId: source.id, field, translated: translation[field], provider: translation.provider || "" });
@@ -250,7 +266,7 @@ export function createTranslationCacheService(dependencies = {}) {
       .filter((entry) => payloadByArticle.has(String(entry.articleId)))
       .map((entry) => ({
         articleId: entry.articleId,
-        targetLanguage,
+        targetLanguage: normalizedTargetLanguage,
         translation: mergeTranslation(entry.existing, payloadByArticle.get(String(entry.articleId)))
       }));
     const savedByArticle = new Map();
@@ -260,7 +276,7 @@ export function createTranslationCacheService(dependencies = {}) {
       }
     } else {
       for (const entry of saveEntries) {
-        const saved = resolved.saveTranslation(entry.articleId, targetLanguage, entry.translation);
+        const saved = resolved.saveTranslation(entry.articleId, normalizedTargetLanguage, entry.translation);
         if (saved) savedByArticle.set(String(entry.articleId), saved);
       }
     }
@@ -274,7 +290,7 @@ export function createTranslationCacheService(dependencies = {}) {
     }
     for (const entry of entries) {
       const saved = savedByArticle.get(String(entry.articleId))
-        || readTranslation(entry.articleId, targetLanguage)
+        || readTranslation(entry.articleId, normalizedTargetLanguage)
         || entry.existing;
       const stillMissing = getMissingTranslationFields(entry.article, saved, entry.missingFields);
       const fields = entry.missingFields.filter((field) => hasText(saved?.[field]));

@@ -1,27 +1,58 @@
 // Shared utility functions
 
 export function decodeEntities(value) {
-  return String(value || "")
+  return String(value ?? "")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)));
+    .replace(/&(nbsp|apos|ndash|mdash|lsquo|rsquo|ldquo|rdquo|hellip|times|minus|micro|alpha|beta|gamma|Delta);/g,
+      (_, name) => ({ nbsp: " ", apos: "'", ndash: "–", mdash: "—", lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”", hellip: "…", times: "×", minus: "−", micro: "µ", alpha: "α", beta: "β", gamma: "γ", Delta: "Δ" })[name])
+    .replace(/&#(x[0-9a-f]+|\d+);/gi, (raw, code) => {
+      const point = /^x/i.test(code) ? parseInt(code.slice(1), 16) : Number(code);
+      return point > 0 && point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff)
+        ? String.fromCodePoint(point) : raw;
+    });
 }
 
 export function stripTags(value) {
   return decodeEntities(String(value || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
 }
 
+export function isUsableMetadataText(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return !/<!doctype\s+html|<html\b|<head\b|<body\b|cloudflare|bad gateway|error code\s*50\d|cf-error-details/i.test(text)
+    && !/\uFFFD|\u951f\u65a4\u62f7/.test(text);
+}
+
+export function safeExternalError(error, fallback = "\u5916\u90e8\u6570\u636e\u6e90\u6682\u65f6\u4e0d\u53ef\u7528") {
+  const message = String(error?.message || error || "").replace(/\s+/g, " ").trim();
+  if (!message || /<!doctype\s+html|<html\b|<head\b|<body\b|cf-error-details/i.test(message)) return fallback;
+  return message.slice(0, 300);
+}
+
+export function isNonResearchTitle(value) {
+  return /^(corrigendum|correction|erratum)\s+to\b|^editorial board$/i.test(String(value || "").trim());
+}
+
 export function decodeBasicEntities(value) {
-  return String(value)
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+  return decodeEntities(value);
+}
+
+// Decode declared legacy encodings before text reaches JSON/SQLite. Never
+// silently persist replacement characters produced by a wrong decoder.
+export async function readResponseText(response) {
+  if (!response.arrayBuffer) return response.text(); // lightweight test doubles
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  const prefix = new TextDecoder("latin1").decode(bytes.slice(0, 2048));
+  const contentType = response.headers?.get?.("content-type") || "";
+  const charset = contentType.match(/charset\s*=\s*["']?([^\s;"']+)/i)?.[1]
+    || prefix.match(/<\?xml[^>]*encoding=["']([^"']+)/i)?.[1]
+    || prefix.match(/<meta[^>]*charset\s*=\s*["']?([^\s;"'/>]+)/i)?.[1]
+    || "utf-8";
+  return new TextDecoder(charset, { fatal: true }).decode(bytes);
 }
 
 export function escapeHtml(value) {
@@ -39,6 +70,13 @@ export function sleep(ms) {
 
 export function escapeLike(value) {
   return String(value || "").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+// Chinese academic text commonly contains Latin abbreviations such as V2G,
+// HVDC, OPF, and AI. Those abbreviations do not make the surrounding Chinese
+// title or abstract an English translation candidate.
+export function containsChineseText(value) {
+  return /[\u3400-\u9fff]/u.test(String(value || ""));
 }
 
 export function calculatePushDays(frequency) {

@@ -50,7 +50,9 @@ test("extracts fallback html metadata for crawler", () => {
 test("crawler reports missing requested metadata while preserving partial fields", async () => {
   const previousFetch = globalThis.fetch;
   const previousCrawlerEnabled = config.crawlerEnabled;
+  const previousWebFallbackEnabled = config.semanticScholarWebFallbackEnabled;
   config.crawlerEnabled = true;
+  config.semanticScholarWebFallbackEnabled = false;
   globalThis.fetch = async () => ({
     ok: true,
     url: "https://publisher.example/article",
@@ -75,6 +77,30 @@ test("crawler reports missing requested metadata while preserving partial fields
   } finally {
     globalThis.fetch = previousFetch;
     config.crawlerEnabled = previousCrawlerEnabled;
+    config.semanticScholarWebFallbackEnabled = previousWebFallbackEnabled;
+  }
+});
+
+test("crawler does not fetch an article whose requested metadata is already complete", async () => {
+  const previousFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    throw new Error("fetch should not be called");
+  };
+  try {
+    const details = await crawlArticleDetails({
+      id: 100,
+      title: "Cached article",
+      abstract: "Cached abstract",
+      keywords: "cached keyword",
+      url: "https://publisher.example/article"
+    });
+    assert.equal(details.abstract, "Cached abstract");
+    assert.equal(details.keywords, "cached keyword");
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
   }
 });
 
@@ -98,6 +124,32 @@ test("translation provider only requests the selected field", async () => {
     );
     assert.equal(result.title, "中文标题");
     assert.equal(result.abstract, "");
+    assert.equal(calls.length, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("translation skips source fields that are already Chinese", async () => {
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return {
+      ok: true,
+      json: async () => ({ translatedText: "中文摘要译文" })
+    };
+  };
+
+  try {
+    const result = await translateInternals.translateWithProvider(
+      { title: "V2G 车网互动中文标题", abstract: "English abstract" },
+      "zh",
+      "libretranslate",
+      ["title", "abstract"]
+    );
+    assert.equal(result.title, "");
+    assert.equal(result.abstract, "中文摘要译文");
     assert.equal(calls.length, 1);
   } finally {
     globalThis.fetch = previousFetch;
@@ -364,8 +416,10 @@ test("extracts IEEE page metadata JSON", () => {
 test("crawler continues to a second DOI source when the first source is partial", async () => {
   const previousFetch = globalThis.fetch;
   const previousCrawlerEnabled = config.crawlerEnabled;
+  const previousElsevierKey = config.elsevierApiKey;
   const calls = [];
   config.crawlerEnabled = true;
+  config.elsevierApiKey = "";
   globalThis.fetch = async (url) => {
     calls.push(String(url));
     if (calls.length === 1) {
@@ -411,6 +465,7 @@ test("crawler continues to a second DOI source when the first source is partial"
   } finally {
     globalThis.fetch = previousFetch;
     config.crawlerEnabled = previousCrawlerEnabled;
+    config.elsevierApiKey = previousElsevierKey;
   }
 });
 
@@ -490,4 +545,39 @@ test("adds the generated Markdown file as a digest attachment", () => {
   });
   assert.equal(message.to, "reader@example.com");
   assert.deepEqual(message.attachments, [{ filename: "report.md", path: "data/digests/report.md" }]);
+});
+
+import { fetchIeeeArticleDetails } from "./ieee.js";
+import { isNonResearchTitle, isUsableMetadataText, safeExternalError } from "./utils.js";
+
+test("IEEE detail lookup queries by DOI and returns exact metadata", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = config.ieeeApiKey;
+  config.ieeeApiKey = "test-key";
+  globalThis.fetch = async (url) => {
+    assert.match(String(url), /doi=10\.1109%2Fexample/i);
+    return Response.json({ articles: [{ doi: "10.1109/example", title: "Exact", abstract: "Full abstract", index_terms: { "IEEE Author Keywords": ["grid"] } }] });
+  };
+  try {
+    const result = await fetchIeeeArticleDetails("https://doi.org/10.1109/example");
+    assert.equal(result.abstract, "Full abstract");
+    assert.equal(result.keywords, "grid");
+  } finally { globalThis.fetch = originalFetch; config.ieeeApiKey = originalKey; }
+});
+
+test("non-research titles and gateway HTML are recognized", () => {
+  assert.equal(isNonResearchTitle("Corrigendum to a paper"), true);
+  assert.equal(isNonResearchTitle("Editorial Board"), true);
+  assert.equal(isNonResearchTitle("A research paper"), false);
+  assert.equal(isUsableMetadataText("<!DOCTYPE html><title>502 Bad gateway</title>"), false);
+  assert.equal(safeExternalError(new Error("<!DOCTYPE html><body>bad</body>")), "外部数据源暂时不可用");
+});
+
+import { internals as elsevierInternals } from "./elsevier.js";
+
+test("normalizes Scopus abstract retrieval metadata", () => {
+  const result = elsevierInternals.normalizeScopusItem({ "abstracts-retrieval-response": { coredata: { "dc:title": "IEEE paper", "dc:description": "A complete abstract.", "prism:doi": "10.1109/test", "prism:publicationName": "IEEE Test", "prism:coverDate": "2026-09-01" }, authors: { author: [{ "ce:indexed-name": "Ada Chen" }] }, authkeywords: { "author-keyword": [{ "$": "microgrid" }] } } });
+  assert.equal(result.abstract, "A complete abstract.");
+  assert.equal(result.authors, "Ada Chen");
+  assert.equal(result.keywords, "microgrid");
 });

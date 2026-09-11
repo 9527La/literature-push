@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createTranslationCacheService, getMissingTranslationFields, isTranslationComplete } from "./translation-cache.js";
 
+test("Chinese source fields with Latin abbreviations do not enter the translation queue", () => {
+  const article = {
+    id: 100,
+    title: "V2G 车网互动调度方法",
+    abstract: "面向 HVDC 系统的稳定性分析"
+  };
+  assert.deepEqual(getMissingTranslationFields(article, null), []);
+  assert.equal(isTranslationComplete(article, null), true);
+});
+
 test("translation cache requests only missing fields and reuses the saved row", async () => {
   const article = { id: 1, title: "English title", abstract: "English abstract", keywords: "power; grid" };
   let row = { article_id: 1, target_language: "zh", title: "已有标题", abstract: "", keywords: "", provider: "old" };

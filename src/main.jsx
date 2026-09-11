@@ -10,18 +10,22 @@ import {
   CloudDownload,
   CloudUpload,
   CircleStop,
+  ChevronDown,
   Database,
   ExternalLink,
   Eye,
   EyeOff,
   FileText,
   Filter,
+  FolderPlus,
+  Globe,
   Heart,
   HardDrive,
   HelpCircle,
   Mail,
   MessageCircle,
   MessageSquare,
+  Pencil,
   RefreshCw,
   Save,
   ScrollText,
@@ -96,9 +100,14 @@ async function parseResponse(response) {
     const data = JSON.parse(text);
     const error = new Error(data.error || text);
     error.status = response.status;
+    error.payload = data;
+    if (data.article) error.article = data.article;
     throw error;
   } catch (error) {
-    if (error instanceof SyntaxError) throw new Error(text || `请求失败（${response.status}）`);
+    if (error instanceof SyntaxError) {
+      const looksLikeHtml = /<!doctype\s+html|<html\b|<head\b|<body\b|cf-error-details/i.test(text);
+      throw new Error(looksLikeHtml ? `外部服务暂时不可用（${response.status}）` : (text.slice(0, 300) || `请求失败（${response.status}）`));
+    }
     throw error;
   }
 }
@@ -114,7 +123,25 @@ function requestHeaders(hasBody = false) {
 }
 
 const DEFAULT_FILTERS = { journal: [], q: "", keyword: [], unread: false, favorite: false, from: "", to: "", sort: "desc" };
-const DEFAULT_DISPLAY = { authors: true, keywords: true, abstract: true, bilingual: true, translatedAbstract: true };
+const ARTICLE_PAGE_SIZE = 50;
+const ARTICLE_RELEVANCE_PAGE_SIZE = 500;
+const DISPLAY_PREFERENCES_VERSION = 2;
+const DEFAULT_DISPLAY = { authors: true, keywords: true, abstract: true, bilingual: true, translatedAbstract: false };
+
+function normalizeDisplayPreferences(snapshot) {
+  const saved = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const preferences = saved.displayPreferences && typeof saved.displayPreferences === "object"
+    ? saved.displayPreferences
+    : {};
+  const isLegacySnapshot = Number(saved.displayPreferencesVersion || 0) < DISPLAY_PREFERENCES_VERSION;
+  return {
+    ...DEFAULT_DISPLAY,
+    ...preferences,
+    // Before version 2, true meant the old default rather than an explicit
+    // user choice. Do not let that legacy value keep re-enabling the section.
+    ...(isLegacySnapshot ? { translatedAbstract: false } : {})
+  };
+}
 
 function readLocalPersonalization() {
   try {
@@ -142,6 +169,9 @@ const api = {
       body: JSON.stringify(body)
     }));
   },
+  async patch(path, body) {
+    return parseResponse(await fetch(path, { method: "PATCH", headers: requestHeaders(true), body: JSON.stringify(body) }));
+  },
   async delete(path) {
     return parseResponse(await fetch(path, { method: "DELETE", headers: requestHeaders() }));
   }
@@ -151,6 +181,42 @@ function formatDate(value) {
   if (!value) return "未知日期";
   if (/^\d{8}$/.test(value)) return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}`;
   return String(value).slice(0, 10);
+}
+
+function formatDateTime(value) {
+  if (!value) return "未知时间";
+  const raw = String(value);
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return raw.replace("T", " ").replace(/\.\d+Z$/, "").slice(0, 19);
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).format(date).replace(/\//g, "-");
+}
+
+function isChineseSourceText(value) {
+  const text = String(value || "").trim();
+  return Boolean(text) && /[\u3400-\u9fff]/u.test(text);
+}
+
+function isChineseJournalArticle(article, journals = []) {
+  const journalName = String(article?.journal || "").trim();
+  const journal = (Array.isArray(journals) ? journals : []).find((item) => (
+    String(item?.name || "").trim() === journalName
+  ));
+  const platform = String(journal?.platform || journal?.publisher || "").trim().toLowerCase();
+  const language = String(journal?.language || "").trim().toLowerCase();
+  return platform === "wanfang"
+    || language === "zh"
+    || language.startsWith("zh-")
+    || String(article?.external_id || "").startsWith("wanfang:")
+    || isChineseSourceText(article?.title)
+    || isChineseSourceText(article?.abstract);
 }
 
 function Highlight({ text, terms }) {
@@ -255,73 +321,101 @@ function UpdateModal({ versionInfo, onClose }) {
   );
 }
 
+function InternalUseNotice({ className = "" }) {
+  return (
+    <aside className={`internal-use-notice ${className}`.trim()} role="note">
+      <ShieldCheck size={18} aria-hidden="true" />
+      <div>
+        <strong>课题组内部使用</strong>
+        <p>本项目只限于课题组内部使用，请勿外传，请勿用于商业用途。</p>
+      </div>
+    </aside>
+  );
+}
+
 function HelpView() {
   return (
-    <div className="help-view">
-      <section className="help-section">
-        <h3><BookOpen size={18} /> 系统简介</h3>
-        <p>本系统自动订阅电力系统领域期刊的最新文献，提供文献浏览、关键词统计、邮件推送、公共讨论和账户个性设置同步。</p>
+    <div className="help-view" aria-labelledby="help-title">
+      <section className="help-section help-intro help-section-wide">
+        <div className="help-intro-copy">
+          <span className="eyebrow">快速上手</span>
+          <h1 id="help-title">使用说明</h1>
+          <p>本系统面向课题组内部的电力系统文献阅读与整理，提供文献浏览、关键词统计、收藏管理、邮件推送、公共讨论和个性设置同步。</p>
+        </div>
+        <InternalUseNotice compact />
       </section>
 
       <section className="help-section">
         <h3><Bell size={18} /> 最新文献</h3>
-        <p>展示所有已订阅期刊的最新论文，支持以下操作：</p>
+        <p>展示已订阅期刊的最新论文。页面会优先显示本地已有内容，缺失的摘要、关键词和中文翻译在后台补全。</p>
         <ul>
-          <li><strong>搜索</strong>：在顶部搜索框输入关键词，可搜索标题、作者、摘要和关键词内容。匹配的文本会高亮显示。</li>
-          <li><strong>筛选</strong>：左侧面板提供多维度筛选条件，包括期刊（多选）、关键词频次（多选）、时间范围、仅未读、仅收藏。不同筛选条件之间为"且"关系，同一条件内多选为"或"关系。</li>
-          <li><strong>排序</strong>：支持按发布时间（升序/降序）和按相关性排序。相关性排序根据搜索词在标题（权重 3）、关键词（权重 2）、摘要（权重 1）中出现的次数计算。</li>
-          <li><strong>收藏与阅读</strong>：点击心形图标收藏文献，点击文献卡片可展开查看详情，同时自动标记为已读。</li>
-          <li><strong>显示控制</strong>：可通过主页面顶部开关控制作者、关键词、摘要以及中文标题的可见性。</li>
+          <li><strong>搜索与筛选</strong>：点击“打开筛选”后，可按标题、作者、摘要、关键词、期刊、日期、未读状态和收藏状态筛选；同一条件内的多选为“或”关系，不同条件之间为“且”关系。</li>
+          <li><strong>排序</strong>：支持最新优先、最早优先和按相关性排序。相关性按标题、关键词和摘要中的匹配程度计算。</li>
+          <li><strong>阅读操作</strong>：点击标题或摘要图标查看文献详情；使用勾选按钮标记或取消已读，使用心形按钮收藏或取消收藏。</li>
+          <li><strong>显示控制</strong>：顶部“显示内容”开关可分别控制作者、关键词、摘要、中文标题和中文摘要；中文摘要默认关闭，中文期刊不会重复显示中文摘要。</li>
+        </ul>
+      </section>
+
+      <section className="help-section">
+        <h3><Star size={18} /> 收藏文献</h3>
+        <p>把重要文献集中保存，按研究方向管理，并为每篇文献记录自己的备注。</p>
+        <ul>
+          <li><strong>默认收藏夹</strong>：新注册的个人账户会自动创建“默认收藏夹”，首次收藏时会优先选中它。</li>
+          <li><strong>分组管理</strong>：可以新建、重命名或删除分组；删除分组不会删除其中的文献，文献会转为“未分组”。</li>
+          <li><strong>备注与调整</strong>：在收藏列表中可修改文献分组和备注，点击“保存备注”后生效。</li>
+          <li><strong>账户隔离</strong>：收藏、阅读状态、分组和备注只属于当前个人账户，游客不能保存这些内容。</li>
         </ul>
       </section>
 
       <section className="help-section">
         <h3><BarChart3 size={18} /> 关键词统计</h3>
-        <p>汇总所有文献中出现的关键词及其频次，帮助了解研究热点趋势。</p>
+        <p>汇总文献关键词及其频次，帮助了解研究热点和关键词之间的共现关系。</p>
         <ul>
-          <li>可按期刊和时间范围筛选关键词统计结果。</li>
-          <li>点击某个关键词下方的文献卡片可展开查看论文详情。</li>
+          <li>可按期刊和时间范围重新统计。</li>
+          <li>支持列表、词云和共现三种查看方式，可搜索关键词。</li>
+          <li>点击关键词后可查看对应文献，并进一步打开文献详情。</li>
         </ul>
       </section>
 
       <section className="help-section">
         <h3><Mail size={18} /> 文献推送</h3>
-        <p>管理邮件订阅和系统设置：</p>
+        <p>在“文献推送”页面管理邮箱、订阅期刊和自动推送计划。</p>
         <ul>
-          <li><strong>周报邮箱</strong>：填写您的邮箱地址并保存，系统将按账户配置的频率推送最新文献。点击“发送测试邮箱”可收到一封测试邮件。</li>
-          <li><strong>订阅期刊</strong>：勾选需要关注的期刊，只有已订阅期刊的文献会出现在最新文献页和推送中。</li>
-          <li><strong>补全关键词</strong>：对缺失关键词的文献自动补全，提升关键词统计的完整性。</li>
-          <li><strong>推送设置</strong>：可选择每天、每周或每月推送，设置发送时间（时:分），自定义邮件内容（附件、摘要、关键词、翻译），指定推送期刊范围。</li>
+          <li><strong>邮箱</strong>：填写并保存邮箱后，可以发送测试邮件。</li>
+          <li><strong>订阅期刊</strong>：勾选需要关注的期刊，最新文献和推送会使用账户自己的订阅范围。</li>
+          <li><strong>推送计划</strong>：支持每天、每周或每月推送，可设置发送时间、邮件内容和推送期刊范围。</li>
+          <li>游客可以浏览设置页面，但需要登录个人账户才能保存邮箱、期刊和推送配置。</li>
         </ul>
       </section>
 
       <section className="help-section">
         <h3><UserRound size={18} /> 账户与个性设置</h3>
         <ul>
-          <li><strong>网页通行证</strong>：先使用管理员或用户通行证进入网页；通行证与个人账户相互独立。</li>
-          <li><strong>个人账户</strong>：可自行注册，用户名唯一。游客可以浏览，但不能参与公共讨论或保存个人阅读、收藏和推送设置。</li>
-          <li><strong>账户资料</strong>：可保存姓名、入学年份、学历和周报邮箱。</li>
-          <li><strong>本机保存</strong>：开启自动保存后，筛选、列表显示、期刊订阅和推送配置会保存在当前浏览器。</li>
-          <li><strong>远端同步</strong>：登录后可手动上传当前设置，也可从远端账户载入。</li>
-          <li><strong>公共讨论</strong>：登录个人账户后可设置发言名称、发布主题、评论和点赞；公开标签按账户固定，不使用 IP 作为新账户身份。</li>
+          <li><strong>网页通行证</strong>：用于进入网页；它与个人账户相互独立。</li>
+          <li><strong>个人账户</strong>：可注册、登录和退出。登录后才能保存阅读、收藏、推送和讨论相关数据。</li>
+          <li><strong>本机保存</strong>：可以将筛选、列表显示、订阅期刊和推送配置保存到当前浏览器。</li>
+          <li><strong>远端同步</strong>：登录后可手动上传当前个性设置，也可从账户载入已保存设置。</li>
+          <li><strong>公共讨论</strong>：登录后可设置发言名称、发布主题、评论和点赞；公开标签按账户固定。</li>
         </ul>
       </section>
 
       <section className="help-section">
         <h3><RefreshCw size={18} /> 数据刷新</h3>
-        <p>系统支持两种刷新方式：</p>
+        <p>系统支持后台定时刷新和管理员手动维护。</p>
         <ul>
-          <li><strong>手动维护</strong>：最高管理员可在“管理中心”即时拉取最新文献、补全摘要和关键词，或批量翻译缺失的标题和摘要。</li>
-          <li><strong>定时刷新</strong>：在周报递送页面中设置 Cron 表达式，系统将按计划自动获取新文献。默认每天凌晨执行一次。</li>
+          <li><strong>定时刷新</strong>：系统按服务器配置的计划获取新文献。</li>
+          <li><strong>手动维护</strong>：管理员可在“管理中心”拉取最新文献、补全摘要和关键词，或批量翻译缺失内容。</li>
+          <li>刷新期间已有内容仍可浏览；页面会显示后台补全进度和失败提示。</li>
         </ul>
       </section>
 
-      <section className="help-section">
+      <section className="help-section help-section-wide">
         <h3><HelpCircle size={18} /> 常见问题</h3>
         <ul>
           <li><strong>局域网访问</strong>：同一 Wi-Fi 下的其他设备可通过浏览器输入本机显示的局域网地址访问本系统。</li>
-          <li><strong>版本更新</strong>：系统更新后会弹出更新说明，可选择"知道了"关闭，下次更新前不再重复提示。</li>
+          <li><strong>版本更新</strong>：系统更新后会弹出更新说明，可选择“知道了”关闭；同一版本不会重复提示。</li>
           <li><strong>管理中心</strong>：只有管理员网页通行证可查看网站统计、用户、期刊完整度和刷新记录，并执行数据维护。</li>
+          <li><strong>访问限制</strong>：本项目只限于课题组内部使用，请勿外传，请勿用于商业用途。</li>
         </ul>
       </section>
     </div>
@@ -353,6 +447,7 @@ function LoginGate({ onAuthenticate }) {
         <span className="eyebrow">受限访问</span>
         <h1 id="login-title">输入网页通行证</h1>
         <p>通行证用于进入网页。进入后可游客浏览，也可以注册或登录独立的个人账户。</p>
+        <InternalUseNotice className="login-use-notice" />
         <form className="auth-form login-form" onSubmit={submit} onInput={() => setMessage("")}>
           <label><span>网页通行证</span><input type="password" value={passport} autoComplete="current-password" maxLength={128} onChange={(event) => setPassport(event.target.value)} required autoFocus /></label>
           <button className="primary" disabled={submitting || !passport}>{submitting ? "正在验证" : "进入网页"}</button>
@@ -366,16 +461,18 @@ function LoginGate({ onAuthenticate }) {
 
 function App() {
   const [articles, setArticles] = useState([]);
+  const [articlesHasMore, setArticlesHasMore] = useState(false);
+  const [loadingMoreArticles, setLoadingMoreArticles] = useState(false);
   const [settings, setSettings] = useState({ journals: [], refreshCron: "", emailEnabled: false, emailRecipients: [] });
   const [status, setStatus] = useState(null);
   const [availableJournals, setAvailableJournals] = useState([]);
   const [autoSavePersonalization, setAutoSavePersonalization] = useState(() => localStorage.getItem("autoSavePersonalization") === "true");
   const localPersonalization = useMemo(() => localStorage.getItem("autoSavePersonalization") === "true" ? readLocalPersonalization() : null, []);
   const [filters, setFilters] = useState(() => ({ ...DEFAULT_FILTERS, ...(localPersonalization?.filters || {}) }));
-  const [displayPreferences, setDisplayPreferences] = useState(() => ({ ...DEFAULT_DISPLAY, ...(localPersonalization?.displayPreferences || {}) }));
+  const [displayPreferences, setDisplayPreferences] = useState(() => normalizeDisplayPreferences(localPersonalization));
   const [activeView, setActiveView] = useState(() => {
     const requested = window.location.hash.slice(1);
-    return ["feed", "stats", "settings", "feedback", "account", "admin", "help"].includes(requested) ? requested : "feed";
+    return ["feed", "stats", "favorites", "settings", "feedback", "account", "admin", "help"].includes(requested) ? requested : "feed";
   });
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -387,6 +484,13 @@ function App() {
   const autoLoginAttemptRef = useRef("");
   const autoLoginPromiseRef = useRef(null);
   const articleCacheRef = useRef(new Map());
+  const articleRequestRef = useRef(0);
+  const loadedArticleQueryRef = useRef(null);
+  const initialLoadStartedRef = useRef(false);
+  const accountBootstrapPromiseRef = useRef(null);
+  const interactionPendingRef = useRef(new Set());
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
+  const [favoritePicker, setFavoritePicker] = useState(null);
   
   // Debounced search
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -423,7 +527,7 @@ function App() {
 
   useEffect(() => {
     if (!autoSavePersonalization || initialLoading) return;
-    localStorage.setItem("personalizationSnapshot", JSON.stringify({ filters, displayPreferences, settings }));
+    localStorage.setItem("personalizationSnapshot", JSON.stringify(getPersonalizationSnapshot()));
   }, [autoSavePersonalization, initialLoading, filters, displayPreferences, settings]);
 
   useEffect(() => {
@@ -435,23 +539,21 @@ function App() {
     setVersionInfo(null);
   }
 
-  const query = useMemo(() => {
-    const params = new URLSearchParams();
-    Object.entries(filters).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        if (value.length) params.set(key, value.join(","));
-      } else if (value) {
-        params.set(key, String(value));
-      }
-    });
-    return params.toString();
-  }, [filters]);
-
   async function loadAccountWithAutoLogin() {
     if (autoLoginPromiseRef.current) return autoLoginPromiseRef.current;
 
     const run = (async () => {
-      const current = await api.get("/api/account");
+      let current;
+      try {
+        current = await api.get("/api/account");
+      } catch (error) {
+        // The account endpoint is intentionally protected by the site gate.
+        // During the initial gate/account parallel check, a missing or stale
+        // passport is therefore a normal guest result rather than a fatal
+        // bootstrap error.
+        if (error.status !== 401) throw error;
+        current = { authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" };
+      }
       const loginSettings = readAccountLoginSettings();
       const hasStoredToken = Boolean(getUserToken());
       const canAutoLogin = Boolean(
@@ -495,62 +597,144 @@ function App() {
     }
   }
 
-  async function loadAll({ forceArticles = false } = {}) {
-    // Resolve a remembered account before loading user-specific data. This
-    // ensures read/favorite/settings requests carry the restored token.
-    const nextAccount = await loadAccountWithAutoLogin();
-    const articleCacheKey = `${getUserToken() || "guest"}::${debouncedQuery}`;
-    const cachedArticles = !forceArticles && articleCacheRef.current.get(articleCacheKey);
-    const articlesPromise = cachedArticles
-      ? Promise.resolve(cachedArticles)
-      : api.get(`/api/articles${debouncedQuery ? `?${debouncedQuery}` : ""}`).then((result) => {
-        articleCacheRef.current.set(articleCacheKey, result);
-        return result;
-      });
-    const [nextSettings, nextStatus, nextArticles, journals] = await Promise.all([
+  async function loadMeta(nextAccount) {
+    const account = nextAccount || await loadAccountWithAutoLogin();
+    const [nextSettings, nextStatus, journals] = await Promise.all([
       api.get("/api/settings"),
       api.get("/api/status"),
-      articlesPromise,
       availableJournals.length ? Promise.resolve(availableJournals) : api.get("/api/journals")
     ]);
     setSettings(nextSettings);
     setStatus(nextStatus);
-    setArticles(nextArticles);
-    setAccount(nextAccount);
-    if (activeView === "admin" && !nextAccount.is_admin) setActiveView("feed");
-    if (getUserToken() && !nextAccount.authenticated) clearAccountToken();
+    setAccount(account);
+    if (activeView === "admin" && !account.is_admin) setActiveView("feed");
+    if (getUserToken() && !account.authenticated) clearAccountToken();
     if (!availableJournals.length) setAvailableJournals(journals);
+    return account;
+  }
+
+  async function loadArticles({ force = false, append = false, queryString = debouncedQuery, offset = 0 } = {}) {
+    const normalizedQuery = String(queryString || "");
+    const queryParams = new URLSearchParams(normalizedQuery);
+    const pageSize = queryParams.get("sort") === "relevance" ? ARTICLE_RELEVANCE_PAGE_SIZE : ARTICLE_PAGE_SIZE;
+    const pageOffset = append ? Math.max(Number(offset) || 0, 0) : 0;
+    queryParams.set("limit", String(pageSize));
+    queryParams.set("offset", String(pageOffset));
+    const cacheKey = `${getUserToken() || "guest"}::${normalizedQuery}::${pageOffset}::${pageSize}`;
+    const requestId = ++articleRequestRef.current;
+    if (append) setLoadingMoreArticles(true);
+
+    try {
+      let page = force ? null : articleCacheRef.current.get(cacheKey);
+      if (!page) {
+        const result = await api.get(`/api/articles?${queryParams.toString()}`);
+        page = Array.isArray(result)
+          ? { articles: result, hasMore: false, total: result.length }
+          : result;
+        articleCacheRef.current.set(cacheKey, page);
+      }
+      if (requestId !== articleRequestRef.current) return 0;
+
+      const nextArticles = Array.isArray(page?.articles) ? page.articles : [];
+      loadedArticleQueryRef.current = normalizedQuery;
+      setArticles((current) => append ? [...current, ...nextArticles] : nextArticles);
+      setArticlesHasMore(Boolean(page?.hasMore));
+      return nextArticles.length;
+    } finally {
+      if (append && requestId === articleRequestRef.current) setLoadingMoreArticles(false);
+    }
+  }
+
+  async function loadAll({ forceArticles = false, accountOverride = null } = {}) {
+    // Resolve a remembered account before loading user-specific data. This
+    // ensures read/favorite/settings requests carry the restored token.
+    const nextAccount = accountOverride || await loadAccountWithAutoLogin();
+    await Promise.all([
+      loadMeta(nextAccount),
+      loadArticles({ force: forceArticles, queryString: debouncedQuery })
+    ]);
     setInitialLoading(false);
+    return nextAccount;
+  }
+
+  async function reloadArticlesAndStatus() {
+    const queryString = loadedArticleQueryRef.current ?? debouncedQuery;
+    await Promise.all([
+      loadArticles({ force: true, queryString }),
+      api.get("/api/status").then(setStatus)
+    ]);
+  }
+
+  function handleDataLoadError(error) {
+    if (error.status === 401 || String(error.message).includes("通行证")) {
+      localStorage.removeItem("passportToken");
+      initialLoadStartedRef.current = false;
+      accountBootstrapPromiseRef.current = null;
+      setInitialDataLoaded(false);
+      setGateAuthenticated(false);
+      setGateRole("");
+      clearAccountToken();
+      setAccount({ authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" });
+      return;
+    }
+    setMessage(error.message);
   }
 
   useEffect(() => {
+    accountBootstrapPromiseRef.current = loadAccountWithAutoLogin();
     api.get("/api/gate/session")
       .then((session) => {
         setGateAuthenticated(Boolean(session.authenticated));
         setGateRole(session.role || "");
         if (!session.authenticated) {
           localStorage.removeItem("passportToken");
+          initialLoadStartedRef.current = false;
+          setInitialDataLoaded(false);
           setInitialLoading(false);
         }
       })
-      .catch(() => setInitialLoading(false));
+      .catch(() => {
+        initialLoadStartedRef.current = false;
+        setInitialDataLoaded(false);
+        setInitialLoading(false);
+      });
   }, []);
 
   useEffect(() => {
-    if (!gateAuthenticated) return;
-    loadAll().catch((error) => {
-      if (error.status === 401 || String(error.message).includes("通行证")) {
-        localStorage.removeItem("passportToken");
-        setGateAuthenticated(false);
-        setGateRole("");
-        clearAccountToken();
-        setAccount({ authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" });
-      } else {
-        setMessage(error.message);
-      }
-      setInitialLoading(false);
-    });
-  }, [debouncedQuery, gateAuthenticated]);
+    if (!gateAuthenticated || initialLoadStartedRef.current) return;
+    initialLoadStartedRef.current = true;
+    setInitialLoading(true);
+    const accountPromise = accountBootstrapPromiseRef.current || loadAccountWithAutoLogin();
+    accountPromise
+      .then((nextAccount) => loadAll({ accountOverride: nextAccount }))
+      .then(() => setInitialDataLoaded(true))
+      .catch((error) => {
+        handleDataLoadError(error);
+        setInitialLoading(false);
+      });
+  }, [gateAuthenticated]);
+
+  useEffect(() => {
+    if (!gateAuthenticated || !initialDataLoaded) return;
+    if (loadedArticleQueryRef.current === debouncedQuery) return;
+    setArticlesHasMore(false);
+    loadArticles({ queryString: debouncedQuery }).catch(handleDataLoadError);
+  }, [debouncedQuery, gateAuthenticated, initialDataLoaded]);
+
+  async function loadMoreArticles() {
+    if (!articlesHasMore || loadingMoreArticles) return 0;
+    const queryString = loadedArticleQueryRef.current ?? debouncedQuery;
+    try {
+      return await loadArticles({
+        append: true,
+        queryString,
+        offset: articles.length
+      });
+    } catch (error) {
+      handleDataLoadError(error);
+      return 0;
+    }
+  }
 
   async function refresh() {
     setLoading(true);
@@ -570,15 +754,69 @@ function App() {
     }
   }
 
+  function updateLocalArticleInteraction(id, patch, statusDelta = {}) {
+    articleCacheRef.current.clear();
+    setArticles((current) => current.map((article) => (
+      article.id === id ? { ...article, ...patch } : article
+    )));
+    setStatus((current) => {
+      if (!current) return current;
+      const next = { ...current };
+      for (const [key, delta] of Object.entries(statusDelta)) {
+        next[key] = Math.max(0, Number(next[key] || 0) + Number(delta || 0));
+      }
+      return next;
+    });
+  }
+
+  function reportInteractionRefreshError(error) {
+    if (error.status === 401 || String(error.message || "").includes("通行证")) {
+      localStorage.removeItem("passportToken");
+      setGateAuthenticated(false);
+      setGateRole("");
+      clearAccountToken();
+      return;
+    }
+    setMessage(`状态已保存，但列表刷新失败：${error.message}`);
+  }
+
   async function markRead(id) {
     if (!account.authenticated) {
       setMessage("游客模式只能浏览，请先登录个人账户保存阅读状态。");
       setActiveView("account");
       return;
     }
-    await api.post(`/api/articles/${id}/read`);
-    articleCacheRef.current.clear();
-    await loadAll();
+    const article = articles.find((item) => item.id === id);
+    const pendingKey = `${id}:read`;
+    if (!article || interactionPendingRef.current.has(pendingKey)) return;
+
+    interactionPendingRef.current.add(pendingKey);
+    const previous = Boolean(article.is_read);
+    const optimistic = !previous;
+    updateLocalArticleInteraction(id, { is_read: Number(optimistic) }, {
+      unreadCount: optimistic ? -1 : 1,
+      readCount: optimistic ? 1 : -1
+    });
+
+    try {
+      const result = await api.post(`/api/articles/${id}/read`);
+      const confirmed = Boolean(result.isRead);
+      if (confirmed !== optimistic) {
+        updateLocalArticleInteraction(id, { is_read: Number(confirmed) }, {
+          unreadCount: confirmed ? -1 : 1,
+          readCount: confirmed ? 1 : -1
+        });
+      }
+      void reloadArticlesAndStatus().catch(reportInteractionRefreshError);
+    } catch (error) {
+      updateLocalArticleInteraction(id, { is_read: Number(previous) }, {
+        unreadCount: previous ? -1 : 1,
+        readCount: previous ? 1 : -1
+      });
+      setMessage(`阅读状态保存失败：${error.message}`);
+    } finally {
+      interactionPendingRef.current.delete(pendingKey);
+    }
   }
 
   async function toggleFavorite(id) {
@@ -587,9 +825,60 @@ function App() {
       setActiveView("account");
       return;
     }
-    await api.post(`/api/articles/${id}/favorite`);
-    articleCacheRef.current.clear();
-    await loadAll();
+    const article = articles.find((item) => item.id === id);
+    const pendingKey = `${id}:favorite`;
+    if (!article || interactionPendingRef.current.has(pendingKey)) return;
+
+    interactionPendingRef.current.add(pendingKey);
+    const previous = Boolean(article.is_favorite);
+    if (!previous) {
+      try {
+        const options = await api.get("/api/favorites/options");
+        setFavoritePicker({ article, groups: options.groups || [], groupId: options.defaultGroupId == null ? "ungrouped" : String(options.defaultGroupId), setDefault: false, saving: false, error: "" });
+      } catch (error) {
+        setMessage(`无法读取收藏分组：${error.message}`);
+      } finally {
+        interactionPendingRef.current.delete(pendingKey);
+      }
+      return;
+    }
+    const optimistic = !previous;
+    updateLocalArticleInteraction(id, { is_favorite: Number(optimistic) }, {
+      favoriteCount: optimistic ? 1 : -1
+    });
+
+    try {
+      const result = await api.post(`/api/articles/${id}/favorite`);
+      const confirmed = Boolean(result.is_favorite);
+      if (confirmed !== optimistic) {
+        updateLocalArticleInteraction(id, { is_favorite: Number(confirmed) }, {
+          favoriteCount: confirmed ? 1 : -1
+        });
+      }
+      void reloadArticlesAndStatus().catch(reportInteractionRefreshError);
+    } catch (error) {
+      updateLocalArticleInteraction(id, { is_favorite: Number(previous) }, {
+        favoriteCount: previous ? 1 : -1
+      });
+      setMessage(`收藏状态保存失败：${error.message}`);
+    } finally {
+      interactionPendingRef.current.delete(pendingKey);
+    }
+  }
+
+  async function confirmFavorite() {
+    if (!favoritePicker || favoritePicker.saving) return;
+    const { article, groupId, setDefault } = favoritePicker;
+    setFavoritePicker((current) => ({ ...current, saving: true, error: "" }));
+    try {
+      const result = await api.post(`/api/articles/${article.id}/favorite`, { groupId: groupId === "ungrouped" ? null : Number(groupId), setDefault });
+      updateLocalArticleInteraction(article.id, { is_favorite: Number(Boolean(result.is_favorite)) }, { favoriteCount: 1 });
+      setFavoritePicker(null);
+      setMessage(`已加入收藏${result.group_name ? `：${result.group_name}` : "（未分组）"}。`);
+      void reloadArticlesAndStatus().catch(reportInteractionRefreshError);
+    } catch (error) {
+      setFavoritePicker((current) => ({ ...current, saving: false, error: error.message }));
+    }
   }
 
   async function saveSettings(nextSettings) {
@@ -615,7 +904,7 @@ function App() {
   }, []);
 
   function getPersonalizationSnapshot() {
-    return { filters, displayPreferences, settings };
+    return { displayPreferencesVersion: DISPLAY_PREFERENCES_VERSION, filters, displayPreferences, settings };
   }
 
   function savePersonalizationLocal() {
@@ -625,7 +914,7 @@ function App() {
   async function applyPersonalization(snapshot) {
     if (!snapshot || typeof snapshot !== "object") throw new Error("没有可载入的个性设置");
     if (snapshot.filters) setFilters({ ...DEFAULT_FILTERS, ...snapshot.filters });
-    if (snapshot.displayPreferences) setDisplayPreferences({ ...DEFAULT_DISPLAY, ...snapshot.displayPreferences });
+    if (snapshot.displayPreferences) setDisplayPreferences(normalizeDisplayPreferences(snapshot));
     if (snapshot.settings) {
       const saved = await api.put("/api/settings", snapshot.settings);
       setSettings(saved);
@@ -637,8 +926,10 @@ function App() {
     localStorage.setItem("passportToken", result.token);
     setGateAuthenticated(true);
     setGateRole(result.role || "");
+    initialLoadStartedRef.current = false;
+    accountBootstrapPromiseRef.current = null;
+    setInitialDataLoaded(false);
     setInitialLoading(true);
-    await loadAll();
   }
 
   async function authenticateAccount(mode, credentials, loginOptions = {}) {
@@ -677,6 +968,9 @@ function App() {
     setGateAuthenticated(false);
     setGateRole("");
     setAccount({ authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" });
+    initialLoadStartedRef.current = false;
+    accountBootstrapPromiseRef.current = null;
+    setInitialDataLoaded(false);
     setInitialLoading(false);
   }
 
@@ -724,6 +1018,10 @@ function App() {
             <button className={activeView === "stats" ? "active" : ""} onClick={() => setActiveView("stats")}>
               <BarChart3 size={16} /> 关键词统计
             </button>
+            <button className={activeView === "favorites" ? "active" : ""} onClick={() => setActiveView("favorites")}>
+              <Star size={16} /> 收藏文献
+              {status?.favoriteCount > 0 && <span className="nav-badge" aria-label={`${status.favoriteCount} 篇收藏文献`}>{status.favoriteCount}</span>}
+            </button>
             <button className={activeView === "settings" ? "active" : ""} onClick={() => setActiveView("settings")}>
               <Settings size={16} /> 文献推送
             </button>
@@ -753,6 +1051,12 @@ function App() {
             {status?.favoriteCount > 0 && (
               <span className="stat-badge stat-badge-fav">收藏 <strong>{status.favoriteCount}</strong></span>
             )}
+            <span className="stat-badge stat-badge-new" title="按首次进入数据库的时间统计">
+              最近一周新增 <strong>{status?.newArticleCount7d ?? 0}</strong>
+            </span>
+            <span className="stat-badge stat-badge-new stat-badge-new-month" title="按首次进入数据库的时间统计">
+              最近一月新增 <strong>{status?.newArticleCount30d ?? 0}</strong>
+            </span>
           </div>
           {account.is_admin && <button className="primary" onClick={refresh} disabled={loading}>
             <RefreshCw size={16} className={loading ? "spin" : ""} />
@@ -785,6 +1089,9 @@ function App() {
             onDisplayPreferencesChange={setDisplayPreferences}
             onArticleUpdated={updateArticleInList}
             canPersonalize={account.authenticated}
+            onLoadMore={loadMoreArticles}
+            hasMoreArticles={articlesHasMore}
+            loadingMoreArticles={loadingMoreArticles}
           />
         ) : activeView === "settings" ? (
           <SettingsView
@@ -793,6 +1100,14 @@ function App() {
             status={status}
             onSave={saveSettings}
             canEdit={account.authenticated}
+          />
+        ) : activeView === "favorites" ? (
+          <FavoritesView
+            canPersonalize={account.authenticated}
+            markRead={markRead}
+            toggleFavorite={toggleFavorite}
+            onArticleUpdated={updateArticleInList}
+            onDataChanged={() => loadAll({ forceArticles: true })}
           />
         ) : activeView === "help" ? (
           <HelpView />
@@ -817,6 +1132,21 @@ function App() {
           <StatsView journals={settings.journals} markRead={markRead} toggleFavorite={toggleFavorite} />
         )}
       </main>
+
+      {favoritePicker && (
+        <div className="modal-backdrop favorite-picker-backdrop" role="presentation" onClick={() => !favoritePicker.saving && setFavoritePicker(null)}>
+          <section className="favorite-picker" role="dialog" aria-modal="true" aria-labelledby="favorite-picker-title" onClick={(event) => event.stopPropagation()}>
+            <header><div><span className="eyebrow">选择收藏位置</span><h2 id="favorite-picker-title">收藏到分组</h2></div><button className="icon-button" type="button" aria-label="关闭" onClick={() => setFavoritePicker(null)} disabled={favoritePicker.saving}><X size={18} /></button></header>
+            <p className="favorite-picker-title-text">{favoritePicker.article.title}</p>
+            <div className="favorite-picker-groups" role="radiogroup" aria-label="收藏分组">
+              {favoritePicker.groups.map((group) => { const value = group.id === null ? "ungrouped" : String(group.id); return <label className={favoritePicker.groupId === value ? "selected" : ""} key={value}><input type="radio" name="favorite-group" value={value} checked={favoritePicker.groupId === value} onChange={() => setFavoritePicker((current) => ({ ...current, groupId: value }))} /><span>{group.name}</span><small>{group.count || 0} 篇</small></label>; })}
+            </div>
+            <label className="favorite-default-choice"><input type="checkbox" checked={favoritePicker.setDefault} onChange={(event) => setFavoritePicker((current) => ({ ...current, setDefault: event.target.checked }))} /><span><strong>设为默认收藏夹</strong><small>下次收藏时会预选此分组，仍可临时更改。</small></span></label>
+            {favoritePicker.error && <div className="inline-msg" role="alert">{favoritePicker.error}</div>}
+            <footer><button className="secondary" type="button" disabled={favoritePicker.saving} onClick={() => setFavoritePicker(null)}>取消</button><button className="primary" type="button" disabled={favoritePicker.saving} onClick={confirmFavorite}><Star size={16} /> {favoritePicker.saving ? "保存中" : "确认收藏"}</button></footer>
+          </section>
+        </div>
+      )}
 
       {versionInfo && (
         <UpdateModal versionInfo={versionInfo} onClose={dismissVersion} />
@@ -897,6 +1227,7 @@ function PersonalAccountAuth({ onAuthenticate }) {
           <button type="button" role="tab" aria-selected={mode === "login"} className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>登录个人账户</button>
           <button type="button" role="tab" aria-selected={mode === "register"} className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")}>注册个人账户</button>
         </div>
+        <InternalUseNotice className="account-use-notice" />
         <form className="auth-form" onSubmit={submit} onInput={() => setMessage("")}>
           <label><span>用户名</span><input value={credentials.username} autoComplete={mode === "login" ? "username" : "new-username"} maxLength={32} onChange={(event) => setCredentials({ ...credentials, username: event.target.value })} required autoFocus /></label>
           <label><span>密码</span><input type="password" value={credentials.password} autoComplete={mode === "login" ? "current-password" : "new-password"} minLength={mode === "register" ? 8 : 1} maxLength={72} onChange={(event) => setCredentials({ ...credentials, password: event.target.value })} required /></label>
@@ -1037,6 +1368,8 @@ function AdminView({ onDataChanged }) {
   const [userForm, setUserForm] = useState({ username: "", password: "", name: "", email: "" });
   const [userSubmitting, setUserSubmitting] = useState(false);
   const [deleteUserId, setDeleteUserId] = useState(null);
+  const [expandedCoverageKey, setExpandedCoverageKey] = useState(null);
+  const [selectedCoverageArticle, setSelectedCoverageArticle] = useState(null);
 
   async function loadOverview() {
     setOverview(await api.get("/api/admin/overview"));
@@ -1141,11 +1474,13 @@ function AdminView({ onDataChanged }) {
     ["评论 / 点赞", `${counts.comments || 0} / ${counts.likes || 0}`]
   ];
   const coverageRows = [
-    ["原文摘要", coverage.abstracts],
-    ["原文关键词", coverage.keywords],
-    ["中文标题", coverage.translatedTitles],
-    ["中文摘要", coverage.translatedAbstracts]
+    { key: "abstracts", label: "原文摘要", value: coverage.abstracts },
+    { key: "keywords", label: "原文关键词", value: coverage.keywords },
+    { key: "translatedTitles", label: "中文标题", value: coverage.translatedTitles },
+    { key: "translatedAbstracts", label: "中文摘要", value: coverage.translatedAbstracts }
   ];
+  const coverageDetails = overview.coverageDetails || {};
+  const recentRefreshes = Array.isArray(overview.recentRefreshes) ? overview.recentRefreshes.slice(0, 10) : [];
   const taskLabels = {
     refresh: "刷新文献",
     abstracts: "补全摘要",
@@ -1185,18 +1520,66 @@ function AdminView({ onDataChanged }) {
       <div className="admin-dashboard-grid">
         <section className="admin-panel-card coverage-panel">
           <header><div><span className="eyebrow">数据健康</span><h2>内容完整度</h2></div><Activity size={19} /></header>
-          <div className="coverage-list">{coverageRows.map(([label, value]) => <div className="coverage-row" key={label}><div><span>{label}</span><strong>{Number(value || 0).toFixed(1)}%</strong></div><div className="coverage-track"><span style={{ width: `${Math.min(Number(value || 0), 100)}%` }} /></div></div>)}</div>
+          <div className="coverage-list">
+            {coverageRows.map(({ key, label, value }) => {
+              const detail = coverageDetails[key] || {};
+              const journals = Array.isArray(detail.journals) ? detail.journals : [];
+              const missingCount = Number(detail.missingCount || 0);
+              const expanded = expandedCoverageKey === key;
+              const detailId = `coverage-detail-${key}`;
+              return (
+                <div className={`coverage-row ${expanded ? "expanded" : ""}`} key={key}>
+                  <button
+                    className="coverage-row-button"
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-controls={detailId}
+                    onClick={() => setExpandedCoverageKey(expanded ? null : key)}
+                  >
+                    <span className="coverage-row-copy">
+                      <span>{label}</span>
+                      <small>{missingCount ? `缺少 ${missingCount} 篇` : "全部完整"}</small>
+                    </span>
+                    <span className="coverage-row-value"><strong>{Number(value || 0).toFixed(1)}%</strong><ChevronDown size={15} aria-hidden="true" /></span>
+                  </button>
+                  <div className="coverage-track"><span style={{ width: `${Math.min(Number(value || 0), 100)}%` }} /></div>
+                  {expanded && (
+                    <div className="coverage-details" id={detailId}>
+                      <div className="coverage-detail-summary"><span>不完整文献</span><strong>{missingCount} 篇 · {journals.length} 个期刊</strong></div>
+                      {journals.length ? (
+                        <div className="coverage-journal-list">
+                          {journals.map((group) => (
+                            <section className="coverage-journal-group" key={group.journal}>
+                              <header><strong>{group.journal || "未标记期刊"}</strong><span>{group.count || 0} 篇</span></header>
+                              <div className="coverage-article-list">
+                                {(group.articles || []).map((article) => (
+                                  <button className="coverage-article-button" type="button" key={article.id} onClick={() => setSelectedCoverageArticle(article)}>
+                                    <span className="coverage-article-title">{article.title || "未命名文献"}</span>
+                                    <span className="coverage-article-meta">{article.year || formatDate(article.published_at)}{article.doi ? ` · DOI ${article.doi}` : ""}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            </section>
+                          ))}
+                        </div>
+                      ) : <p className="coverage-empty">当前没有不完整文献。</p>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
           <div className="coverage-pending" role="status"><span>当前待补全</span><strong>摘要 {pending.abstracts || 0} 篇 · 关键词 {pending.keywords || 0} 篇</strong></div>
         </section>
 
         <section className="admin-panel-card refresh-panel">
           <header><div><span className="eyebrow">任务记录</span><h2>最近任务</h2></div><RefreshCw size={19} /></header>
           <div className="refresh-ledger">
-            {overview.recentRefreshes.length ? overview.recentRefreshes.map((run, index) => (
+            {recentRefreshes.length ? recentRefreshes.map((run, index) => (
               <div key={`${run.started_at}-${index}`}>
                 <span className={`run-state ${run.status}`}>{taskStatusLabels[run.status] || run.status}</span>
                 <div className="run-details">
-                  <div className="run-heading"><strong>{taskLabels[run.task_type] || "数据维护"}</strong><time>{formatDate(run.started_at)}</time></div>
+                   <div className="run-heading"><strong>{taskLabels[run.task_type] || "数据维护"}</strong><time dateTime={run.started_at} title={run.finished_at ? `完成：${formatDateTime(run.finished_at)}` : "仍在进行"}>开始 {formatDateTime(run.started_at)}{run.finished_at && <> · 完成 {formatDateTime(run.finished_at)}</>}</time></div>
                   <small>文献 +{run.added_count || 0} · 摘要 +{run.enriched_abstract_count || 0} · 关键词 +{run.enriched_keyword_count || 0} · 翻译 +{run.translated_count || 0}</small>
                   {(run.translation_unit_count || run.translation_request_count || run.translated_title_count || run.translated_abstract_count) && <small>翻译单元 {run.translation_unit_count || 0}（标题 {run.translated_title_count || 0} · 摘要 {run.translated_abstract_count || 0}） · API 请求 {run.translation_request_count || 0} 次</small>}
                   <small className="run-failures">失败：文献 {run.failed_article_count || 0} · 摘要 {run.failed_abstract_count || 0} · 关键词 {run.failed_keyword_count || 0} · 翻译 {run.failed_translation_count || 0}</small>
@@ -1241,6 +1624,13 @@ function AdminView({ onDataChanged }) {
         <header><div><span className="eyebrow">期刊数据</span><h2>文献分布</h2></div><BookOpen size={19} /></header>
         <div className="admin-table-wrap"><table><thead><tr><th>期刊</th><th>文献数量</th><th>带摘要</th><th>摘要覆盖率</th></tr></thead><tbody>{overview.journals.map((journal) => <tr key={journal.journal}><td><strong>{journal.journal || "未标记期刊"}</strong></td><td>{journal.count}</td><td>{journal.abstract_count}</td><td>{journal.count ? (journal.abstract_count * 100 / journal.count).toFixed(1) : "0.0"}%</td></tr>)}</tbody></table></div>
       </section>
+      {selectedCoverageArticle && (
+        <ArticleDialog
+          article={selectedCoverageArticle}
+          close={() => setSelectedCoverageArticle(null)}
+          showActions={false}
+        />
+      )}
     </section>
   );
 }
@@ -1492,14 +1882,25 @@ function FeedbackView({ account }) {
   );
 }
 
-function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize }) {
+function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, onLoadMore, hasMoreArticles, loadingMoreArticles }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
+  const [filterOpen, setFilterOpen] = useState(true);
+  const [collapsedFilterGroups, setCollapsedFilterGroups] = useState({
+    search: false,
+    journal: false,
+    date: false,
+    flags: false,
+    keyword: false,
+    sort: false
+  });
   const [topKeywords, setTopKeywords] = useState([]);
   const [visibleCount, setVisibleCount] = useState(50);
   const [preparation, setPreparation] = useState({ active: false, total: 0, completed: 0, enriched: 0, enrichedAbstract: 0, enrichedKeywords: 0, translated: 0, failed: 0, failedAbstract: 0, failedKeywords: 0, message: "" });
   const attemptedPreparationIdsRef = useRef(new Set());
   const preparationJobRef = useRef("");
   const preparationTimerRef = useRef(null);
+  const preparationDelayRef = useRef(1500);
+  const autoPreparationStartedRef = useRef(false);
   const preparationMountedRef = useRef(true);
 
   useEffect(() => {
@@ -1515,12 +1916,41 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     return () => {
       preparationMountedRef.current = false;
       preparationJobRef.current = "";
+      preparationDelayRef.current = 1500;
       if (preparationTimerRef.current) clearTimeout(preparationTimerRef.current);
     };
   }, []);
 
+  useEffect(() => {
+    if (!selectedArticle) return;
+    const latest = articles.find((article) => article.id === selectedArticle.id);
+    if (!latest) return;
+    setSelectedArticle((current) => current ? { ...current, ...latest } : current);
+  }, [articles]);
+
   function toggleDisplay(field) {
     onDisplayPreferencesChange({ ...displayPreferences, [field]: !displayPreferences[field] });
+  }
+
+  function toggleFilterGroup(group) {
+    setCollapsedFilterGroups((current) => ({ ...current, [group]: !current[group] }));
+  }
+
+  function filterGroupHeader(group, label, icon = null) {
+    const contentId = `feed-filter-group-${group}`;
+    const collapsed = Boolean(collapsedFilterGroups[group]);
+    return (
+      <button
+        className="filter-group-toggle"
+        type="button"
+        aria-expanded={!collapsed}
+        aria-controls={contentId}
+        onClick={() => toggleFilterGroup(group)}
+      >
+        <span>{icon}{label}</span>
+        <ChevronDown size={15} aria-hidden="true" />
+      </button>
+    );
   }
 
   function handleArticleUpdated(nextArticles) {
@@ -1536,8 +1966,8 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   function articleNeedsPreparation(article) {
     return !article.abstract?.trim()
       || !article.keywords?.trim()
-      || !article.translated_title?.trim()
-      || (Boolean(article.abstract?.trim()) && !article.translated_abstract?.trim());
+      || (!isChineseSourceText(article.title) && !article.translated_title?.trim())
+      || (Boolean(article.abstract?.trim()) && !isChineseSourceText(article.abstract) && !article.translated_abstract?.trim());
   }
 
   async function pollPreparationJob(jobId) {
@@ -1568,7 +1998,9 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
         }, 6000);
         return;
       }
-      preparationTimerRef.current = setTimeout(() => pollPreparationJob(jobId), 1500);
+      const delay = preparationDelayRef.current;
+      preparationDelayRef.current = Math.min(delay * 2, 5000);
+      preparationTimerRef.current = setTimeout(() => pollPreparationJob(jobId), delay);
     } catch (error) {
       preparationJobRef.current = "";
       setPreparation((current) => ({ ...current, active: false, message: `批量补全暂未完成：${error.message}` }));
@@ -1583,6 +2015,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
       : uniqueIds.filter((id) => !attemptedPreparationIdsRef.current.has(id));
     if (!selectedIds.length) return;
     selectedIds.forEach((id) => attemptedPreparationIdsRef.current.add(id));
+    preparationDelayRef.current = 1500;
     setPreparation({ active: true, total: selectedIds.length, completed: 0, enriched: 0, enrichedAbstract: 0, enrichedKeywords: 0, translated: 0, failed: 0, failedAbstract: 0, failedKeywords: 0, message: `已从本地数据库直接显示已有内容，正在创建 ${selectedIds.length} 篇缺失内容的补全任务…` });
     try {
       const job = await api.post("/api/articles/prepare", { ids: selectedIds });
@@ -1633,7 +2066,9 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     article.translated_title && article.translated_title !== article.title
   )).length;
   const visibleAbstractCount = visibleArticles.filter((article) => Boolean(article.abstract?.trim())).length;
-  const visibleTranslatedAbstractCount = visibleArticles.filter((article) => Boolean(article.translated_abstract?.trim())).length;
+  const visibleTranslatedAbstractCount = visibleArticles.filter((article) => (
+    !isChineseJournalArticle(article, journals) && Boolean(article.translated_abstract?.trim())
+  )).length;
   const visiblePendingArticles = visibleArticles.filter(articleNeedsPreparation);
   const visibleReadyCount = visibleArticles.length - visiblePendingArticles.length;
   const visiblePendingCount = visiblePendingArticles.length;
@@ -1646,10 +2081,12 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   ].join(":" )).join("|");
 
   useEffect(() => {
-    if (preparationJobRef.current) return;
+    if (autoPreparationStartedRef.current || preparationJobRef.current || !visibleArticles.length) return;
     const missingIds = visiblePendingArticles.map((article) => article.id);
-    if (missingIds.length) void startArticlePreparation(missingIds);
-  }, [visiblePreparationKey, preparation.active]);
+    if (!missingIds.length) return;
+    autoPreparationStartedRef.current = true;
+    void startArticlePreparation(missingIds);
+  }, [visiblePreparationKey, preparation.active, visibleArticles.length]);
 
   useEffect(() => {
     // A completion notice belongs to the page that started the job. Clear it
@@ -1660,112 +2097,138 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     }
   }, [visiblePreparationKey]);
 
+  const activeFilterCount = filters.journal.length + filters.keyword.length
+    + (filters.q ? 1 : 0) + (filters.from ? 1 : 0) + (filters.to ? 1 : 0)
+    + (filters.unread ? 1 : 0) + (filters.favorite ? 1 : 0);
+
   return (
-    <div className="content-layout">
-      <aside className="filter-panel">
-        <div className="filter-group">
-          <h4><Search size={14} /> 搜索</h4>
-          <input
-            className="search-input"
-            value={filters.q}
-            onChange={(event) => setFilters({ ...filters, q: event.target.value })}
-            placeholder="搜索标题、摘要、作者或关键词"
-          />
+    <div className={`content-layout ${filterOpen ? "filters-open" : "filters-closed"}`}>
+      {filterOpen && <div className="filter-scrim" aria-hidden="true" onClick={() => setFilterOpen(false)} />}
+      <aside className="filter-panel" id="feed-filters">
+        <div className="filter-panel-header">
+          <div><span className="eyebrow">检索工具</span><h2>筛选条件</h2></div>
+          <button className="icon-button filter-close-button" type="button" title="收起筛选" aria-label="收起筛选" onClick={() => setFilterOpen(false)}><X size={18} /></button>
         </div>
-        <div className="filter-group">
-          <h4>期刊</h4>
-          <div className="keyword-filter-list journal-filter-list">
-            {journals.map((j) => (
-              <button
-                key={j.name}
-                className={`keyword-filter-chip ${filters.journal.includes(j.name) ? "active" : ""}`}
-                onClick={() => {
-                  const next = filters.journal.includes(j.name)
-                    ? filters.journal.filter((k) => k !== j.name)
-                    : [...filters.journal, j.name];
-                  setFilters({ ...filters, journal: next });
-                }}
-                title={j.name}
+        <div className={`filter-group ${collapsedFilterGroups.search ? "is-collapsed" : ""}`}>
+          {filterGroupHeader("search", "搜索", <Search size={14} aria-hidden="true" />)}
+          <div className="filter-group-content" id="feed-filter-group-search" hidden={collapsedFilterGroups.search}>
+            <input
+              className="search-input"
+              value={filters.q}
+              onChange={(event) => setFilters({ ...filters, q: event.target.value })}
+              placeholder="搜索标题、摘要、作者或关键词"
+            />
+          </div>
+        </div>
+        <div className={`filter-group ${collapsedFilterGroups.journal ? "is-collapsed" : ""}`}>
+          {filterGroupHeader("journal", "期刊")}
+          <div className="filter-group-content" id="feed-filter-group-journal" hidden={collapsedFilterGroups.journal}>
+            <div className="keyword-filter-list journal-filter-list">
+              {journals.map((j) => (
+                <button
+                  key={j.name}
+                  className={`keyword-filter-chip ${filters.journal.includes(j.name) ? "active" : ""}`}
+                  onClick={() => {
+                    const next = filters.journal.includes(j.name)
+                      ? filters.journal.filter((k) => k !== j.name)
+                      : [...filters.journal, j.name];
+                    setFilters({ ...filters, journal: next });
+                  }}
+                  title={j.name}
+                >
+                  <span className="kw-name">{j.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className={`filter-group ${collapsedFilterGroups.date ? "is-collapsed" : ""}`}>
+          {filterGroupHeader("date", "时间范围")}
+          <div className="filter-group-content" id="feed-filter-group-date" hidden={collapsedFilterGroups.date}>
+            <input
+              type="date"
+              value={filters.from}
+              onChange={(event) => setFilters({ ...filters, from: event.target.value })}
+              aria-label="开始日期"
+            />
+            <input
+              type="date"
+              value={filters.to}
+              onChange={(event) => setFilters({ ...filters, to: event.target.value })}
+              aria-label="结束日期"
+            />
+          </div>
+        </div>
+        <div className={`filter-group ${collapsedFilterGroups.flags ? "is-collapsed" : ""}`}>
+          {filterGroupHeader("flags", "筛选", <Filter size={14} aria-hidden="true" />)}
+          <div className="filter-group-content" id="feed-filter-group-flags" hidden={collapsedFilterGroups.flags}>
+            <div className="filter-row">
+              <label className="checkline">
+                <input
+                  type="checkbox"
+                  checked={filters.unread}
+                  onChange={(event) => setFilters({ ...filters, unread: event.target.checked })}
+                />
+                仅未读
+              </label>
+              <label className="checkline">
+                <input
+                  type="checkbox"
+                  checked={filters.favorite}
+                  onChange={(event) => setFilters({ ...filters, favorite: event.target.checked })}
+                />
+                仅收藏
+              </label>
+            </div>
+          </div>
+        </div>
+        <div className={`filter-group ${collapsedFilterGroups.keyword ? "is-collapsed" : ""}`}>
+          {filterGroupHeader("keyword", "关键词")}
+          <div className="filter-group-content" id="feed-filter-group-keyword" hidden={collapsedFilterGroups.keyword}>
+            <div className="keyword-filter-list">
+              {topKeywords.map((item) => (
+                <button
+                  key={item.keyword}
+                  className={`keyword-filter-chip ${filters.keyword.includes(item.keyword) ? "active" : ""}`}
+                  onClick={() => {
+                    const next = filters.keyword.includes(item.keyword)
+                      ? filters.keyword.filter((k) => k !== item.keyword)
+                      : [...filters.keyword, item.keyword];
+                    setFilters({ ...filters, keyword: next });
+                  }}
+                  title={item.keyword}
+                >
+                  <span className="kw-name">{item.keyword}</span>
+                  <span className="kw-count">{item.count}</span>
+                </button>
+              ))}
+              {topKeywords.length === 0 && <span style={{ fontSize: 12, color: "var(--text-muted)" }}>暂无数据</span>}
+            </div>
+          </div>
+        </div>
+        <div className={`filter-group ${collapsedFilterGroups.sort ? "is-collapsed" : ""}`}>
+          {filterGroupHeader("sort", "排序", <ArrowDownUp size={14} aria-hidden="true" />)}
+          <div className="filter-group-content" id="feed-filter-group-sort" hidden={collapsedFilterGroups.sort}>
+            <label className="sort-select">
+              <ArrowDownUp size={14} />
+              <select
+                value={filters.sort}
+                onChange={(event) => setFilters({ ...filters, sort: event.target.value })}
               >
-                <span className="kw-name">{j.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="filter-group">
-          <h4>时间范围</h4>
-          <input
-            type="date"
-            value={filters.from}
-            onChange={(event) => setFilters({ ...filters, from: event.target.value })}
-            aria-label="开始日期"
-          />
-          <input
-            type="date"
-            value={filters.to}
-            onChange={(event) => setFilters({ ...filters, to: event.target.value })}
-            aria-label="结束日期"
-          />
-        </div>
-        <div className="filter-group">
-          <h4>筛选</h4>
-          <div className="filter-row">
-            <label className="checkline">
-              <input
-                type="checkbox"
-                checked={filters.unread}
-                onChange={(event) => setFilters({ ...filters, unread: event.target.checked })}
-              />
-              仅未读
-            </label>
-            <label className="checkline">
-              <input
-                type="checkbox"
-                checked={filters.favorite}
-                onChange={(event) => setFilters({ ...filters, favorite: event.target.checked })}
-              />
-              仅收藏
+                <option value="desc">最新优先</option>
+                <option value="asc">最早优先</option>
+                <option value="relevance">按相关性</option>
+              </select>
             </label>
           </div>
-        </div>
-        <div className="filter-group">
-          <h4>关键词</h4>
-          <div className="keyword-filter-list">
-            {topKeywords.map((item) => (
-              <button
-                key={item.keyword}
-                className={`keyword-filter-chip ${filters.keyword.includes(item.keyword) ? "active" : ""}`}
-                onClick={() => {
-                  const next = filters.keyword.includes(item.keyword)
-                    ? filters.keyword.filter((k) => k !== item.keyword)
-                    : [...filters.keyword, item.keyword];
-                  setFilters({ ...filters, keyword: next });
-                }}
-                title={item.keyword}
-              >
-                <span className="kw-name">{item.keyword}</span>
-                <span className="kw-count">{item.count}</span>
-              </button>
-            ))}
-            {topKeywords.length === 0 && <span style={{ fontSize: 12, color: "var(--text-muted)" }}>暂无数据</span>}
-          </div>
-        </div>
-        <div className="filter-group">
-          <h4>排序</h4>
-          <label className="sort-select">
-            <ArrowDownUp size={14} />
-            <select
-              value={filters.sort}
-              onChange={(event) => setFilters({ ...filters, sort: event.target.value })}
-            >
-              <option value="desc">最新优先</option>
-              <option value="asc">最早优先</option>
-              <option value="relevance">按相关性</option>
-            </select>
-          </label>
         </div>
       </aside>
       <section className="content-main">
+        <div className="feed-toolbar">
+          <button className="secondary filter-toggle" type="button" aria-expanded={filterOpen} aria-controls="feed-filters" onClick={() => setFilterOpen((current) => !current)}>
+            <Filter size={15} /> {filterOpen ? "收起筛选" : "打开筛选"}
+            {activeFilterCount > 0 && <span className="filter-count-badge">{activeFilterCount}</span>}
+          </button>
         <div className="display-toggles">
           <span className="display-toggles-label">显示内容</span>
           <button type="button" className={`display-toggle ${displayPreferences.authors ? "active" : ""}`} onClick={() => toggleDisplay("authors")}>
@@ -1798,6 +2261,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
             {displayPreferences.abstract && ` · ${visibleAbstractCount} 篇有摘要`}
             {displayPreferences.translatedAbstract && ` · ${visibleTranslatedAbstractCount} 篇有中文摘要`}
           </span>
+        </div>
         </div>
 
         {(preparation.active || preparation.message) && (
@@ -1835,7 +2299,10 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           {sortedArticles.length === 0 ? (
             <div className="empty">暂无文献。点击刷新从公开数据源获取，或调整筛选条件。</div>
           ) : (
-            visibleArticles.map((article) => (
+            visibleArticles.map((article) => {
+              const showTranslatedAbstract = displayPreferences.translatedAbstract
+                && !isChineseJournalArticle(article, journals);
+              return (
               <article className={`article ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}`} key={article.id}>
                 <div className="article-main">
                   <div className="article-meta">
@@ -1871,41 +2338,69 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                       ? <p className="abstract"><Highlight text={article.abstract} terms={highlightTerms} /></p>
                       : <button type="button" className="abstract-missing" disabled={preparation.active} onClick={() => startArticlePreparation([article.id], { force: true })}>获取摘要与中文翻译</button>
                   )}
-                  {displayPreferences.translatedAbstract && article.translated_abstract && (
+                  {showTranslatedAbstract && article.translated_abstract && (
                     <div className="translated-abstract"><span>中文摘要</span><p>{article.translated_abstract}</p></div>
                   )}
-                  {displayPreferences.translatedAbstract && article.abstract && !article.translated_abstract && (
+                  {showTranslatedAbstract && article.abstract && !article.translated_abstract && (
                     <button type="button" className="translation-missing" disabled={preparation.active} onClick={() => startArticlePreparation([article.id], { force: true })}>
                       <Languages size={13} /> 获取中文摘要
                     </button>
                   )}
                 </div>
                 <div className="article-actions">
-                  <button title="查看摘要" onClick={() => setSelectedArticle(article)}>
+                  <button type="button" title="查看摘要" aria-label="查看摘要" onClick={() => setSelectedArticle(article)}>
                     <ScrollText size={18} />
                   </button>
-                  <button title={canPersonalize ? (article.is_read ? "取消已读" : "标记已读") : "登录个人账户后可标记已读"} className={`action-read ${article.is_read ? "action-done" : ""}`} onClick={() => markRead(article.id)} disabled={!canPersonalize}>
+                  <button
+                    type="button"
+                    title={canPersonalize ? (article.is_read ? "取消已读" : "标记已读") : "登录个人账户后可标记已读"}
+                    aria-label={canPersonalize ? (article.is_read ? "取消已读" : "标记已读") : "登录个人账户后可标记已读"}
+                    aria-pressed={Boolean(article.is_read)}
+                    className={`action-read ${article.is_read ? "action-done" : ""}`}
+                    onClick={() => markRead(article.id)}
+                    disabled={!canPersonalize}
+                  >
                     <Check size={18} />
                   </button>
                   <button
+                    type="button"
                     title={canPersonalize ? (article.is_favorite ? "取消收藏" : "收藏") : "登录个人账户后可收藏"}
-                    className={article.is_favorite ? "selected" : ""}
+                    aria-label={canPersonalize ? (article.is_favorite ? "取消收藏" : "收藏") : "登录个人账户后可收藏"}
+                    aria-pressed={Boolean(article.is_favorite)}
+                    className={`action-favorite ${article.is_favorite ? "selected" : ""}`}
                     onClick={() => toggleFavorite(article.id)}
                     disabled={!canPersonalize}
                   >
-                    {article.is_favorite ? <Star size={18} /> : <Heart size={18} />}
+                    {article.is_favorite
+                      ? <Star size={18} fill="currentColor" />
+                      : <Heart size={18} />}
                   </button>
                   {article.url && (
-                    <a title="打开原文" href={article.url} target="_blank" rel="noreferrer">
-                      <ExternalLink size={18} />
+                    <a title="打开原文网页" aria-label="打开原文网页" href={article.url} target="_blank" rel="noopener noreferrer">
+                      <Globe size={18} />
                     </a>
                   )}
                 </div>
               </article>
-            ))
+              );
+            })
           )}
         </div>
-        {visibleCount < sortedArticles.length && <div className="load-more"><button className="secondary" type="button" onClick={() => setVisibleCount((count) => count + 50)}>继续显示下一批文献（剩余 {sortedArticles.length - visibleCount} 篇）</button></div>}
+        {(visibleCount < sortedArticles.length || hasMoreArticles) && <div className="load-more"><button
+          className="secondary"
+          type="button"
+          disabled={loadingMoreArticles}
+          onClick={async () => {
+            if (visibleCount < sortedArticles.length) {
+              setVisibleCount((count) => count + ARTICLE_PAGE_SIZE);
+              return;
+            }
+            const loaded = await onLoadMore?.();
+            if (loaded) setVisibleCount((count) => count + ARTICLE_PAGE_SIZE);
+          }}
+        >
+          {loadingMoreArticles ? "加载中…" : hasMoreArticles ? "加载下一批文献" : `继续显示下一批文献（剩余 ${sortedArticles.length - visibleCount} 篇）`}
+        </button></div>}
       </section>
       {selectedArticle && (
         <ArticleDialog
@@ -1914,15 +2409,16 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           markRead={markRead}
           toggleFavorite={toggleFavorite}
           onArticleUpdated={handleArticleUpdated}
+          hideTranslatedAbstract={isChineseJournalArticle(selectedArticle, journals)}
         />
       )}
     </div>
   );
 }
 
-function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpdated }) {
+function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpdated, showActions = true, hideTranslatedAbstract = false }) {
   const [detail, setDetail] = useState(article);
-  const [enriching, setEnriching] = useState(!article.abstract || !article.keywords);
+  const [enriching, setEnriching] = useState(true);
   const [enrichError, setEnrichError] = useState("");
   const [translation, setTranslation] = useState(() => article.translated_title ? {
     target_language: "zh",
@@ -1942,25 +2438,44 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
       abstract: article.translated_abstract || ""
     } : null);
     setTranslationError("");
-    if (article.abstract && article.keywords) {
-      setEnriching(false);
-      return () => {
-        ignore = true;
-      };
-    }
-
     setEnriching(true);
-    api.get(`/api/articles/${article.id}/enrich`)
-      .then((nextArticle) => {
-        if (!ignore) {
+    api.get(`/api/articles/${article.id}`)
+      .then(async (fullArticle) => {
+        if (ignore) return;
+        const applyArticle = (nextArticle) => {
           const mergedArticle = { ...article, ...nextArticle };
           setDetail(mergedArticle);
+          setTranslation(nextArticle.translated_title ? {
+            target_language: "zh",
+            title: nextArticle.translated_title,
+            abstract: nextArticle.translated_abstract || ""
+          } : null);
           if (nextArticle.enrichment_error) setEnrichError(nextArticle.enrichment_error);
           onArticleUpdated?.(mergedArticle);
+          return mergedArticle;
+        };
+        applyArticle(fullArticle);
+        const missingFields = [
+          !String(fullArticle.abstract || "").trim() ? "abstract" : "",
+          !String(fullArticle.keywords || "").trim() ? "keywords" : ""
+        ].filter(Boolean);
+        if (!missingFields.length) return;
+        try {
+          applyArticle(await api.get(`/api/articles/${article.id}/enrich?fields=${encodeURIComponent(missingFields.join(","))}`));
+        } catch (error) {
+          if (error.article) applyArticle(error.article);
+          setEnrichError(error.message);
         }
       })
       .catch((error) => {
-        if (!ignore) setEnrichError(error.message);
+        if (!ignore) {
+          if (error.article) {
+            const mergedArticle = { ...article, ...error.article };
+            setDetail(mergedArticle);
+            onArticleUpdated?.(mergedArticle);
+          }
+          setEnrichError(error.message);
+        }
       })
       .finally(() => {
         if (!ignore) setEnriching(false);
@@ -2036,42 +2551,37 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
         )}
         <div className="abstract-panel">
           <h4>摘要</h4>
-          {enriching ? (
-            <p>正在从公开页面补全摘要和关键词...</p>
-          ) : (
-            <p>{detail.abstract || "公开数据源和页面爬取都暂未提供该文献摘要，可通过原文链接查看。"}</p>
-          )}
+          <p>{detail.abstract || (enriching ? "正在补全摘要..." : "公开数据源和页面爬取都暂未提供该文献摘要，可通过原文链接查看。")}</p>
           {enrichError && <p className="crawl-note">爬取补全未成功：{enrichError}</p>}
         </div>
         <div className="translation-tools">
-          <button className="secondary" onClick={() => translate("zh")} disabled={Boolean(translating)}>
+          {!isChineseSourceText(detail.title) && <button className="secondary" onClick={() => translate("zh")} disabled={Boolean(translating)}>
             <Languages size={18} /> {translating === "zh" ? "翻译中" : "译为中文"}
-          </button>
-          <button className="secondary" onClick={() => translate("en")} disabled={Boolean(translating)}>
-            <Languages size={18} /> {translating === "en" ? "Translating" : "译为英文"}
-          </button>
+          </button>}
         </div>
         {translationError && <p className="crawl-note">翻译未成功：{translationError}</p>}
         {translation && (
           <div className="translation-panel">
             <h4>{translation.target_language === "zh" ? "中文翻译" : "English Translation"}</h4>
             {translation.title && <strong>{translation.title}</strong>}
-            {translation.abstract && <p>{translation.abstract}</p>}
+            {!hideTranslatedAbstract && translation.abstract && <p>{translation.abstract}</p>}
           </div>
         )}
-        <footer className="dialog-actions">
-          <button className="secondary" onClick={() => markRead(detail.id)}>
-            <Check size={18} /> 标记已读
-          </button>
-          <button className="secondary" onClick={() => toggleFavorite(detail.id)}>
-            {detail.is_favorite ? <Star size={18} /> : <Heart size={18} />} 收藏
-          </button>
-          {detail.url && (
-            <a className="primary" href={detail.url} target="_blank" rel="noreferrer">
-              <ExternalLink size={18} /> 打开原文
-            </a>
-          )}
-        </footer>
+        {showActions && (
+          <footer className="dialog-actions">
+            <button className="secondary" onClick={() => markRead(detail.id)}>
+              <Check size={18} /> 标记已读
+            </button>
+            <button className="secondary" onClick={() => toggleFavorite(detail.id)}>
+              {detail.is_favorite ? <Star size={18} /> : <Heart size={18} />} 收藏
+            </button>
+            {detail.url && (
+              <a className="primary" href={detail.url} target="_blank" rel="noreferrer">
+                <ExternalLink size={18} /> 打开原文
+              </a>
+            )}
+          </footer>
+        )}
       </section>
     </div>
   );
@@ -2164,6 +2674,260 @@ function CooccurrenceView({ data, loading }) {
   );
 }
 
+function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpdated, onDataChanged }) {
+  const [data, setData] = useState({ groups: [], favorites: [] });
+  const [selectedGroup, setSelectedGroup] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState(null);
+  const [editingGroupName, setEditingGroupName] = useState("");
+  const [savingArticleId, setSavingArticleId] = useState(null);
+  const [noteDrafts, setNoteDrafts] = useState({});
+  const [selectedArticle, setSelectedArticle] = useState(null);
+
+  const loadFavorites = useCallback(async (group = selectedGroup) => {
+    setLoading(true);
+    setMessage("");
+    try {
+      const query = group === "all" ? "" : `?group=${encodeURIComponent(group)}`;
+      const result = await api.get(`/api/favorites${query}`);
+      const favorites = Array.isArray(result.favorites) ? result.favorites : [];
+      setData({ groups: Array.isArray(result.groups) ? result.groups : [], favorites });
+      setNoteDrafts(Object.fromEntries(favorites.map((article) => [article.id, article.note || ""])));
+      setSelectedArticle((current) => {
+        if (!current) return current;
+        return favorites.find((article) => article.id === current.id) || current;
+      });
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedGroup]);
+
+  useEffect(() => {
+    if (!canPersonalize) {
+      setLoading(false);
+      return;
+    }
+    void loadFavorites(selectedGroup);
+  }, [canPersonalize, selectedGroup, loadFavorites]);
+
+  useEffect(() => {
+    setSelectedArticle((current) => {
+      if (!current) return current;
+      const latest = data.favorites.find((article) => article.id === current.id);
+      return latest ? { ...current, ...latest } : current;
+    });
+  }, [data.favorites]);
+
+  const allGroups = data.groups || [];
+  const selectedGroupData = selectedGroup === "all"
+    ? { name: "全部收藏", count: data.favorites.length }
+    : allGroups.find((group) => String(group.id === null ? "ungrouped" : group.id) === selectedGroup)
+      || { name: selectedGroup === "ungrouped" ? "未分组" : "收藏分组", count: data.favorites.length };
+
+  async function createGroup(event) {
+    event.preventDefault();
+    if (!newGroupName.trim()) return;
+    setCreatingGroup(true);
+    setMessage("");
+    try {
+      const group = await api.post("/api/favorites/groups", { name: newGroupName.trim() });
+      setNewGroupName("");
+      setSelectedGroup(String(group.id));
+      setMessage(`已创建收藏分组“${group.name}”。`);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setCreatingGroup(false);
+    }
+  }
+
+  function startRenameGroup(group) {
+    setEditingGroupId(group.id);
+    setEditingGroupName(group.name || "");
+    setMessage("");
+  }
+
+  function cancelRenameGroup() {
+    setEditingGroupId(null);
+    setEditingGroupName("");
+  }
+
+  async function renameGroup(event, group) {
+    event.preventDefault();
+    if (!editingGroupName.trim()) {
+      setMessage("收藏分组名称不能为空。");
+      return;
+    }
+    try {
+      await api.patch(`/api/favorites/groups/${group.id}`, { name: editingGroupName.trim() });
+      cancelRenameGroup();
+      await loadFavorites(selectedGroup);
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function removeGroup(group) {
+    if (!window.confirm(`删除分组“${group.name}”？其中的文献会保留在“未分组”。`)) return;
+    try {
+      await api.delete(`/api/favorites/groups/${group.id}`);
+      if (selectedGroup === String(group.id)) setSelectedGroup("all");
+      else await loadFavorites(selectedGroup);
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function saveFavorite(article, changes = {}) {
+    setSavingArticleId(article.id);
+    setMessage("");
+    try {
+      const result = await api.put(`/api/favorites/${article.id}`, {
+        note: changes.note === undefined ? (noteDrafts[article.id] ?? article.note ?? "") : changes.note,
+        groupId: changes.groupId === undefined ? (article.group_id ?? null) : changes.groupId
+      });
+      setData((current) => ({
+        ...current,
+        favorites: current.favorites.map((item) => item.id === article.id ? { ...item, ...result } : item)
+      }));
+      setNoteDrafts((current) => ({ ...current, [article.id]: result.note || "" }));
+      if (changes.groupId !== undefined) await loadFavorites(selectedGroup);
+      setMessage("收藏备注和分组已保存。");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSavingArticleId(null);
+    }
+  }
+
+  async function removeFavorite(article) {
+    setSavingArticleId(article.id);
+    setMessage("");
+    try {
+      await api.post(`/api/articles/${article.id}/favorite`);
+      setSelectedArticle((current) => current?.id === article.id ? null : current);
+      await Promise.all([loadFavorites(selectedGroup), onDataChanged?.()]);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setSavingArticleId(null);
+    }
+  }
+
+  async function markFavoriteRead(id) {
+    try {
+      await api.post(`/api/articles/${id}/read`);
+      await Promise.all([loadFavorites(selectedGroup), onDataChanged?.()]);
+    } catch (error) {
+      setMessage(error.message);
+    }
+  }
+
+  async function toggleFavoriteFromDialog(id) {
+    await removeFavorite({ id });
+  }
+
+  function mergeUpdatedArticle(nextArticle) {
+    if (!nextArticle?.id) return;
+    onArticleUpdated?.(nextArticle);
+    setData((current) => ({
+      ...current,
+      favorites: current.favorites.map((item) => item.id === nextArticle.id ? { ...item, ...nextArticle } : item)
+    }));
+    setSelectedArticle((current) => current?.id === nextArticle.id ? { ...current, ...nextArticle } : current);
+  }
+
+  if (!canPersonalize) {
+    return (
+      <section className="profile-layout favorites-view" aria-labelledby="favorites-title">
+        <div className="page-intro account-heading">
+          <div><span className="eyebrow">游客模式</span><h1 id="favorites-title">收藏文献</h1><p>登录个人账户后，收藏、分组和备注会自动同步到你的账户。</p></div>
+        </div>
+        <div className="guest-prompt"><Star size={20} /><div><strong>登录个人账户后管理收藏</strong><p>网页通行证只负责进入站点，个人收藏不会与其他用户混用。</p></div></div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="profile-layout favorites-view" aria-labelledby="favorites-title">
+      <div className="page-intro account-heading">
+        <div><span className="eyebrow">个人账户 · 自动同步</span><h1 id="favorites-title">收藏文献</h1><p>把重要文献集中保存，按研究方向分组，并为每篇文献记录自己的备注。</p></div>
+        <div className="favorites-total"><Star size={17} fill="currentColor" /> <strong>{data.favorites.length}</strong> 篇收藏</div>
+      </div>
+      {message && <div className="admin-notice favorites-notice" role="status">{message}</div>}
+      <div className="favorites-layout">
+        <aside className="favorites-sidebar" aria-label="收藏分组">
+          <div className="favorites-sidebar-header"><div><span className="eyebrow">我的收藏</span><h2>分组</h2></div><Star size={18} /></div>
+          <div className="favorites-group-list">
+            <button className={`favorites-group-button ${selectedGroup === "all" ? "active" : ""}`} type="button" onClick={() => setSelectedGroup("all")}>
+              <span>全部收藏</span><strong>{data.groups.reduce((total, group) => total + Number(group.count || 0), 0)}</strong>
+            </button>
+            {allGroups.map((group) => {
+              const value = group.id === null ? "ungrouped" : String(group.id);
+              const editing = group.id !== null && editingGroupId === group.id;
+              return (
+                <div className="favorites-group-row" key={value}>
+                  {editing ? (
+                    <form className="favorites-rename-form" onSubmit={(event) => renameGroup(event, group)}>
+                      <input value={editingGroupName} maxLength={40} onChange={(event) => setEditingGroupName(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); cancelRenameGroup(); } }} autoFocus />
+                      <button className="icon-button" type="submit" title="保存分组名称" aria-label="保存分组名称" disabled={!editingGroupName.trim()}><Check size={15} /></button>
+                      <button className="icon-button" type="button" title="取消重命名" aria-label="取消重命名" onClick={cancelRenameGroup}><X size={15} /></button>
+                    </form>
+                  ) : (
+                    <>
+                      <button className={`favorites-group-button ${selectedGroup === value ? "active" : ""}`} type="button" onClick={() => setSelectedGroup(value)}>
+                        <span>{group.name}</span><strong>{group.count || 0}</strong>
+                      </button>
+                      {group.id !== null && <div className="favorites-group-actions">
+                        <button className="icon-button" type="button" title="重命名分组" aria-label={`重命名分组 ${group.name}`} onClick={() => startRenameGroup(group)}><Pencil size={13} /></button>
+                        <button className="icon-button" type="button" title="删除分组" aria-label={`删除分组 ${group.name}`} onClick={() => removeGroup(group)}><Trash2 size={13} /></button>
+                      </div>}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <form className="favorites-create-form" onSubmit={createGroup}>
+            <label htmlFor="new-favorite-group">新建分组</label>
+            <div><input id="new-favorite-group" value={newGroupName} maxLength={40} onChange={(event) => setNewGroupName(event.target.value)} placeholder="例如：储能方向" /><button className="secondary compact" type="submit" disabled={creatingGroup || !newGroupName.trim()}><FolderPlus size={14} /> 新建</button></div>
+          </form>
+        </aside>
+        <section className="favorites-content" aria-live="polite">
+          <header className="favorites-content-header"><div><span className="eyebrow">收藏列表</span><h2>{selectedGroupData.name}</h2></div><span>{selectedGroupData.count || 0} 篇</span></header>
+          {loading ? <div className="loading-skeleton"><div className="skeleton" style={{ height: 140, marginBottom: 12 }} /><div className="skeleton" style={{ height: 140 }} /></div> : data.favorites.length ? (
+            <div className="favorites-list">
+              {data.favorites.map((article) => {
+                const selectedValue = article.group_id === null || article.group_id === undefined ? "ungrouped" : String(article.group_id);
+                const note = noteDrafts[article.id] ?? article.note ?? "";
+                return (
+                  <article className="favorite-card" key={article.id}>
+                    <header><div className="article-meta"><span>{article.journal || "未知期刊"}</span><span>{formatDate(article.published_at)}</span>{article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : <span className="article-status-badge unread-badge">未读</span>}</div><button className="icon-button favorite-remove-button" type="button" title="取消收藏" aria-label={`取消收藏：${article.title}`} disabled={savingArticleId === article.id} onClick={() => removeFavorite(article)}><Star size={18} fill="currentColor" /></button></header>
+                    <button className="favorite-card-title" type="button" onClick={() => setSelectedArticle(article)}>{article.title || "未命名文献"}</button>
+                    {article.translated_title && article.translated_title !== article.title && <p className="translated-title"><Languages size={14} /> {article.translated_title}</p>}
+                    {article.authors && <p className="authors">{article.authors}</p>}
+                    <div className="favorite-card-meta">
+                      <label><span>分组</span><select value={selectedValue} onChange={(event) => saveFavorite(article, { groupId: event.target.value === "ungrouped" ? null : event.target.value })}><option value="ungrouped">未分组</option>{allGroups.filter((group) => group.id !== null).map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
+                      <label className="favorite-note-field"><span>备注</span><textarea rows={2} maxLength={2000} value={note} onChange={(event) => setNoteDrafts((current) => ({ ...current, [article.id]: event.target.value }))} placeholder="记录阅读重点、研究方向或后续行动" /></label>
+                      <button className="secondary compact favorite-save-button" type="button" disabled={savingArticleId === article.id || note === (article.note || "")} onClick={() => saveFavorite(article)}><Save size={14} /> 保存备注</button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : <div className="empty favorites-empty"><Star size={22} /><strong>这个分组还没有收藏文献</strong><p>在最新文献页面点击星标即可加入收藏。</p></div>}
+        </section>
+      </div>
+      {selectedArticle && <ArticleDialog article={selectedArticle} close={() => setSelectedArticle(null)} markRead={markFavoriteRead} toggleFavorite={toggleFavoriteFromDialog} onArticleUpdated={mergeUpdatedArticle} hideTranslatedAbstract={isChineseJournalArticle(selectedArticle)} />}
+    </section>
+  );
+}
+
 function StatsView({ journals, markRead, toggleFavorite }) {
   const [filters, setFilters] = useState({ journal: "", from: "", to: "" });
   const [stats, setStats] = useState(null);
@@ -2196,11 +2960,19 @@ function StatsView({ journals, markRead, toggleFavorite }) {
   }
 
   async function openArticle(article) {
-    try {
-      const full = await api.get(`/api/articles/${article.id}/enrich`);
-      setSelectedArticle(full);
-    } catch {
+    const missingFields = [
+      !String(article.abstract || "").trim() ? "abstract" : "",
+      !String(article.keywords || "").trim() ? "keywords" : ""
+    ].filter(Boolean);
+    if (!missingFields.length) {
       setSelectedArticle(article);
+      return;
+    }
+    try {
+      const full = await api.get(`/api/articles/${article.id}/enrich?fields=${encodeURIComponent(missingFields.join(","))}`);
+      setSelectedArticle(full);
+    } catch (error) {
+      setSelectedArticle(error.article ? { ...article, ...error.article } : article);
     }
   }
 
@@ -2373,6 +3145,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
           close={() => setSelectedArticle(null)}
           markRead={markRead}
           toggleFavorite={toggleFavorite}
+          hideTranslatedAbstract={isChineseJournalArticle(selectedArticle, journals)}
         />
       )}
     </div>

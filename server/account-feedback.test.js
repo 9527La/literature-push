@@ -10,7 +10,7 @@ test("keeps personal accounts, discussion identities, and session limits indepen
   const dbUrl = new URL("./db.js", import.meta.url).href;
   const script = `
     const dbModule = await import(${JSON.stringify(dbUrl)});
-    const { db, updateUserProfile, getUserProfile, getAllUserEmails, saveTranslation, listArticles, addFeedback, addFeedbackComment, listPublicFeedback, toggleFeedbackLike, toggleFeedbackCommentLike, replyFeedback, closeFeedback, deleteFeedback, deleteFeedbackComment, createUserAccount, createUserSession, getActiveUserSession, revokeUserSession, getDiscussionProfile, updateDiscussionProfile, getAdminOverview, saveRemotePreferences, getRemotePreferences, updateUserSettings, getUserSettings, getUserAccountCount } = dbModule;
+    const { db, updateUserProfile, getUserProfile, getAllUserEmails, saveTranslation, listArticles, addFeedback, addFeedbackComment, listPublicFeedback, toggleFeedbackLike, toggleFeedbackCommentLike, replyFeedback, closeFeedback, deleteFeedback, deleteFeedbackComment, createUserAccount, createUserSession, getActiveUserSession, revokeUserSession, getDiscussionProfile, updateDiscussionProfile, getAdminOverview, saveRemotePreferences, getRemotePreferences, updateUserSettings, getUserSettings, getUserAccountCount, getUserStatus, toggleArticleFavoriteForUser, createFavoriteGroup, updateUserFavorite, getUserFavorites } = dbModule;
     db.prepare("INSERT INTO articles (external_id, title, fetched_at, first_seen_at) VALUES (?, ?, datetime('now'), datetime('now'))").run('test-article', 'English title');
     const article = db.prepare("SELECT id FROM articles WHERE external_id = 'test-article'").get();
     saveTranslation(article.id, 'zh', { title: '中文标题', abstract: '中文摘要', provider: 'test' });
@@ -45,6 +45,20 @@ test("keeps personal accounts, discussion identities, and session limits indepen
     const account = createUserAccount({ username: 'tester', passwordHash: 'hash', passwordSalt: 'salt', registeredIp: '10.0.0.1' });
     const sameIpAccount = createUserAccount({ username: 'tester2', passwordHash: 'hash', passwordSalt: 'salt', registeredIp: '10.0.0.1' });
     if (!account || !sameIpAccount || getUserProfile('account:' + account.id).email !== '' || getAllUserEmails().some((item) => item.user_id === '10.0.0.1') || getUserAccountCount() !== 2) process.exit(9);
+    const accountA = 'account:' + account.id;
+    const accountB = 'account:' + sameIpAccount.id;
+    const groupA = createFavoriteGroup(accountA, '重点文献');
+    const groupB = createFavoriteGroup(accountB, '待复核');
+    if (!toggleArticleFavoriteForUser(accountA, article.id)?.is_favorite || !toggleArticleFavoriteForUser(accountB, article.id)?.is_favorite) process.exit(32);
+    if (!updateUserFavorite(accountA, article.id, { groupId: groupA.id, note: '账户 A 的阅读重点' })?.note) process.exit(33);
+    if (!updateUserFavorite(accountB, article.id, { groupId: groupB.id, note: '账户 B 的后续动作' })?.note) process.exit(34);
+    const favoritesA = getUserFavorites(accountA);
+    const favoritesB = getUserFavorites(accountB);
+    if (favoritesA.favorites[0]?.note !== '账户 A 的阅读重点' || favoritesA.favorites[0]?.group_name !== '重点文献') process.exit(35);
+    if (favoritesB.favorites[0]?.note !== '账户 B 的后续动作' || favoritesB.favorites[0]?.group_name !== '待复核') process.exit(36);
+    if (getUserStatus(accountA).favoriteCount !== 1 || getUserStatus(accountB).favoriteCount !== 1) process.exit(37);
+    const guestStatus = getUserStatus(null);
+    if (typeof guestStatus.newArticleCount7d !== 'number' || typeof guestStatus.newArticleCount30d !== 'number' || guestStatus.newArticleCount7d < 1 || guestStatus.newArticleCount30d < 1) process.exit(38);
     saveRemotePreferences(account.id, { filters: { favorite: true } });
     if (getRemotePreferences(account.id)?.preferences?.filters?.favorite !== true) process.exit(10);
     updateUserSettings('user-a', { pushEnabled: true, pushFrequency: 'daily' });

@@ -1,6 +1,9 @@
+import { requestJson, collectionLimits } from "./http.js";
+import { collectJournal } from "./publishers.js";
 import { config } from "./config.js";
 import { normalizeArticle as normalizeIeeeArticle, fetchJournalArticles as fetchIeeeArticles } from "./ieee.js";
-import { decodeBasicEntities, stripTags, ELECTRICAL_FILTER_KEYWORDS } from "./utils.js";
+import { fetchWanfangArticles } from "./wanfang.js";
+import { decodeBasicEntities, stripTags, ELECTRICAL_FILTER_KEYWORDS, isNonResearchTitle } from "./utils.js";
 
 const CROSSREF_API = "https://api.crossref.org";
 const OPENALEX_API = "https://api.openalex.org/works";
@@ -48,7 +51,7 @@ function articleKey(doi, fallback) {
 }
 
 function isResearchArticle(title) {
-  return title && !SKIP_TITLE_PATTERNS.some((pattern) => pattern.test(title.trim()));
+  return title && !isNonResearchTitle(title) && !SKIP_TITLE_PATTERNS.some((pattern) => pattern.test(title.trim()));
 }
 
 function matchesJournalFilter(article, journal) {
@@ -56,6 +59,26 @@ function matchesJournalFilter(article, journal) {
   const text = [article.title, article.abstract, article.keywords].filter(Boolean).join(" ").toLowerCase();
   if (!text) return false;
   return journal.filterKeywords.some((kw) => text.includes(kw.toLowerCase()));
+}
+
+function containsChinese(text) {
+  return /[\u3400-\u9fff]/u.test(String(text || ""));
+}
+
+function isTrustedChineseFallbackLandingPage(value) {
+  const text = String(value || "").trim();
+  if (!text || /10\.5281\/zenodo/i.test(text)) return false;
+  try {
+    const hostname = new URL(text).hostname.toLowerCase();
+    return hostname === "cnki.com.cn"
+      || hostname.endsWith(".cnki.com.cn")
+      || hostname === "wanfangdata.com.cn"
+      || hostname.endsWith(".wanfangdata.com.cn")
+      || hostname === "jglobal.jst.go.jp"
+      || hostname.endsWith(".jglobal.jst.go.jp");
+  } catch {
+    return false;
+  }
 }
 
 // Extract keywords from title/abstract for articles without keywords
@@ -97,7 +120,7 @@ function normalizeCrossrefItem(item, journal) {
     external_id: articleKey(doi, item.URL || title),
     title,
     authors,
-    journal: item["container-title"]?.[0] || journal.name,
+    journal: decodeBasicEntities(item["container-title"]?.[0] || journal.name),
     year: item.published?.["date-parts"]?.[0]?.[0] || item.issued?.["date-parts"]?.[0]?.[0] || null,
     volume: item.volume || "",
     issue: item.issue || "",
@@ -168,7 +191,11 @@ function normalizeOpenAlexItem(item, journal) {
     external_id: articleKey(doi, item.id || title),
     title,
     authors,
-    journal: item.primary_location?.source?.display_name || journal.name,
+    // OpenAlex is a fallback for the Chinese Wanfang feeds.  Keep the
+    // configured journal name so subscriptions and filters do not depend on
+    // OpenAlex's English source label (for example, "Power System
+    // Technology").
+    journal: journal.wanfangId ? journal.name : (item.primary_location?.source?.display_name || journal.name),
     year: item.publication_year || null,
     volume: item.biblio?.volume || "",
     issue: item.biblio?.issue || "",
@@ -185,7 +212,7 @@ function reconstructOpenAlexAbstract(index) {
   if (!index || typeof index !== "object") return "";
   const words = [];
   for (const [word, positions] of Object.entries(index)) {
-    for (const position of positions) {
+    for (const position of Array.isArray(positions) ? positions : []) {
       words[position] = word;
     }
   }
@@ -196,63 +223,129 @@ async function fetchCrossrefBatch(journal, options = {}, dateFilter = "from-pub-
   const issn = journal.issns?.[0];
   if (!issn) return [];
 
+  const { maxRecords, pageSize, maxPages } = collectionLimits(options);
   const params = new URLSearchParams({
     filter: `${dateFilter}:${isoDateDaysAgo(options.lookbackDays || config.lookbackDays)},type:journal-article`,
     sort,
     order: "desc",
-    rows: String(options.maxRecords || 50)
+    rows: String(pageSize),
+    cursor: "*"
   });
   if (config.crossrefMailto) {
     params.set("mailto", config.crossrefMailto);
   }
 
-  const response = await fetch(`${CROSSREF_API}/journals/${encodeURIComponent(issn)}/works?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`Crossref returned ${response.status} for ${journal.name}`);
+  const records = [];
+  const cursors = new Set();
+  for (let page = 0; page < maxPages; page += 1) {
+    const cursor = params.get("cursor");
+    if (cursors.has(cursor)) break;
+    cursors.add(cursor);
+    const data = await requestJson(`${CROSSREF_API}/journals/${encodeURIComponent(issn)}/works?${params}`);
+    const items = data.message?.items || [];
+    records.push(...items.map((item) => normalizeCrossrefItem(item, journal))
+      .filter((article) => isResearchArticle(article.title) && matchesJournalFilter(article, journal)));
+    const next = data.message?.["next-cursor"];
+    if (records.length >= maxRecords || !items.length || !next || next === cursor) break;
+    params.set("cursor", next);
   }
+  return records.slice(0, maxRecords);
 
-  const data = await response.json();
-  return (data.message?.items || [])
-    .map((item) => normalizeCrossrefItem(item, journal))
-    .filter((article) => isResearchArticle(article.title) && matchesJournalFilter(article, journal));
 }
 
 async function fetchCrossrefArticles(journal, options = {}) {
   // Crossref publication dates may be future issue dates; the lower-bound
   // filter intentionally keeps those Online Early records while excluding old
   // papers that were merely re-indexed or deposited recently.
-  return fetchCrossrefBatch(journal, options, "from-pub-date", "published");
+  return fetchAcrossIssns(journal, options, (entry, settings) => fetchCrossrefBatch(entry, settings, "from-pub-date", "published"));
 }
 
-async function fetchOpenAlexArticles(journal, options = {}) {
+async function fetchOpenAlexBatch(journal, options = {}) {
   const issn = journal.issns?.[0];
   if (!issn) return [];
 
+  const { maxRecords, pageSize, maxPages } = collectionLimits(options);
+
   const params = new URLSearchParams({
-    filter: `primary_location.source.issn:${issn},from_publication_date:${isoDateDaysAgo(options.lookbackDays || config.lookbackDays)}`,
+    filter: `primary_location.source.issn:${issn},from_publication_date:${isoDateDaysAgo(options.lookbackDays || config.lookbackDays)},type:article`,
     sort: "publication_date:desc",
-    "per-page": String(options.maxRecords || 50),
+    "per-page": String(pageSize),
+    cursor: "*",
     select: "id,doi,title,display_name,publication_year,publication_date,biblio,authorships,primary_location,abstract_inverted_index,keywords,concepts,primary_topic"
   });
   if (config.crossrefMailto) {
     params.set("mailto", config.crossrefMailto);
   }
 
-  const response = await fetch(`${OPENALEX_API}?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`OpenAlex returned ${response.status} for ${journal.name}`);
+  const results = [];
+  const cursors = new Set();
+  for (let page = 0; page < maxPages; page += 1) {
+    const cursor = params.get("cursor");
+    if (cursors.has(cursor)) break;
+    cursors.add(cursor);
+    const data = await requestJson(`${OPENALEX_API}?${params}`);
+    const batch = data.results || [];
+    results.push(...batch);
+    const next = data.meta?.next_cursor;
+    if (results.length >= maxRecords || !batch.length || !next || next === cursor) break;
+    params.set("cursor", next);
   }
+  const candidates = results.slice(0, maxRecords)
+    .map((item) => ({ raw: item, article: normalizeOpenAlexItem(item, journal) }))
+    .filter(({ raw, article }) => {
+      if (!isResearchArticle(article.title) || !matchesJournalFilter(article, journal)) return false;
+      if (!journal.wanfangId) return true;
 
-  const data = await response.json();
-  return (data.results || [])
-    .map((item) => normalizeOpenAlexItem(item, journal))
-    .filter((article) => isResearchArticle(article.title) && matchesJournalFilter(article, journal));
+      // OpenAlex has historically mapped several Chinese ISSNs to unrelated
+      // records.  Keep the source-ISSN check as the hard boundary for the
+      // fallback path; the normal source remains Wanfang RSS.
+      const sourceIssns = raw.primary_location?.source?.issn;
+      const issnMatches = Array.isArray(sourceIssns)
+        ? sourceIssns.includes(issn)
+        : raw.primary_location?.source?.issn_l === issn;
+      if (!issnMatches) return false;
+
+      // OpenAlex currently contains a known contamination pattern where
+      // recent Zenodo records are attached to Chinese-journal ISSNs.  Keep
+      // native Chinese records and records that point to recognized CNKI,
+      // Wanfang, or J-GLOBAL landing pages; reject generic/Zenodo records.
+      return containsChinese(article.title)
+        || isTrustedChineseFallbackLandingPage(raw.primary_location?.landing_page_url);
+    });
+
+  if (!journal.wanfangId) return candidates.map(({ article }) => article);
+
+  // Prefer native Chinese records when OpenAlex has them.  Some of the
+  // Chinese-journal sources only expose English translations, however; in
+  // that case the exact ISSN-validated English records are the useful final
+  // fallback instead of returning an empty feed.
+  const chineseCandidates = candidates.filter(({ article }) => containsChinese(article.title));
+  return (chineseCandidates.length ? chineseCandidates : candidates)
+    .map(({ article }) => article);
+}
+
+async function fetchAcrossIssns(journal, options, fetchBatch) {
+  const records = [];
+  const failures = [];
+  const { maxRecords } = collectionLimits(options);
+  for (const issn of journal.issns || []) {
+    try { records.push(...await fetchBatch({ ...journal, issns: [issn] }, options)); }
+    catch (error) { failures.push({ issn, message: error.message }); }
+  }
+  if (options.onIssnDiagnostics) options.onIssnDiagnostics({ journal: journal.name, failures });
+  if (!records.length && failures.length) throw new Error(failures.map((item) => `${item.issn}: ${item.message}`).join("; "));
+  return dedupeArticles(records).sort((a, b) => String(b.published_at || "").localeCompare(String(a.published_at || ""))).slice(0, maxRecords);
+}
+
+async function fetchOpenAlexArticles(journal, options = {}) {
+  return fetchAcrossIssns(journal, options, fetchOpenAlexBatch);
 }
 
 function dedupeArticles(articles) {
   const byId = new Map();
-  for (const article of articles) {
+  for (let article of articles) {
     if (!article.external_id) continue;
+    article = { ...article, external_id: normalizeDoi(article.doi) ? articleKey(article.doi) : article.external_id, title: decodeBasicEntities(article.title), authors: decodeBasicEntities(article.authors), journal: decodeBasicEntities(article.journal), abstract: decodeBasicEntities(article.abstract), keywords: decodeBasicEntities(article.keywords) };
     const existing = byId.get(article.external_id);
     byId.set(article.external_id, existing ? mergeArticle(existing, article) : article);
   }
@@ -278,39 +371,16 @@ function mergeArticle(primary, secondary) {
 }
 
 export async function fetchJournalArticles(journal, options = {}) {
-  const sources = config.publicDataSources;
-  const batches = [];
-  const errors = [];
-
-  if (sources.includes("crossref")) {
-    try {
-      batches.push(await fetchCrossrefArticles(journal, options));
-    } catch (error) {
-      errors.push(error.message);
-    }
-  }
-
-  if (sources.includes("openalex")) {
-    try {
-      batches.push(await fetchOpenAlexArticles(journal, options));
-    } catch (error) {
-      errors.push(error.message);
-    }
-  }
-
-  if (config.ieeeApiKey && sources.includes("ieee")) {
-    try {
-      batches.push(await fetchIeeeArticles(journal.name, options));
-    } catch (error) {
-      errors.push(error.message);
-    }
-  }
-
-  const articles = dedupeArticles(batches.flat());
-  if (!articles.length && errors.length) {
-    throw new Error(errors.join("; "));
-  }
-  return articles;
+  return collectJournal(journal, options, {
+    config,
+    adapters: {
+      crossref: fetchCrossrefArticles,
+      openalex: fetchOpenAlexArticles,
+      wanfang: fetchWanfangArticles,
+      ieee: (entry, settings) => fetchIeeeArticles(entry.name, settings)
+    },
+    dedupe: dedupeArticles
+  });
 }
 
 export { normalizeIeeeArticle };
@@ -318,5 +388,6 @@ export const internals = {
   normalizeCrossrefItem,
   normalizeOpenAlexItem,
   normalizeDoi,
+  dedupeArticles,
   reconstructOpenAlexAbstract
 };

@@ -106,7 +106,7 @@ export async function refreshArticles() {
   try {
     for (const journal of journals) {
       try {
-        fetched.push(...await fetchJournalArticles(journal, { lookbackDays: config.lookbackDays }));
+        fetched.push(...await fetchJournalArticles(journal, { lookbackDays: config.lookbackDays, maxRecords: config.collectionMaxRecords }));
       } catch (error) {
         errors.push(`${journal.name}: ${error.message}`);
       }
@@ -126,13 +126,13 @@ export async function refreshArticles() {
     // background pipeline: metadata first, translation second, local DB last.
     if (addedArticles.length) {
       void (async () => {
-        const selected = addedArticles.slice(0, TRANSLATE_BATCH_LIMIT);
+        const selected = addedArticles;
         const enrichment = await enrichArticles(selected);
         const enriched = enrichment.articles;
         const metadata = countMetadataAdditions(selected, enriched);
         const translationResult = await autoTranslateArticles(enriched);
         const remaining = getMetadataGaps();
-        const remainingTranslationCount = countArticlesMissingTranslation(config.weeklyDigestTranslationLanguage || "zh");
+        const remainingTranslationCount = countArticlesMissingTranslation("title", config.weeklyDigestTranslationLanguage || "zh");
         updateRefreshRunSummary(runId, {
           ...metadata,
           translatedCount: translationResult.translated,
@@ -176,7 +176,7 @@ export async function refreshArticles() {
         );
         const translationResult = await autoTranslateArticles(backlog);
         const remaining = getMetadataGaps();
-        const remainingTranslationCount = countArticlesMissingTranslation(config.weeklyDigestTranslationLanguage || "zh");
+        const remainingTranslationCount = countArticlesMissingTranslation("title", config.weeklyDigestTranslationLanguage || "zh");
         const abstractCount = (abstractResult.enrichedAbstracts ?? abstractResult.enriched ?? 0)
           + (keywordResult.enrichedAbstracts || 0);
         const keywordCount = (abstractResult.enrichedKeywords || 0)
@@ -275,8 +275,8 @@ async function enrichArticles(articles, fields = ["abstract", "keywords"]) {
   return { articles: results, errors };
 }
 
-export async function enrichMissingKeywords() {
-  const articles = listArticlesWithoutKeywords(ENRICH_BATCH_LIMIT);
+export async function enrichMissingKeywords(options = {}) {
+  const articles = listArticlesWithoutKeywords(ENRICH_BATCH_LIMIT, options.excludeIds || []);
   if (!articles.length) {
     return {
       processed: 0,
@@ -304,6 +304,7 @@ export async function enrichMissingKeywords() {
   ).length;
   return {
     processed: articles.length,
+    attemptedIds: articles.map((article) => article.id),
     enriched: enrichedKeywords,
     failed: failedKeywords,
     enrichedKeywords,
@@ -315,8 +316,8 @@ export async function enrichMissingKeywords() {
   };
 }
 
-export async function enrichMissingAbstracts() {
-  const articles = listArticlesMissingAbstract(ENRICH_BATCH_LIMIT);
+export async function enrichMissingAbstracts(options = {}) {
+  const articles = listArticlesMissingAbstract(ENRICH_BATCH_LIMIT, options.excludeIds || []);
   if (!articles.length) {
     return {
       processed: 0,
@@ -344,6 +345,7 @@ export async function enrichMissingAbstracts() {
   ).length;
   return {
     processed: articles.length,
+    attemptedIds: articles.map((article) => article.id),
     enriched: enrichedAbstracts,
     failed: failedAbstracts,
     enrichedAbstracts,
@@ -386,6 +388,7 @@ export async function translateMissingArticles(field, targetLanguage = "zh", lim
     field,
     targetLanguage,
     processed: articles.length,
+    attemptedIds: articles.map((article) => article.id),
     translated,
     translatedTitleCount: field === "title" ? batch.translatedUnits || 0 : 0,
     translatedAbstractCount: field === "abstract" ? batch.translatedUnits || 0 : 0,

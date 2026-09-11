@@ -1,16 +1,20 @@
+import { resolveJournal } from "./publishers.js";
 import { DatabaseSync } from "node:sqlite";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DEFAULT_JOURNAL_BY_NAME, DEFAULT_JOURNALS, config } from "./config.js";
-import { escapeLike } from "./utils.js";
+import { containsChineseText, escapeLike, decodeEntities, isNonResearchTitle, isUsableMetadataText } from "./utils.js";
 
+const DEFAULT_FAVORITE_GROUP_NAME = "默认收藏夹";
 const dataDir = path.resolve("data");
 fs.mkdirSync(dataDir, { recursive: true });
 
 export const db = new DatabaseSync(path.join(dataDir, "literature.sqlite"));
 db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
+db.function("is_non_research_title", { deterministic: true }, (value) => isNonResearchTitle(value) ? 1 : 0);
+db.function("contains_chinese_text", (value) => containsChineseText(value) ? 1 : 0);
 
 // Add keywords columns to existing tables if they don't exist yet.
 try { db.exec("ALTER TABLE articles ADD COLUMN keywords TEXT"); } catch (e) {
@@ -185,6 +189,32 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ui_user ON user_interactions(user_id);
   CREATE INDEX IF NOT EXISTS idx_ui_article ON user_interactions(article_id);
 
+  CREATE TABLE IF NOT EXISTS favorite_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(user_id, name)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_favorite_groups_user ON favorite_groups(user_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS user_favorites (
+    user_id TEXT NOT NULL,
+    article_id INTEGER NOT NULL,
+    group_id INTEGER,
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, article_id),
+    FOREIGN KEY (article_id) REFERENCES articles(id) ON DELETE CASCADE,
+    FOREIGN KEY (group_id) REFERENCES favorite_groups(id) ON DELETE SET NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_user_favorites_user ON user_favorites(user_id, updated_at);
+  CREATE INDEX IF NOT EXISTS idx_user_favorites_group ON user_favorites(user_id, group_id);
+
   CREATE TABLE IF NOT EXISTS user_journals (
     user_id TEXT NOT NULL,
     journal_name TEXT NOT NULL,
@@ -240,6 +270,23 @@ db.exec("UPDATE user_emails SET updated_at = created_at WHERE updated_at IS NULL
 
 db.exec("UPDATE articles SET first_seen_at = fetched_at WHERE first_seen_at IS NULL OR first_seen_at = ''");
 
+// Preserve favorites created before the dedicated collection tables existed.
+// The account principal remains the source of isolation; no global article
+// favorite flag is copied into another user's collection.
+db.exec(`
+  INSERT OR IGNORE INTO user_favorites (user_id, article_id, note, created_at, updated_at)
+  SELECT ui.user_id, ui.article_id, '', datetime('now'), datetime('now')
+  FROM user_interactions ui
+  JOIN articles a ON a.id = ui.article_id
+  WHERE ui.is_favorite = 1
+`);
+
+// Ensure personal accounts created before the default collection was added
+// receive the same usable starting state as newly registered accounts.
+for (const account of db.prepare("SELECT id FROM user_accounts").all()) {
+  ensureDefaultFavoriteGroup(`account:${account.id}`);
+}
+
 const insertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
 insertSetting.run("journals", JSON.stringify(DEFAULT_JOURNALS));
 insertSetting.run("refreshCron", config.refreshCron);
@@ -284,10 +331,14 @@ export function normalizeJournals(journals) {
         const preset = DEFAULT_JOURNAL_BY_NAME.get(journal);
         return preset || { name: journal, issns: [] };
       }
+      journal = resolveJournal(journal);
       const preset = DEFAULT_JOURNAL_BY_NAME.get(journal.name);
       return {
+        publisher: journal.publisher || "",
+        platform: journal.platform,
         name: journal.name,
         issns: Array.isArray(journal.issns) ? journal.issns.filter(Boolean) : (preset?.issns || []),
+        wanfangId: journal.wanfangId || preset?.wanfangId || "",
         filterKeywords: Array.isArray(journal.filterKeywords)
           ? journal.filterKeywords
           : (preset?.filterKeywords || undefined)
@@ -348,7 +399,42 @@ export function updateSettings(settings) {
 }
 
 export function listArticles(filters = {}, userId) {
-  const clauses = [];
+  const { clauses, params, order } = buildArticleListQuery(filters, userId);
+
+  if (userId) {
+    const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const articles = db.prepare(`
+      SELECT a.*,
+        COALESCE(ui_read.is_read, 0) AS is_read,
+        COALESCE(ui_fav.is_favorite, 0) AS is_favorite,
+        zh.title AS translated_title,
+        zh.abstract AS translated_abstract
+      FROM articles a
+      LEFT JOIN user_interactions ui_read ON ui_read.article_id = a.id AND ui_read.user_id = @userId AND ui_read.is_read = 1
+      LEFT JOIN user_interactions ui_fav ON ui_fav.article_id = a.id AND ui_fav.user_id = @userId AND ui_fav.is_favorite = 1
+      LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
+      ${whereClause}
+      ORDER BY COALESCE(a.published_at, a.fetched_at) ${order}, a.id ${order}
+      LIMIT 500
+    `).all({ ...params, userId });
+    return articles;
+  }
+
+  const whereFinal = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return db.prepare(`
+    SELECT a.*,
+      zh.title AS translated_title,
+      zh.abstract AS translated_abstract
+    FROM articles a
+    LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
+    ${whereFinal}
+    ORDER BY COALESCE(a.published_at, a.fetched_at) ${order}, a.id ${order}
+    LIMIT 500
+  `).all(params);
+}
+
+function buildArticleListQuery(filters = {}, userId) {
+  const clauses = ["is_non_research_title(a.title) = 0"];
   const params = {};
 
   if (filters.journal) {
@@ -381,9 +467,6 @@ export function listArticles(filters = {}, userId) {
     }
   }
 
-  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const order = filters.sort === "asc" ? "ASC" : "DESC";
-
   if (userId) {
     if (filters.unread === "true") {
       clauses.push("NOT EXISTS (SELECT 1 FROM user_interactions ui WHERE ui.user_id = @userId AND ui.article_id = a.id AND ui.is_read = 1)");
@@ -393,35 +476,77 @@ export function listArticles(filters = {}, userId) {
       clauses.push("EXISTS (SELECT 1 FROM user_interactions ui WHERE ui.user_id = @userId AND ui.article_id = a.id AND ui.is_favorite = 1)");
       params.userId = userId;
     }
-    const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-    const articles = db.prepare(`
-      SELECT a.*,
-        COALESCE(ui_read.is_read, 0) AS is_read,
-        COALESCE(ui_fav.is_favorite, 0) AS is_favorite,
-        zh.title AS translated_title,
-        zh.abstract AS translated_abstract
-      FROM articles a
-      LEFT JOIN user_interactions ui_read ON ui_read.article_id = a.id AND ui_read.user_id = @userId AND ui_read.is_read = 1
-      LEFT JOIN user_interactions ui_fav ON ui_fav.article_id = a.id AND ui_fav.user_id = @userId AND ui_fav.is_favorite = 1
-      LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
-      ${whereClause}
-      ORDER BY COALESCE(a.published_at, a.fetched_at) ${order}, a.id ${order}
-      LIMIT 500
-    `).all({ ...params, userId });
-    return articles;
   }
 
-  const whereFinal = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  return db.prepare(`
-    SELECT a.*,
+  return { clauses, params, order: filters.sort === "asc" ? "ASC" : "DESC" };
+}
+
+function normalizeArticlePageLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 50;
+  return Math.min(Math.max(Math.floor(parsed), 1), 500);
+}
+
+function normalizeArticlePageOffset(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.min(Math.max(Math.floor(parsed), 0), 10_000_000);
+}
+
+// The feed only needs a compact preview. Full article text remains available
+// through getArticleForUser()/the detail endpoint, so the first page does not
+// transfer every full abstract and translation.
+export function listArticlePage(filters = {}, userId) {
+  const { clauses, params, order } = buildArticleListQuery(filters, userId);
+  const limit = normalizeArticlePageLimit(filters.limit);
+  const offset = normalizeArticlePageOffset(filters.offset);
+  const where = `WHERE ${clauses.join(" AND ")}`;
+  const interactionJoins = userId
+    ? `
+      LEFT JOIN user_interactions ui_read ON ui_read.article_id = a.id AND ui_read.user_id = @userId AND ui_read.is_read = 1
+      LEFT JOIN user_interactions ui_fav ON ui_fav.article_id = a.id AND ui_fav.user_id = @userId AND ui_fav.is_favorite = 1
+    `
+    : "";
+  const interactionFields = userId
+    ? "COALESCE(ui_read.is_read, 0) AS is_read, COALESCE(ui_fav.is_favorite, 0) AS is_favorite"
+    : "0 AS is_read, 0 AS is_favorite";
+
+  const rows = db.prepare(`
+    SELECT
+      a.id,
+      a.external_id,
+      a.title,
+      a.authors,
+      a.journal,
+      a.year,
+      a.volume,
+      a.issue,
+      a.doi,
+      substr(a.abstract, 1, 320) AS abstract,
+      a.url,
+      a.published_at,
+      a.keywords,
+      ${interactionFields},
       zh.title AS translated_title,
-      zh.abstract AS translated_abstract
+      substr(zh.abstract, 1, 320) AS translated_abstract,
+      COUNT(*) OVER () AS total_count
     FROM articles a
     LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
-    ${whereFinal}
+    ${interactionJoins}
+    ${where}
     ORDER BY COALESCE(a.published_at, a.fetched_at) ${order}, a.id ${order}
-    LIMIT 500
-  `).all(params);
+    LIMIT @pageLimitPlusOne OFFSET @pageOffset
+  `).all({
+    ...params,
+    ...(userId ? { userId } : {}),
+    pageLimitPlusOne: limit + 1,
+    pageOffset: offset
+  });
+
+  const hasMore = rows.length > limit;
+  const total = rows.length ? Number(rows[0].total_count || 0) : 0;
+  const articles = rows.slice(0, limit).map(({ total_count, ...article }) => article);
+  return { articles, hasMore, total, limit, offset };
 }
 
 export function listRecentArticlesForDigest(days, limit, journals = []) {
@@ -469,7 +594,33 @@ export function getArticle(id) {
   return db.prepare("SELECT * FROM articles WHERE id = ?").get(id);
 }
 
+export function getArticleForUser(id, userId) {
+  const article = getArticle(id);
+  if (!article) return null;
+
+  const translation = db.prepare(`
+    SELECT title AS translated_title, abstract AS translated_abstract
+    FROM translations
+    WHERE article_id = ? AND target_language = 'zh'
+  `).get(id) || {};
+  const interaction = userId
+    ? getUserInteraction(userId, id)
+    : { is_read: 0, is_favorite: 0 };
+
+  return {
+    ...article,
+    ...translation,
+    is_read: interaction.is_read ? 1 : 0,
+    is_favorite: interaction.is_favorite ? 1 : 0
+  };
+}
+
 export function updateArticleDetails(id, details) {
+  details = { ...details };
+  for (const field of ["title", "authors", "journal", "abstract", "keywords"]) {
+    if (typeof details[field] === "string") details[field] = decodeEntities(details[field]);
+    if (details[field] && !isUsableMetadataText(details[field])) details[field] = "";
+  }
   db.prepare(`
     UPDATE articles
     SET
@@ -651,20 +802,35 @@ export function setArticleReadForUser(userId, articleId) {
   return next;
 }
 
-export function toggleArticleFavoriteForUser(userId, articleId) {
+export function toggleArticleFavoriteForUser(userId, articleId, options = {}) {
+  const article = getArticle(articleId);
+  if (!article) return null;
+  ensureDefaultFavoriteGroup(userId);
   const row = db.prepare("SELECT is_favorite FROM user_interactions WHERE user_id = ? AND article_id = ?").get(userId, articleId);
-  if (!row) {
+  const favorite = db.prepare("SELECT 1 AS favorite_exists FROM user_favorites WHERE user_id = ? AND article_id = ?").get(userId, articleId);
+  const currentlyFavorite = Boolean(row?.is_favorite || favorite?.favorite_exists);
+  if (!currentlyFavorite) {
+    const groupId = options.groupId === undefined ? getDefaultFavoriteGroupId(userId) : normalizeFavoriteGroupId(options.groupId);
+    if (groupId !== null && !db.prepare("SELECT 1 FROM favorite_groups WHERE id = ? AND user_id = ?").get(groupId, userId)) {
+      throw new Error("\u6536\u85cf\u5206\u7ec4\u4e0d\u5b58\u5728");
+    }
     db.prepare(`
       INSERT INTO user_interactions (user_id, article_id, is_read, is_favorite, updated_at)
       VALUES (?, ?, 0, 1, datetime('now'))
+      ON CONFLICT(user_id, article_id) DO UPDATE SET is_favorite = 1, updated_at = datetime('now')
     `).run(userId, articleId);
+    db.prepare(`
+      INSERT OR IGNORE INTO user_favorites (user_id, article_id, group_id, note, created_at, updated_at)
+      VALUES (?, ?, ?, '', datetime('now'), datetime('now'))
+    `).run(userId, articleId, groupId);
+    if (options.setDefault) setDefaultFavoriteGroupId(userId, groupId);
   } else {
-    const next = row.is_favorite ? 0 : 1;
-    db.prepare("UPDATE user_interactions SET is_favorite = ?, updated_at = datetime('now') WHERE user_id = ? AND article_id = ?").run(next, userId, articleId);
+    db.prepare("UPDATE user_interactions SET is_favorite = 0, updated_at = datetime('now') WHERE user_id = ? AND article_id = ?").run(userId, articleId);
+    db.prepare("DELETE FROM user_favorites WHERE user_id = ? AND article_id = ?").run(userId, articleId);
   }
-  const article = getArticle(articleId);
   const interaction = db.prepare("SELECT is_read, is_favorite FROM user_interactions WHERE user_id = ? AND article_id = ?").get(userId, articleId);
-  return { ...article, is_read: interaction?.is_read || 0, is_favorite: interaction?.is_favorite || 0 };
+  const favoriteRecord = currentlyFavorite ? null : db.prepare(`${favoriteArticleSelect()} WHERE uf.user_id = ? AND uf.article_id = ?`).get(userId, articleId);
+  return { ...article, ...(favoriteRecord || {}), is_read: interaction?.is_read || 0, is_favorite: interaction?.is_favorite || 0 };
 }
 
 export function getUserInteraction(userId, articleId) {
@@ -684,20 +850,255 @@ export function getUserInteractionsMap(userId, articleIds) {
 }
 
 export function getUserStatus(userId) {
-  const articleCount = db.prepare("SELECT COUNT(*) AS count FROM articles").get().count;
+  const articleCount = db.prepare("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0").get().count;
+  // These two counters describe the shared literature database rather than a
+  // personal account. Keep them available in guest mode as well, so the
+  // top-right summary does not silently turn into zero before login.
+  const newArticleCount7d = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM articles
+    WHERE is_non_research_title(title) = 0
+      AND datetime(COALESCE(NULLIF(first_seen_at, ''), fetched_at)) >= datetime('now', '-7 days')
+  `).get().count;
+  const newArticleCount30d = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM articles
+    WHERE is_non_research_title(title) = 0
+      AND datetime(COALESCE(NULLIF(first_seen_at, ''), fetched_at)) >= datetime('now', '-30 days')
+  `).get().count;
   if (!userId) {
-    return { articleCount, unreadCount: 0, favoriteCount: 0, readCount: 0 };
+    return { articleCount, unreadCount: 0, favoriteCount: 0, readCount: 0, newArticleCount7d, newArticleCount30d };
   }
   const unreadCount = db.prepare(`
     SELECT COUNT(*) AS count FROM articles a
-    WHERE NOT EXISTS (
+    WHERE is_non_research_title(a.title) = 0
+      AND NOT EXISTS (
       SELECT 1 FROM user_interactions ui
       WHERE ui.user_id = ? AND ui.article_id = a.id AND ui.is_read = 1
     )
   `).get(userId).count;
-  const favoriteCount = db.prepare("SELECT COUNT(*) AS count FROM user_interactions WHERE user_id = ? AND is_favorite = 1").get(userId).count;
+  const favoriteCount = db.prepare("SELECT COUNT(*) AS count FROM user_favorites uf JOIN articles a ON a.id = uf.article_id WHERE uf.user_id = ? AND is_non_research_title(a.title) = 0").get(userId).count;
   const readCount = db.prepare("SELECT COUNT(*) AS count FROM user_interactions WHERE user_id = ? AND is_read = 1").get(userId).count;
-  return { articleCount, unreadCount, favoriteCount, readCount };
+  return { articleCount, unreadCount, favoriteCount, readCount, newArticleCount7d, newArticleCount30d };
+}
+
+function normalizeFavoriteGroupName(name) {
+  const value = String(name || "").trim();
+  if (!value) throw new Error("收藏分组名称不能为空");
+  if (value.length > 40) throw new Error("收藏分组名称不能超过 40 个字符");
+  return value;
+}
+
+function normalizeFavoriteNote(note) {
+  const value = String(note || "").trim();
+  if (value.length > 2000) throw new Error("收藏备注不能超过 2000 个字符");
+  return value;
+}
+
+function normalizeFavoriteGroupId(groupId) {
+  if (groupId === undefined || groupId === null || groupId === "" || groupId === "ungrouped") return null;
+  const value = Number(groupId);
+  if (!Number.isInteger(value) || value <= 0) throw new Error("收藏分组无效");
+  return value;
+}
+
+function ensureDefaultFavoriteGroup(userId) {
+  const principal = String(userId || "").trim();
+  if (!principal) return null;
+
+  db.prepare(`
+    INSERT OR IGNORE INTO favorite_groups (user_id, name, created_at, updated_at)
+    VALUES (?, ?, datetime('now'), datetime('now'))
+  `).run(principal, DEFAULT_FAVORITE_GROUP_NAME);
+
+  const group = db.prepare(`
+    SELECT id, name, created_at, updated_at
+    FROM favorite_groups
+    WHERE user_id = ? AND name = ?
+  `).get(principal, DEFAULT_FAVORITE_GROUP_NAME);
+  if (!group) return null;
+
+  const savedDefault = db.prepare(
+    "SELECT value FROM user_settings WHERE user_id = ? AND key = 'defaultFavoriteGroupId'"
+  ).get(principal)?.value;
+  let shouldUseDefault = savedDefault === undefined;
+  if (savedDefault && savedDefault !== "ungrouped") {
+    try {
+      const savedId = normalizeFavoriteGroupId(savedDefault);
+      shouldUseDefault = !db.prepare(
+        "SELECT 1 FROM favorite_groups WHERE id = ? AND user_id = ?"
+      ).get(savedId, principal);
+    } catch {
+      shouldUseDefault = true;
+    }
+  }
+
+  if (shouldUseDefault) {
+    db.prepare(`
+      INSERT INTO user_settings (user_id, key, value, updated_at)
+      VALUES (?, 'defaultFavoriteGroupId', ?, datetime('now'))
+      ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+    `).run(principal, String(group.id));
+  }
+  return group;
+}
+
+function favoriteArticleSelect() {
+  return `
+    SELECT a.id, a.external_id, a.title, a.authors, a.journal, a.year, a.volume, a.issue,
+      a.doi, a.abstract, a.url, a.published_at, a.fetched_at, a.first_seen_at, a.keywords,
+      COALESCE(ui.is_read, 0) AS is_read,
+      1 AS is_favorite,
+      uf.group_id,
+      COALESCE(fg.name, '') AS group_name,
+      COALESCE(uf.note, '') AS note,
+      zh.title AS translated_title,
+      zh.abstract AS translated_abstract
+    FROM user_favorites uf
+    JOIN articles a ON a.id = uf.article_id
+    LEFT JOIN user_interactions ui ON ui.user_id = uf.user_id AND ui.article_id = uf.article_id
+    LEFT JOIN favorite_groups fg ON fg.id = uf.group_id AND fg.user_id = uf.user_id
+    LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
+  `;
+}
+
+export function listFavoriteGroups(userId) {
+  ensureDefaultFavoriteGroup(userId);
+  const groups = db.prepare(`
+    SELECT g.id, g.name, g.created_at, g.updated_at,
+      COUNT(CASE WHEN is_non_research_title(a.title) = 0 THEN uf.article_id END) AS count
+    FROM favorite_groups g
+    LEFT JOIN user_favorites uf ON uf.group_id = g.id AND uf.user_id = g.user_id
+    LEFT JOIN articles a ON a.id = uf.article_id
+    WHERE g.user_id = ?
+    GROUP BY g.id
+    ORDER BY g.created_at ASC, g.id ASC
+  `).all(userId);
+  const ungrouped = db.prepare(`
+    SELECT COUNT(*) AS count FROM user_favorites uf
+    JOIN articles a ON a.id = uf.article_id
+    WHERE uf.user_id = ? AND uf.group_id IS NULL AND is_non_research_title(a.title) = 0
+  `).get(userId)?.count || 0;
+  return [{ id: null, name: "未分组", count: Number(ungrouped) }, ...groups.map((group) => ({
+    ...group,
+    count: Number(group.count || 0)
+  }))];
+}
+
+export function getDefaultFavoriteGroupId(userId) {
+  ensureDefaultFavoriteGroup(userId);
+  const value = db.prepare("SELECT value FROM user_settings WHERE user_id = ? AND key = 'defaultFavoriteGroupId'").get(userId)?.value;
+  if (!value || value === "ungrouped") return null;
+  const id = normalizeFavoriteGroupId(value);
+  return db.prepare("SELECT id FROM favorite_groups WHERE id = ? AND user_id = ?").get(id, userId)?.id || null;
+}
+
+export function setDefaultFavoriteGroupId(userId, groupId) {
+  const id = normalizeFavoriteGroupId(groupId);
+  if (id !== null && !db.prepare("SELECT 1 FROM favorite_groups WHERE id = ? AND user_id = ?").get(id, userId)) throw new Error("\u6536\u85cf\u5206\u7ec4\u4e0d\u5b58\u5728");
+  db.prepare(`
+    INSERT INTO user_settings (user_id, key, value, updated_at)
+    VALUES (?, 'defaultFavoriteGroupId', ?, datetime('now'))
+    ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+  `).run(userId, id === null ? "ungrouped" : String(id));
+  return id;
+}
+
+export function listUserFavorites(userId, groupFilter = "all") {
+  const params = [userId];
+  let where = "WHERE uf.user_id = ? AND is_non_research_title(a.title) = 0";
+  if (groupFilter === "ungrouped" || groupFilter === null) {
+    where += " AND uf.group_id IS NULL";
+  } else if (groupFilter !== undefined && groupFilter !== "" && groupFilter !== "all") {
+    const groupId = normalizeFavoriteGroupId(groupFilter);
+    const group = db.prepare("SELECT id FROM favorite_groups WHERE id = ? AND user_id = ?").get(groupId, userId);
+    if (!group) return [];
+    where += " AND uf.group_id = ?";
+    params.push(groupId);
+  }
+  return db.prepare(`${favoriteArticleSelect()} ${where}
+    ORDER BY COALESCE(uf.updated_at, uf.created_at) DESC, a.id DESC
+  `).all(...params);
+}
+
+export function getUserFavorites(userId, groupFilter = "all") {
+  return {
+    groups: listFavoriteGroups(userId),
+    favorites: listUserFavorites(userId, groupFilter),
+    defaultGroupId: getDefaultFavoriteGroupId(userId)
+  };
+}
+
+export function createFavoriteGroup(userId, name) {
+  const normalizedName = normalizeFavoriteGroupName(name);
+  const count = db.prepare("SELECT COUNT(*) AS count FROM favorite_groups WHERE user_id = ?").get(userId)?.count || 0;
+  if (Number(count) >= 50) throw new Error("收藏分组最多创建 50 个");
+  try {
+    const result = db.prepare(`
+      INSERT INTO favorite_groups (user_id, name, created_at, updated_at)
+      VALUES (?, ?, datetime('now'), datetime('now'))
+    `).run(userId, normalizedName);
+    return db.prepare("SELECT id, name, created_at, updated_at, 0 AS count FROM favorite_groups WHERE id = ?").get(result.lastInsertRowid);
+  } catch (error) {
+    if (String(error.message || "").toLowerCase().includes("unique")) throw new Error("该收藏分组已经存在");
+    throw error;
+  }
+}
+
+export function renameFavoriteGroup(userId, groupId, name) {
+  const normalizedName = normalizeFavoriteGroupName(name);
+  const id = normalizeFavoriteGroupId(groupId);
+  if (id === null) throw new Error("未分组不能重命名");
+  try {
+    const result = db.prepare(`
+      UPDATE favorite_groups
+      SET name = ?, updated_at = datetime('now')
+      WHERE id = ? AND user_id = ?
+    `).run(normalizedName, id, userId);
+    if (!result.changes) return null;
+    return db.prepare("SELECT id, name, created_at, updated_at, 0 AS count FROM favorite_groups WHERE id = ? AND user_id = ?").get(id, userId);
+  } catch (error) {
+    if (String(error.message || "").toLowerCase().includes("unique")) throw new Error("该收藏分组已经存在");
+    throw error;
+  }
+}
+
+export function deleteFavoriteGroup(userId, groupId) {
+  const id = normalizeFavoriteGroupId(groupId);
+  if (id === null) throw new Error("未分组不能删除");
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const group = db.prepare("SELECT id FROM favorite_groups WHERE id = ? AND user_id = ?").get(id, userId);
+    if (!group) {
+      db.exec("ROLLBACK");
+      return false;
+    }
+    db.prepare("UPDATE user_favorites SET group_id = NULL, updated_at = datetime('now') WHERE user_id = ? AND group_id = ?").run(userId, id);
+    db.prepare("UPDATE user_settings SET value = 'ungrouped', updated_at = datetime('now') WHERE user_id = ? AND key = 'defaultFavoriteGroupId' AND value = ?").run(userId, String(id));
+    db.prepare("DELETE FROM favorite_groups WHERE id = ? AND user_id = ?").run(id, userId);
+    db.exec("COMMIT");
+    return true;
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw error;
+  }
+}
+
+export function updateUserFavorite(userId, articleId, changes = {}) {
+  const current = db.prepare("SELECT group_id, note FROM user_favorites WHERE user_id = ? AND article_id = ?").get(userId, Number(articleId));
+  if (!current) return null;
+  const groupId = changes.groupId === undefined ? current.group_id : normalizeFavoriteGroupId(changes.groupId);
+  if (groupId !== null) {
+    const group = db.prepare("SELECT id FROM favorite_groups WHERE id = ? AND user_id = ?").get(groupId, userId);
+    if (!group) throw new Error("收藏分组不存在");
+  }
+  const note = changes.note === undefined ? current.note : normalizeFavoriteNote(changes.note);
+  db.prepare(`
+    UPDATE user_favorites
+    SET group_id = ?, note = ?, updated_at = datetime('now')
+    WHERE user_id = ? AND article_id = ?
+  `).run(groupId, note, userId, Number(articleId));
+  return db.prepare(`${favoriteArticleSelect()} WHERE uf.user_id = ? AND uf.article_id = ?`).get(userId, Number(articleId));
 }
 
 export function createRefreshRun({ taskType = "refresh", message = "" } = {}) {
@@ -812,7 +1213,7 @@ export function getStatus() {
     LIMIT 1
   `).get();
   const unreadCount = db.prepare("SELECT COUNT(*) AS count FROM articles WHERE is_read = 0").get().count;
-  const articleCount = db.prepare("SELECT COUNT(*) AS count FROM articles").get().count;
+  const articleCount = db.prepare("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0").get().count;
   return {
     latestRun: latestRun || null,
     unreadCount,
@@ -824,13 +1225,15 @@ export function getStatus() {
   };
 }
 
-export function listArticlesWithoutKeywords(limit = 50) {
+export function listArticlesWithoutKeywords(limit = 50, excludeIds = []) {
   return db.prepare(`
     SELECT * FROM articles
     WHERE length(trim(coalesce(keywords, ''))) = 0
+    AND is_non_research_title(title) = 0
+    AND id NOT IN (SELECT value FROM json_each(?))
     ORDER BY COALESCE(published_at, fetched_at) DESC
     LIMIT ?
-  `).all(limit);
+  `).all(JSON.stringify(excludeIds), limit);
 }
 
 export function countArticlesWithoutKeywords() {
@@ -838,14 +1241,15 @@ export function countArticlesWithoutKeywords() {
     SELECT COUNT(*) AS count
     FROM articles
     WHERE length(trim(coalesce(keywords, ''))) = 0
+      AND is_non_research_title(title) = 0
   `).get()?.count || 0);
 }
 
 export function listArticlesMissingMetadata(limit = 50) {
   return db.prepare(`
     SELECT * FROM articles
-    WHERE length(trim(coalesce(abstract, ''))) = 0
-       OR length(trim(coalesce(keywords, ''))) = 0
+    WHERE is_non_research_title(title) = 0
+      AND (length(trim(coalesce(abstract, ''))) = 0 OR length(trim(coalesce(keywords, ''))) = 0)
     ORDER BY COALESCE(first_seen_at, fetched_at) DESC
     LIMIT ?
   `).all(limit);
@@ -857,20 +1261,23 @@ export function listArticlesWithoutTranslation(targetLanguage, limit = 20) {
     FROM articles a
     LEFT JOIN translations t
       ON t.article_id = a.id AND t.target_language = ?
-    WHERE length(trim(coalesce(t.title, ''))) = 0
-      OR (length(trim(coalesce(a.abstract, ''))) > 0 AND length(trim(coalesce(t.abstract, ''))) = 0)
+    WHERE is_non_research_title(a.title) = 0
+      AND (length(trim(coalesce(t.title, ''))) = 0
+      OR (length(trim(coalesce(a.abstract, ''))) > 0 AND length(trim(coalesce(t.abstract, ''))) = 0))
     ORDER BY COALESCE(a.first_seen_at, a.fetched_at) DESC, a.id DESC
     LIMIT ?
   `).all(targetLanguage, limit);
 }
 
-export function listArticlesMissingAbstract(limit = 50) {
+export function listArticlesMissingAbstract(limit = 50, excludeIds = []) {
   return db.prepare(`
     SELECT * FROM articles
     WHERE length(trim(coalesce(abstract, ''))) = 0
+    AND is_non_research_title(title) = 0
+    AND id NOT IN (SELECT value FROM json_each(?))
     ORDER BY COALESCE(first_seen_at, fetched_at) DESC, id DESC
     LIMIT ?
-  `).all(limit);
+  `).all(JSON.stringify(excludeIds), limit);
 }
 
 export function countArticlesMissingAbstract() {
@@ -878,6 +1285,7 @@ export function countArticlesMissingAbstract() {
     SELECT COUNT(*) AS count
     FROM articles
     WHERE length(trim(coalesce(abstract, ''))) = 0
+      AND is_non_research_title(title) = 0
   `).get()?.count || 0);
 }
 
@@ -889,7 +1297,9 @@ export function countArticlesMissingTranslation(field = "title", targetLanguage 
     FROM articles a
     LEFT JOIN translations t
       ON t.article_id = a.id AND t.target_language = ?
-    WHERE length(trim(coalesce(a.${sourceColumn}, ''))) > 0
+    WHERE is_non_research_title(a.title) = 0
+      AND length(trim(coalesce(a.${sourceColumn}, ''))) > 0
+      AND contains_chinese_text(a.${sourceColumn}) = 0
       AND length(trim(coalesce(t.${translatedColumn}, ''))) = 0
   `).get(targetLanguage)?.count || 0);
 }
@@ -911,7 +1321,9 @@ export function listArticlesMissingTranslation(field = "title", targetLanguage =
     FROM articles a
     LEFT JOIN translations t
       ON t.article_id = a.id AND t.target_language = ?
-    WHERE length(trim(coalesce(a.${sourceColumn}, ''))) > 0
+    WHERE is_non_research_title(a.title) = 0
+      AND length(trim(coalesce(a.${sourceColumn}, ''))) > 0
+      AND contains_chinese_text(a.${sourceColumn}) = 0
       AND length(trim(coalesce(t.${translatedColumn}, ''))) = 0
     ORDER BY COALESCE(a.first_seen_at, a.fetched_at) DESC, a.id DESC
     LIMIT ?
@@ -919,7 +1331,7 @@ export function listArticlesMissingTranslation(field = "title", targetLanguage =
 }
 
 export function getKeywordStats(filters = {}) {
-  const clauses = ["keywords IS NOT NULL", "keywords != ''"];
+  const clauses = ["keywords IS NOT NULL", "keywords != ''", "is_non_research_title(title) = 0"];
   const params = {};
 
   if (filters.journal) {
@@ -1195,6 +1607,7 @@ export function createUserAccount({ username, passwordHash, passwordSalt, regist
       VALUES (?, ?, ?, ?, ?)
     `).run(username, passwordHash, passwordSalt, registrationMarker, "user");
     const accountId = Number(result.lastInsertRowid);
+    ensureDefaultFavoriteGroup(`account:${accountId}`);
     db.exec("COMMIT");
     return getUserAccountById(accountId);
   } catch (error) {
@@ -1223,6 +1636,8 @@ export function deleteUserAccount(accountId) {
     db.prepare("DELETE FROM feedback_comment_likes WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM feedback_comments WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM feedback WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM user_favorites WHERE user_id = ?").run(userId);
+    db.prepare("DELETE FROM favorite_groups WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM user_interactions WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM user_journals WHERE user_id = ?").run(userId);
     db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(userId);
@@ -1239,18 +1654,75 @@ export function deleteUserAccount(accountId) {
 
 export function getAdminOverview() {
   const scalar = (sql) => Number(db.prepare(sql).get()?.count || 0);
-  const articleCount = scalar("SELECT COUNT(*) AS count FROM articles");
-  const abstractCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE length(trim(coalesce(abstract, ''))) > 0");
-  const keywordCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE length(trim(coalesce(keywords, ''))) > 0");
+  const articleCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0");
+  const abstractCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(abstract, ''))) > 0");
+  const keywordCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(keywords, ''))) > 0");
   const translationCount = scalar("SELECT COUNT(*) AS count FROM translations");
-  const translatedTitleCount = scalar("SELECT COUNT(*) AS count FROM translations WHERE length(trim(coalesce(title, ''))) > 0");
-  const translatedAbstractCount = scalar("SELECT COUNT(*) AS count FROM translations WHERE length(trim(coalesce(abstract, ''))) > 0");
+  const translatableTitleCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(title, ''))) > 0 AND contains_chinese_text(title) = 0");
+  const translatableAbstractCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(abstract, ''))) > 0 AND contains_chinese_text(abstract) = 0");
+  const translatedTitleCount = scalar(`
+    SELECT COUNT(*) AS count FROM articles a
+    JOIN translations t ON t.article_id = a.id AND t.target_language = 'zh'
+    WHERE length(trim(coalesce(a.title, ''))) > 0
+      AND contains_chinese_text(a.title) = 0
+      AND length(trim(coalesce(t.title, ''))) > 0
+  `);
+  const translatedAbstractCount = scalar(`
+    SELECT COUNT(*) AS count FROM articles a
+    JOIN translations t ON t.article_id = a.id AND t.target_language = 'zh'
+    WHERE length(trim(coalesce(a.abstract, ''))) > 0
+      AND contains_chinese_text(a.abstract) = 0
+      AND length(trim(coalesce(t.abstract, ''))) > 0
+  `);
   const pending = {
     abstracts: articleCount - abstractCount,
     keywords: articleCount - keywordCount,
     translatedTitles: countArticlesMissingTranslation("title", "zh"),
     translatedAbstracts: countArticlesMissingTranslation("abstract", "zh")
   };
+
+  // Keep the dashboard summary cheap to render while still giving the
+  // administrator an actionable list for every incomplete metric.  The
+  // conditions are allow-listed here because they are interpolated into SQL.
+  const coverageConditions = {
+    abstracts: "length(trim(coalesce(a.abstract, ''))) = 0",
+    keywords: "length(trim(coalesce(a.keywords, ''))) = 0",
+    translatedTitles: "length(trim(coalesce(a.title, ''))) > 0 AND contains_chinese_text(a.title) = 0 AND length(trim(coalesce(zh.title, ''))) = 0",
+    translatedAbstracts: "length(trim(coalesce(a.abstract, ''))) > 0 AND contains_chinese_text(a.abstract) = 0 AND length(trim(coalesce(zh.abstract, ''))) = 0"
+  };
+  const coverageArticleSelect = `
+    SELECT a.id, a.title, a.authors, a.journal, a.year, a.volume, a.issue,
+      a.doi, a.abstract, a.url, a.published_at, a.fetched_at, a.keywords,
+      zh.title AS translated_title,
+      zh.abstract AS translated_abstract
+    FROM articles a
+    LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
+  `;
+  const buildCoverageDetails = (condition) => {
+    const articles = db.prepare(`${coverageArticleSelect}
+      WHERE is_non_research_title(a.title) = 0 AND (${condition})
+      ORDER BY COALESCE(NULLIF(a.journal, ''), '未标记期刊') ASC,
+        COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
+    `).all();
+    const journals = new Map();
+    for (const article of articles) {
+      const journal = String(article.journal || "").trim() || "未标记期刊";
+      if (!journals.has(journal)) journals.set(journal, { journal, count: 0, articles: [] });
+      const group = journals.get(journal);
+      group.count += 1;
+      group.articles.push(article);
+    }
+    return {
+      missingCount: articles.length,
+      journals: [...journals.values()].sort((left, right) => (
+        right.count - left.count || left.journal.localeCompare(right.journal, "zh-CN")
+      ))
+    };
+  };
+  const coverageDetails = Object.fromEntries(
+    Object.entries(coverageConditions).map(([key, condition]) => [key, buildCoverageDetails(condition)])
+  );
+
   return {
     counts: {
       articles: articleCount,
@@ -1266,9 +1738,10 @@ export function getAdminOverview() {
     coverage: {
       abstracts: articleCount ? Math.round(abstractCount * 1000 / articleCount) / 10 : 0,
       keywords: articleCount ? Math.round(keywordCount * 1000 / articleCount) / 10 : 0,
-      translatedTitles: articleCount ? Math.round(translatedTitleCount * 1000 / articleCount) / 10 : 0,
-      translatedAbstracts: articleCount ? Math.round(translatedAbstractCount * 1000 / articleCount) / 10 : 0
+      translatedTitles: translatableTitleCount ? Math.round(translatedTitleCount * 1000 / translatableTitleCount) / 10 : 100,
+      translatedAbstracts: translatableAbstractCount ? Math.round(translatedAbstractCount * 1000 / translatableAbstractCount) / 10 : 100
     },
+    coverageDetails,
     pending,
     users: db.prepare(`
       SELECT a.id, a.username, a.role, a.created_at, a.updated_at,
@@ -1290,7 +1763,7 @@ export function getAdminOverview() {
         translated_title_count, translated_abstract_count, translation_unit_count, translation_request_count,
         remaining_abstract_count, remaining_keyword_count, remaining_translation_count,
         status, message
-      FROM refresh_runs ORDER BY id DESC LIMIT 8
+      FROM refresh_runs ORDER BY id DESC LIMIT 10
     `).all()
   };
 }

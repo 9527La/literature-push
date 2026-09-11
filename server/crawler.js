@@ -1,8 +1,13 @@
-import { config } from "./config.js";
-import { decodeEntities, stripTags, sleep } from "./utils.js";
-import { fetchElsevierArticleDetails } from "./elsevier.js";
+import { articlePlatform, PLATFORM_PROFILES } from "./publishers.js";
+import { config, DEFAULT_JOURNAL_BY_NAME } from "./config.js";
+import { decodeEntities, stripTags, sleep, readResponseText, isUsableMetadataText, safeExternalError } from "./utils.js";
+import { fetchElsevierArticleDetails, fetchScopusArticleDetails } from "./elsevier.js";
+import { fetchIeeeArticleDetails } from "./ieee.js";
+import { fetchWanfangArticleDetails } from "./wanfang.js";
+import { fetchSemanticScholarWebDetails } from "./semantic-scholar-web.js";
 
 const CROSSREF_API = "https://api.crossref.org/works";
+const OPENALEX_API = "https://api.openalex.org/works";
 const SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper";
 const DEFAULT_SEMANTIC_SCHOLAR_INTERVAL_MS = 1100;
 let semanticScholarQueue = Promise.resolve();
@@ -186,6 +191,37 @@ function reconstructOpenAlexAbstract(index) {
   return words.filter(Boolean).join(" ");
 }
 
+function normalizeOpenAlexDetail(item, fallbackDoi = "") {
+  const normalizedDoi = String(item?.doi || fallbackDoi || "")
+    .replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")
+    .trim();
+  const keywords = Array.isArray(item?.keywords)
+    ? item.keywords.map((keyword) => keyword?.display_name || keyword?.name || keyword).filter(Boolean).join("; ")
+    : "";
+  const conceptKeywords = Array.isArray(item?.concepts)
+    ? item.concepts
+      .filter((concept) => Number(concept?.score || 0) >= 0.35)
+      .map((concept) => concept?.display_name || concept?.name || "")
+      .filter(Boolean)
+      .join("; ")
+    : "";
+  return {
+    title: stripTags(item?.title || ""),
+    authors: Array.isArray(item?.authorships)
+      ? item.authorships.map((entry) => entry.author?.display_name).filter(Boolean).join(", ")
+      : "",
+    journal: stripTags(item?.primary_location?.source?.display_name || ""),
+    year: item?.publication_year || null,
+    volume: item?.biblio?.volume || "",
+    issue: item?.biblio?.issue || "",
+    doi: normalizedDoi,
+    abstract: reconstructOpenAlexAbstract(item?.abstract_inverted_index),
+    url: item?.primary_location?.landing_page_url || (normalizedDoi ? `https://doi.org/${normalizedDoi}` : item?.id || ""),
+    published_at: item?.publication_date || "",
+    keywords: keywords || conceptKeywords || item?.primary_topic?.display_name || ""
+  };
+}
+
 async function fetchOpenAlexDetails(doi) {
   const normalizedDoi = String(doi || "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim();
   if (!normalizedDoi) return {};
@@ -194,31 +230,43 @@ async function fetchOpenAlexDetails(doi) {
   });
   if (config.crossrefMailto) params.set("mailto", config.crossrefMailto);
   const item = await fetchJson(`https://api.openalex.org/works/${encodeURIComponent(`https://doi.org/${normalizedDoi}`)}?${params}`);
-  const keywords = Array.isArray(item.keywords)
-    ? item.keywords.map((keyword) => keyword?.display_name || keyword?.name || keyword).filter(Boolean).join("; ")
-    : "";
-  const conceptKeywords = Array.isArray(item.concepts)
-    ? item.concepts
-      .filter((concept) => Number(concept?.score || 0) >= 0.35)
-      .map((concept) => concept?.display_name || concept?.name || "")
-      .filter(Boolean)
-      .join("; ")
-    : "";
-  return {
-    title: stripTags(item.title || ""),
-    authors: Array.isArray(item.authorships)
-      ? item.authorships.map((entry) => entry.author?.display_name).filter(Boolean).join(", ")
-      : "",
-    journal: stripTags(item.primary_location?.source?.display_name || ""),
-    year: item.publication_year || null,
-    volume: item.biblio?.volume || "",
-    issue: item.biblio?.issue || "",
-    doi: normalizedDoi,
-    abstract: reconstructOpenAlexAbstract(item.abstract_inverted_index),
-    url: item.primary_location?.landing_page_url || `https://doi.org/${normalizedDoi}`,
-    published_at: item.publication_date || "",
-    keywords: keywords || conceptKeywords || item.primary_topic?.display_name || ""
-  };
+  return normalizeOpenAlexDetail(item, normalizedDoi);
+}
+
+function normalizeTitleForMatch(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s\p{P}\p{S}]+/gu, "");
+}
+
+function openAlexSourceMatchesJournal(item, journal) {
+  const expectedIssns = new Set((journal?.issns || []).map((issn) => String(issn).trim()).filter(Boolean));
+  if (!expectedIssns.size) return false;
+  const source = item?.primary_location?.source || {};
+  const actualIssns = Array.isArray(source.issn) ? source.issn : [source.issn_l, source.issn];
+  return actualIssns.some((issn) => expectedIssns.has(String(issn || "").trim()));
+}
+
+async function fetchOpenAlexDetailsByTitle(article) {
+  const journal = DEFAULT_JOURNAL_BY_NAME.get(String(article?.journal || "").trim());
+  const title = String(article?.title || "").trim();
+  if (!journal?.wanfangId || !title || !/[\u3400-\u9fff]/u.test(title)) return {};
+
+  const params = new URLSearchParams({
+    search: title,
+    "per-page": "10",
+    select: "id,doi,title,publication_year,publication_date,biblio,authorships,primary_location,abstract_inverted_index,keywords,concepts,primary_topic"
+  });
+  const issn = journal.issns?.[0];
+  if (issn) params.set("filter", `primary_location.source.issn:${issn},type:article`);
+  const data = await fetchJson(`${OPENALEX_API}?${params.toString()}`);
+  const expectedTitle = normalizeTitleForMatch(title);
+  const item = (data?.results || []).find((candidate) => (
+    openAlexSourceMatchesJournal(candidate, journal)
+    && normalizeTitleForMatch(candidate.title || candidate.display_name) === expectedTitle
+  ));
+  return item ? normalizeOpenAlexDetail(item) : {};
 }
 
 async function fetchJson(url, options = {}) {
@@ -338,7 +386,7 @@ function parseHtmlMetadata(html) {
 
   return {
     title: extractMetaContent(html, "citation_title") || extractMetaContent(html, "og:title"),
-    authors: "",
+    authors: extractMetaContentAll(html, "citation_author").join(", "),
     journal: extractMetaContent(html, "citation_journal_title"),
     year: Number(extractMetaContent(html, "citation_publication_date").slice(0, 4)) || null,
     volume: extractMetaContent(html, "citation_volume"),
@@ -386,7 +434,7 @@ function parseElsevierMetadata(html) {
     title: extractMetaContent(html, "citation_title") || extractMetaContent(html, "og:title") || extractMetaContent(html, "DC.title"),
     abstract: elsevierAbstract,
     keywords: [...new Set(elsevierKeywords)].join("; "),
-    authors: "",
+    authors: extractMetaContentAll(html, "citation_author").join(", "),
     doi: extractMetaContent(html, "citation_doi") || extractMetaContent(html, "prism:doi")
   };
 }
@@ -402,11 +450,11 @@ function mergeDetails(primary, fallback) {
 }
 
 function isElsevierArticle(article) {
-  const doi = String(article.doi || "").toLowerCase();
-  const url = String(article.url || "").toLowerCase();
-  return doi.includes("10.1016/") ||
-         url.includes("sciencedirect.com") ||
-         url.includes("elsevier.com");
+  return articlePlatform(article) === "elsevier";
+}
+
+function isWanfangArticle(article) {
+  return articlePlatform(article) === "wanfang";
 }
 
 function normalizeRequestedFields(fields) {
@@ -438,48 +486,43 @@ export async function crawlArticleDetails(article, options = {}) {
 
   const mergeSource = (candidate) => {
     if (!candidate || typeof candidate !== "object") return;
-    if (candidate.title || candidate.abstract || candidate.keywords) sourceFound = true;
-    details = mergeDetails(details, candidate);
+    const sanitized = { ...candidate };
+    for (const field of ["title", "authors", "journal", "abstract", "keywords"]) {
+      if (sanitized[field] && !isUsableMetadataText(sanitized[field])) sanitized[field] = "";
+    }
+    if (sanitized.title || sanitized.abstract || sanitized.keywords) sourceFound = true;
+    details = mergeDetails(details, sanitized);
   };
   const isComplete = () =>
     (!needsAbstract || String(details.abstract || "").trim().length > 0)
     && (!needsKeywords || String(details.keywords || "").trim().length > 0);
+  // A Wanfang detail response can discover a DOI that was not present in the
+  // RSS record.  Resolve the DOI lazily after every source merge so OpenAlex,
+  // Crossref, and Semantic Scholar can still act as fallbacks for that same
+  // article.
+  const getFallbackDoi = () => String(details.doi || article.doi || "").trim();
 
-  // Query independent DOI-level sources until both missing fields are filled.
-  // Previously OpenAlex returned as soon as it supplied *either* keywords or
-  // an abstract, so a partial response permanently hid the next fallback.
-  if (config.elsevierApiKey && isElsevierArticle(article) && article.doi) {
+  const sourceErrors = [];
+  const adapters = {
+    ieee: () => getFallbackDoi() ? fetchIeeeArticleDetails(getFallbackDoi()) : null,
+    scopus: () => getFallbackDoi() ? fetchScopusArticleDetails(getFallbackDoi()) : null,
+    elsevier: () => config.elsevierApiKey && getFallbackDoi() ? fetchElsevierArticleDetails(getFallbackDoi()) : null,
+    wanfang: () => fetchWanfangArticleDetails(article),
+    openalexTitle: () => !getFallbackDoi() ? fetchOpenAlexDetailsByTitle(details) : null,
+    openalex: () => getFallbackDoi() ? fetchOpenAlexDetails(getFallbackDoi()) : null,
+    crossref: () => getFallbackDoi() ? fetchCrossrefDetails(getFallbackDoi()) : null,
+    semanticScholar: () => getFallbackDoi() ? fetchSemanticScholarDetails(getFallbackDoi()) : null,
+    semanticScholarWeb: () => needsAbstract ? fetchSemanticScholarWebDetails(details) : null
+  };
+  for (const source of PLATFORM_PROFILES[articlePlatform(article)].details) {
+    if (source === "html" || isComplete()) break;
     try {
-      const elsevierDetails = await fetchElsevierArticleDetails(article.doi);
-      mergeSource(elsevierDetails);
-    } catch {
-      // Continue with the public DOI sources.
+      mergeSource(await adapters[source]());
+    } catch (error) {
+      sourceErrors.push({ source, message: safeExternalError(error) });
     }
   }
-
-  if (article.doi && !isComplete()) {
-    try {
-      mergeSource(await fetchOpenAlexDetails(article.doi));
-    } catch {
-      // Continue with the next public DOI source.
-    }
-  }
-
-  if (article.doi && !isComplete()) {
-    try {
-      mergeSource(await fetchCrossrefDetails(article.doi));
-    } catch {
-      // Crossref may not expose an abstract for every publisher.
-    }
-  }
-
-  if (article.doi && !isComplete()) {
-    try {
-      mergeSource(await fetchSemanticScholarDetails(article.doi));
-    } catch {
-      // Semantic Scholar is best-effort and can rate-limit anonymous calls.
-    }
-  }
+  if (typeof options.onDiagnostics === "function") options.onDiagnostics(sourceErrors);
 
   if (isComplete()) return details;
 
@@ -497,7 +540,8 @@ export async function crawlArticleDetails(article, options = {}) {
       }
     });
 
-    const html = await response.text();
+    if (response.ok === false) throw new Error(`Publisher returned ${response.status}`);
+    const html = await readResponseText(response);
     
     // Check if this is a linkinghub redirect page (Elsevier)
     const finalUrl = response.url || target;
@@ -520,7 +564,8 @@ export async function crawlArticleDetails(article, options = {}) {
             }
           });
           
-          const finalHtml = await finalResponse.text();
+          if (finalResponse.ok === false) throw new Error(`Publisher returned ${finalResponse.status}`);
+          const finalHtml = await readResponseText(finalResponse);
           mergeSource(mergeDetails(
             mergeDetails(parseIeeeMetadata(finalHtml), parseHtmlMetadata(finalHtml)),
             parseElsevierMetadata(finalHtml)
@@ -557,6 +602,8 @@ export async function crawlArticleDetails(article, options = {}) {
     // publisher page itself is unavailable. Callers can save the usable
     // portion and report only the field(s) that are still missing.
     if (!error.details) error.details = details;
+    error.message = safeExternalError(error, "\u516c\u5f00\u6765\u6e90\u672a\u8fd4\u56de\u53ef\u7528\u7684\u6458\u8981\u6216\u5173\u952e\u8bcd");
+    error.sourceErrors = sourceErrors;
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -571,11 +618,14 @@ export const internals = {
   extractMetaContent,
   extractMetaContentAll,
   fetchOpenAlexDetails,
+  fetchOpenAlexDetailsByTitle,
   fetchCrossrefDetails,
   fetchSemanticScholarDetails,
+  fetchSemanticScholarWebDetails,
   mergeDetails,
   normalizeRequestedFields,
   missingRequestedFields,
   normalizePublicationDate,
-  isElsevierArticle
+  isElsevierArticle,
+  isWanfangArticle
 };

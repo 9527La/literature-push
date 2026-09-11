@@ -62,19 +62,22 @@ export async function enrichAllMissingMetadata({
 
   async function runStage(stage, fn, gapKey) {
     let stalled = 0;
+    const attempted = new Set();
     for (let round = 1; round <= roundLimit && toCount(gaps[gapKey]) > 0; round += 1) {
       const before = toCount(gaps[gapKey]);
-      const result = await fn();
+      const result = await fn({ excludeIds: [...attempted] });
+      const newIds = (result?.attemptedIds || []).filter((id) => !attempted.has(id));
+      for (const id of newIds) attempted.add(id);
       summary.rounds += 1;
       mergeResult(summary, result, stage);
       gaps = { ...getGaps() };
       const after = toCount(gaps[gapKey]);
-      if (after >= before) stalled += 1;
+      if (after >= before && !newIds.length) stalled += 1;
       else stalled = 0;
       if (typeof onProgress === "function") {
         await onProgress({ stage, round, result, gaps: { ...gaps }, summary: { ...summary } });
       }
-      if (stalled >= stalledLimit) break;
+      if (result?.processed === 0 || stalled >= stalledLimit) break;
     }
   }
 

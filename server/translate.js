@@ -1,6 +1,6 @@
 import { config } from "./config.js";
 import crypto from "node:crypto";
-import { sleep } from "./utils.js";
+import { containsChineseText, sleep } from "./utils.js";
 
 const TRANSLATION_TIMEOUT_MS = 30_000;
 const TRANSLATION_RETRY_LIMIT = 1;
@@ -24,6 +24,17 @@ const providerLastRequestAt = new Map();
 
 function hasText(value) {
   return String(value || "").trim().length > 0;
+}
+
+function isChineseSource(value) {
+  const text = String(value || "").trim();
+  return Boolean(text) && containsChineseText(text);
+}
+
+function normalizeChineseTargetLanguage(targetLanguage) {
+  const value = String(targetLanguage || "zh").trim().toLowerCase();
+  if (value !== "zh" && value !== "zh-cn") throw new Error("当前仅支持英文翻译为中文");
+  return "zh";
 }
 
 function encodeRFC3986(value) {
@@ -682,12 +693,14 @@ async function translateChunkUnitsWithProvider(units, targetLanguage, provider) 
  * overwriting an already cached title or abstract.
  */
 export async function translateArticles(articles, targetLanguage = "zh", fields = TRANSLATABLE_FIELDS) {
+  targetLanguage = normalizeChineseTargetLanguage(targetLanguage);
   const requestedFields = normalizeFields(fields);
   const logicalUnits = [];
   for (const [index, article] of (Array.isArray(articles) ? articles : []).entries()) {
     const articleId = article?.id ?? `item-${index}`;
     for (const field of requestedFields) {
       if (!hasText(article?.[field])) continue;
+      if (isChineseSource(article[field])) continue;
       logicalUnits.push({
         key: `${articleId}:${field}`,
         articleId,
@@ -766,7 +779,7 @@ async function translateWithProvider(article, targetLanguage, provider, fields =
         : translateLibreText;
   const result = { title: "", abstract: "", provider };
   const errors = [];
-  const requested = normalizeFields(fields).filter((field) => hasText(article[field]));
+  const requested = normalizeFields(fields).filter((field) => hasText(article[field]) && !isChineseSource(article[field]));
   for (const [index, field] of requested.entries()) {
     try {
       const translated = await translateText(article[field], targetLanguage);
@@ -787,7 +800,8 @@ async function translateWithProvider(article, targetLanguage, provider, fields =
 }
 
 export async function translateArticle(article, targetLanguage, fields = TRANSLATABLE_FIELDS) {
-  const requested = normalizeFields(fields).filter((field) => hasText(article?.[field]));
+  targetLanguage = normalizeChineseTargetLanguage(targetLanguage);
+  const requested = normalizeFields(fields).filter((field) => hasText(article?.[field]) && !isChineseSource(article[field]));
   if (!requested.length) throw new Error("没有可翻译的标题或摘要");
   const input = { ...(article || {}), id: article?.id ?? "single" };
   const batch = await translateArticles([input], targetLanguage, requested);

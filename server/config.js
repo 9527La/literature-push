@@ -1,53 +1,5 @@
 import "dotenv/config";
-import { ELECTRICAL_FILTER_KEYWORDS } from "./utils.js";
-
-export const DEFAULT_JOURNALS = [
-  {
-    name: "IEEE Transactions on Power Systems",
-    issns: ["0885-8950", "1558-0679"]
-  },
-  {
-    name: "IEEE Transactions on Smart Grid",
-    issns: ["1949-3053", "1949-3061"]
-  },
-  {
-    name: "IEEE Transactions on Power Delivery",
-    issns: ["0885-8977", "1937-4208"]
-  },
-  {
-    name: "IEEE Transactions on Sustainable Energy",
-    issns: ["1949-3029", "1949-3037"]
-  },
-  {
-    name: "IEEE Transactions on Energy Conversion",
-    issns: ["0885-8969", "1558-0059"]
-  },
-  {
-    name: "Applied Energy",
-    issns: ["0306-2619", "1872-9118"],
-    filterKeywords: ELECTRICAL_FILTER_KEYWORDS
-  },
-  {
-    name: "Energy",
-    issns: ["0360-5442", "1751-4223", "1751-4231"],
-    filterKeywords: ELECTRICAL_FILTER_KEYWORDS
-  },
-  {
-    name: "International Journal of Electrical Power & Energy Systems",
-    issns: ["0142-0615", "1879-3517"]
-  },
-  {
-    name: "Renewable Energy",
-    issns: ["0960-1481", "1879-0682"],
-    filterKeywords: ELECTRICAL_FILTER_KEYWORDS
-  },
-  {
-    name: "Journal of Modern Power Systems and Clean Energy",
-    issns: ["2196-5420", "2196-5625"]
-  }
-];
-
-export const DEFAULT_JOURNAL_BY_NAME = new Map(DEFAULT_JOURNALS.map((journal) => [journal.name, journal]));
+export { DEFAULT_JOURNALS, DEFAULT_JOURNAL_BY_NAME } from "./journals.js";
 
 export const config = {
   port: Number(process.env.PORT || 4177),
@@ -73,6 +25,12 @@ export const config = {
   crawlerEnabled: String(process.env.CRAWLER_ENABLED || "true").toLowerCase() === "true",
   crawlerTimeoutMs: Number(process.env.CRAWLER_TIMEOUT_MS || 12000),
   semanticScholarRequestIntervalMs: Number(process.env.SEMANTIC_SCHOLAR_REQUEST_INTERVAL_MS || 1100),
+  // Last-resort browser crawler. It is serialized and deliberately slow so it
+  // does not burst against Semantic Scholar when DOI APIs and publisher pages fail.
+  semanticScholarWebFallbackEnabled: String(process.env.SEMANTIC_SCHOLAR_WEB_FALLBACK_ENABLED || "true").toLowerCase() === "true",
+  semanticScholarWebRequestIntervalMs: Number(process.env.SEMANTIC_SCHOLAR_WEB_REQUEST_INTERVAL_MS || 12000),
+  semanticScholarWebTimeoutMs: Number(process.env.SEMANTIC_SCHOLAR_WEB_TIMEOUT_MS || 30000),
+  semanticScholarBrowserExecutable: process.env.SEMANTIC_SCHOLAR_BROWSER_EXECUTABLE || "",
   translationProvider: String(process.env.TRANSLATION_PROVIDER || "auto").trim().toLowerCase(),
   volcengineAccessKeyId: process.env.VOLCENGINE_ACCESS_KEY_ID || "",
   volcengineSecretAccessKey: process.env.VOLCENGINE_SECRET_ACCESS_KEY || "",
@@ -93,14 +51,16 @@ export const config = {
   // permits a higher rate.
   baiduTranslateRequestIntervalMs: Number(process.env.BAIDU_TRANSLATE_REQUEST_INTERVAL_MS || 125),
   refreshCron: process.env.REFRESH_CRON || "0 8 * * *",
+  collectionMaxRecords: Math.max(1, Math.min(10000, Number(process.env.COLLECTION_MAX_RECORDS || 1000))),
   lookbackDays: Number(process.env.LOOKBACK_DAYS || 45),
   
   // Legacy weekly digest settings (kept for backward compatibility)
   weeklyDigestCron: process.env.WEEKLY_DIGEST_CRON || process.env.MAIL_WEEKLY_CRON || "0 8 * * 1",
   weeklyDigestDays: Number(process.env.WEEKLY_DIGEST_DAYS || process.env.MAIL_WEEKLY_DAYS || 7),
   weeklyDigestLimit: Number(process.env.WEEKLY_DIGEST_LIMIT || process.env.MAIL_WEEKLY_LIMIT || 0),
-  weeklyDigestTranslationLanguage:
-    process.env.WEEKLY_DIGEST_TRANSLATION_LANGUAGE || process.env.MAIL_TRANSLATION_LANGUAGE || "zh",
+  // Translation is intentionally one-way: English source text -> Chinese.
+  // Ignore legacy environment overrides that requested English output.
+  weeklyDigestTranslationLanguage: "zh",
   weeklyDigestDir: process.env.WEEKLY_DIGEST_DIR || "data/digests",
   weeklyDigestTranslateMissingLimit: Number(process.env.WEEKLY_DIGEST_TRANSLATE_MISSING_LIMIT || 20),
   weeklyDigestEnrichMissingLimit: Number(process.env.WEEKLY_DIGEST_ENRICH_MISSING_LIMIT || 50),

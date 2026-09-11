@@ -136,8 +136,15 @@ export function createArticlePreparationService(dependencies, options = {}) {
     const stageErrors = [];
 
     if (needsAbstract || needsKeywords) {
+      const missingFields = [
+        needsAbstract ? "abstract" : "",
+        needsKeywords ? "keywords" : ""
+      ].filter(Boolean);
       try {
-        article = updateArticleDetails(id, await crawlArticleDetails(article));
+        // Ask the crawler only for the fields that are actually missing. This
+        // avoids re-fetching an already cached abstract when a page only lacks
+        // keywords (and keeps the UI from reporting a false abstract error).
+        article = updateArticleDetails(id, await crawlArticleDetails(article, { fields: missingFields }));
       } catch (error) {
         if (error.details) {
           article = updateArticleDetails(id, error.details) || article;

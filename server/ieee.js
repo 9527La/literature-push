@@ -1,3 +1,4 @@
+import { requestJson, collectionLimits } from "./http.js";
 import { config } from "./config.js";
 
 const API_URL = "https://ieeexploreapi.ieee.org/api/v1/search/articles";
@@ -75,10 +76,11 @@ export async function fetchJournalArticles(journal, options = {}) {
   const start = new Date(end);
   start.setDate(start.getDate() - lookbackDays);
 
+  const { maxRecords, pageSize, maxPages } = collectionLimits(options);
   const params = new URLSearchParams({
     apikey: config.ieeeApiKey,
     format: "json",
-    max_records: String(options.maxRecords || 50),
+    max_records: String(pageSize),
     start_record: "1",
     sort_order: "desc",
     sort_field: "article_number",
@@ -87,11 +89,23 @@ export async function fetchJournalArticles(journal, options = {}) {
     end_date: formatDate(end)
   });
 
-  const response = await fetch(`${API_URL}?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`IEEE API returned ${response.status}`);
+  const records = [];
+  for (let page = 0; page < maxPages; page += 1) {
+    params.set("start_record", String(page * pageSize + 1));
+    const data = await requestJson(`${API_URL}?${params}`);
+    const batch = data.articles || [];
+    records.push(...batch.map((article) => normalizeArticle(article, journal)));
+    if (records.length >= maxRecords || batch.length < pageSize) break;
   }
+  return records.slice(0, maxRecords);
+}
 
-  const data = await response.json();
-  return (data.articles || []).map((article) => normalizeArticle(article, journal));
+export async function fetchIeeeArticleDetails(doi) {
+  if (!config.ieeeApiKey) throw new Error("IEEE_API_KEY is not configured");
+  const normalizedDoi = String(doi || "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim();
+  if (!normalizedDoi) return {};
+  const params = new URLSearchParams({ apikey: config.ieeeApiKey, format: "json", max_records: "10", start_record: "1", doi: normalizedDoi });
+  const data = await requestJson(`${API_URL}?${params}`);
+  const exact = (data.articles || []).find((item) => String(item.doi || "").toLowerCase() === normalizedDoi.toLowerCase());
+  return exact ? normalizeArticle(exact, "") : {};
 }

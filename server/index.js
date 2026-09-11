@@ -1,4 +1,5 @@
 import express from "express";
+import compression from "compression";
 import cors from "cors";
 import crypto from "node:crypto";
 import os from "node:os";
@@ -11,10 +12,12 @@ import {
   getUserSettings,
   updateUserSettings,
   getArticle,
+  getArticleForUser,
   getStatus,
   getKeywordStats,
   getKeywordCooccurrence,
   listArticles,
+  listArticlePage,
   setArticleRead,
   toggleArticleFavorite,
   setArticleReadForUser,
@@ -35,6 +38,14 @@ import {
   touchUserSession,
   revokeUserSession,
   deleteUserAccount,
+  getUserFavorites,
+  listFavoriteGroups,
+  createFavoriteGroup,
+  renameFavoriteGroup,
+  deleteFavoriteGroup,
+  updateUserFavorite,
+  getDefaultFavoriteGroupId,
+  setDefaultFavoriteGroupId,
   getAdminOverview,
   getMetadataGaps,
   countArticlesMissingTranslation,
@@ -84,6 +95,7 @@ app.set("trust proxy", "loopback");
 
 app.use(cors({ origin: config.clientOrigin }));
 app.use(express.json());
+app.use(compression({ threshold: 1024 }));
 
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const pagePrepareConcurrency = config.translationProvider === "baidu"
@@ -114,7 +126,8 @@ app.use("/api", (req, res, next) => {
 
 app.get("/api/articles", (req, res) => {
   const userId = getPrincipalId(req);
-  res.json(listArticles(req.query, userId));
+  const paged = req.query.limit !== undefined || req.query.offset !== undefined;
+  res.json(paged ? listArticlePage(req.query, userId) : listArticles(req.query, userId));
 });
 
 app.post("/api/articles/prepare", (req, res) => {
@@ -134,6 +147,15 @@ app.get("/api/articles/prepare/:jobId", (req, res) => {
   res.json(job);
 });
 
+app.get("/api/articles/:id", (req, res) => {
+  const article = getArticleForUser(req.params.id, getPrincipalId(req));
+  if (!article) {
+    res.status(404).json({ error: "Article not found" });
+    return;
+  }
+  res.json(article);
+});
+
 app.post("/api/articles/:id/read", requireAccount, (req, res) => {
   const userId = getPrincipalId(req);
   const isRead = setArticleReadForUser(userId, Number(req.params.id));
@@ -142,12 +164,88 @@ app.post("/api/articles/:id/read", requireAccount, (req, res) => {
 
 app.post("/api/articles/:id/favorite", requireAccount, (req, res) => {
   const userId = getPrincipalId(req);
-  const article = toggleArticleFavoriteForUser(userId, Number(req.params.id));
-  if (!article) {
-    res.status(404).json({ error: "Article not found" });
-    return;
+  try {
+    const article = toggleArticleFavoriteForUser(userId, Number(req.params.id), {
+      groupId: req.body?.groupId,
+      setDefault: Boolean(req.body?.setDefault)
+    });
+    if (!article) {
+      res.status(404).json({ error: "Article not found" });
+      return;
+    }
+    res.json(article);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
   }
-  res.json(article);
+});
+
+app.get("/api/favorites/options", requireAccount, (req, res) => {
+  const userId = getPrincipalId(req);
+  res.json({ groups: listFavoriteGroups(userId), defaultGroupId: getDefaultFavoriteGroupId(userId) });
+});
+
+app.put("/api/favorites/default-group", requireAccount, (req, res) => {
+  try {
+    const defaultGroupId = setDefaultFavoriteGroupId(getPrincipalId(req), req.body?.groupId);
+    res.json({ defaultGroupId });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.get("/api/favorites", requireAccount, (req, res) => {
+  const group = req.query.group;
+  res.json(getUserFavorites(getPrincipalId(req), group || "all"));
+});
+
+app.post("/api/favorites/groups", requireAccount, (req, res) => {
+  try {
+    const group = createFavoriteGroup(getPrincipalId(req), req.body?.name);
+    res.status(201).json(group);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.patch("/api/favorites/groups/:id", requireAccount, (req, res) => {
+  try {
+    const group = renameFavoriteGroup(getPrincipalId(req), req.params.id, req.body?.name);
+    if (!group) {
+      res.status(404).json({ error: "收藏分组不存在" });
+      return;
+    }
+    res.json(group);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.delete("/api/favorites/groups/:id", requireAccount, (req, res) => {
+  try {
+    if (!deleteFavoriteGroup(getPrincipalId(req), req.params.id)) {
+      res.status(404).json({ error: "收藏分组不存在" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+app.put("/api/favorites/:articleId", requireAccount, (req, res) => {
+  try {
+    const favorite = updateUserFavorite(getPrincipalId(req), req.params.articleId, {
+      groupId: req.body?.groupId,
+      note: req.body?.note
+    });
+    if (!favorite) {
+      res.status(404).json({ error: "该文献尚未收藏" });
+      return;
+    }
+    res.json(favorite);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 app.get("/api/articles/:id/enrich", async (req, res) => {
@@ -157,34 +255,46 @@ app.get("/api/articles/:id/enrich", async (req, res) => {
     return;
   }
 
-  // Return early if both abstract and keywords are already present
-  if (article.abstract && article.keywords) {
-    res.json(article);
+  const requestedFields = String(req.query.fields || "abstract,keywords")
+    .split(",")
+    .map((field) => field.trim().toLowerCase())
+    .filter((field) => field === "abstract" || field === "keywords");
+  const missingFields = [...new Set(requestedFields.length ? requestedFields : ["abstract", "keywords"])]
+    .filter((field) => !String(article[field] || "").trim());
+
+  // Return early when the requested metadata is already cached. In
+  // particular, an existing abstract must not trigger another crawler call
+  // just because keywords are still missing.
+  if (!missingFields.length) {
+    res.json(getArticleForUser(req.params.id, getPrincipalId(req)));
     return;
   }
 
   try {
-    const details = await crawlArticleDetails(article);
-    res.json(updateArticleDetails(req.params.id, details));
+    const details = await crawlArticleDetails(article, { fields: missingFields });
+    updateArticleDetails(req.params.id, details);
+    res.json(getArticleForUser(req.params.id, getPrincipalId(req)));
   } catch (error) {
     const partial = error.details ? updateArticleDetails(req.params.id, error.details) : article;
-    const hasPartialMetadata = ["abstract", "keywords"].some((field) =>
+    const responseArticle = getArticleForUser(req.params.id, getPrincipalId(req)) || partial;
+    const hasPartialMetadata = missingFields.some((field) =>
       String(partial?.[field] || "").trim() && !String(article?.[field] || "").trim()
     );
     if (hasPartialMetadata) {
-      res.json({ ...partial, enrichment_error: error.message });
+      res.json({ ...responseArticle, enrichment_error: error.message });
       return;
     }
-    res.status(502).json({ error: error.message, article: partial });
+    res.status(502).json({ error: error.message, article: responseArticle });
   }
 });
 
 app.post("/api/articles/:id/translate", async (req, res) => {
-  const targetLanguage = req.body?.targetLanguage || "zh";
-  if (!["zh", "en"].includes(targetLanguage)) {
-    res.status(400).json({ error: "targetLanguage must be zh or en" });
+  const requestedTarget = String(req.body?.targetLanguage || "zh").trim().toLowerCase();
+  if (requestedTarget !== "zh" && requestedTarget !== "zh-cn") {
+    res.status(400).json({ error: "当前仅支持英文翻译为中文" });
     return;
   }
+  const targetLanguage = "zh";
 
   const article = getArticle(req.params.id);
   if (!article) {
@@ -968,16 +1078,26 @@ app.delete("/api/admin/feedback/comments/:id", requireSiteAdmin, (req, res) => {
 });
 
 app.get("/version.json", (req, res) => {
+  res.setHeader("Cache-Control", "no-cache");
   res.sendFile(path.resolve(__dirname, "../version.json"));
 });
 
 const distPath = path.resolve(__dirname, "../dist");
-app.use(express.static(distPath));
+app.use(express.static(distPath, {
+  maxAge: "1y",
+  immutable: true,
+  setHeaders(res, filePath) {
+    if (filePath.endsWith("index.html") || filePath.endsWith("version.json")) {
+      res.setHeader("Cache-Control", "no-cache");
+    }
+  }
+}));
 app.use((req, res, next) => {
   if (req.path.startsWith("/api")) {
     next();
     return;
   }
+  res.setHeader("Cache-Control", "no-cache");
   res.sendFile(path.join(distPath, "index.html"));
 });
 

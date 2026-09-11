@@ -51,6 +51,26 @@ test("batch preparation enriches articles and returns complete Chinese translati
   assert.equal(completed.results.find((item) => item.id === 2)?.translated_abstract, "译文 Existing abstract");
 });
 
+test("page preparation requests only metadata fields that are missing", async () => {
+  const article = { id: 8, title: "Cached abstract", abstract: "Already cached", keywords: "" };
+  let requestedFields = null;
+  const service = createArticlePreparationService({
+    getArticle: () => article,
+    updateArticleDetails: (_id, details) => Object.assign(article, details),
+    crawlArticleDetails: async (_article, options) => {
+      requestedFields = options?.fields;
+      return { keywords: "grid" };
+    },
+    ensureTranslation: async () => ({ translated: false, translation: null })
+  });
+
+  const completed = await waitForCompletion(service, service.start([8]).jobId);
+  assert.deepEqual(requestedFields, ["keywords"]);
+  assert.equal(completed.failed, 0);
+  assert.equal(article.abstract, "Already cached");
+  assert.equal(article.keywords, "grid");
+});
+
 test("batch preparation preserves usable results when one stage fails", async () => {
   const article = { id: 3, title: "Title only", abstract: "", keywords: "" };
   const service = createArticlePreparationService({
