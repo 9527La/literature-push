@@ -121,6 +121,13 @@ function UpdateModal({ versionInfo, onClose }) {
   );
 }
 
+// 通行证经常被从聊天窗口整段粘过来，或用全角输入法敲进来。
+// 服务端是逐字符严格比对（safeEqualText），首尾空格、换行、全角字符都会判为错误，
+// 所以提交前统一做一次归一化：NFKC 把全角折成半角，再去掉首尾空白。
+function normalizePassport(value) {
+  return String(value || "").normalize("NFKC").trim();
+}
+
 function LoginGate({ onAuthenticate }) {
   const [passport, setPassport] = useState("");
   const [message, setMessage] = useState("");
@@ -131,7 +138,7 @@ function LoginGate({ onAuthenticate }) {
     setSubmitting(true);
     setMessage("");
     try {
-      await onAuthenticate(passport);
+      await onAuthenticate(normalizePassport(passport));
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -149,10 +156,10 @@ function LoginGate({ onAuthenticate }) {
         <InternalUseNotice className="login-use-notice" />
         <form className="auth-form login-form" onSubmit={submit} onInput={() => setMessage("")}>
           <label><span>网页通行证</span><input type="password" value={passport} autoComplete="current-password" maxLength={128} onChange={(event) => setPassport(event.target.value)} required autoFocus /></label>
-          <button className="primary" disabled={submitting || !passport}>{submitting ? "正在验证" : "进入网页"}</button>
+          <button className="primary" disabled={submitting || !normalizePassport(passport)}>{submitting ? "正在验证" : "进入网页"}</button>
           {message && <div className="inline-msg login-error" role="alert">{message}</div>}
         </form>
-        <small>管理员通行证可进入管理中心；全站最多允许 20 个不同 IP 同时登录个人账户。</small>
+        <small>通行证区分大小写（首尾空格会被自动忽略）；管理员通行证可进入管理中心。全站最多允许 20 个不同 IP 同时登录个人账户。</small>
       </section>
     </main>
   );
