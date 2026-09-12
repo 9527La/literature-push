@@ -1,8 +1,10 @@
 import { memo } from "react";
 import { Check, FileText, Globe, Heart, Languages, Star } from "lucide-react";
 import Highlight from "./Highlight.jsx";
+import TopicIcon from "./TopicIcon.jsx";
 import { formatDate, formatRelativeDate, isChineseJournalArticle } from "../lib/format.js";
 import { findJournal, journalAbbr, journalGroup } from "../lib/journal.js";
+import { articleTopic, topicLabel } from "../lib/topics.js";
 
 /** Cards show the three strongest keywords; the rest collapse into "+N". */
 const KEYWORD_PREVIEW_LIMIT = 3;
@@ -36,6 +38,7 @@ function ArticleCard({
     .map((keyword) => keyword.trim())
     .filter(Boolean);
   const hiddenKeywordCount = Math.max(0, keywords.length - KEYWORD_PREVIEW_LIMIT);
+  const topic = articleTopic(keywords);
 
   return (
     <article className={`article ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}${isCursor ? " is-cursor" : ""}${selected ? " is-selected" : ""}${selectable ? " has-select" : ""}`}>
@@ -76,6 +79,13 @@ function ArticleCard({
         {displayPreferences.authors && article.authors && <p className="authors"><Highlight text={article.authors} terms={highlightTerms} /></p>}
         {displayPreferences.keywords && keywords.length > 0 && (
           <div className="keywords">
+            {/* A second reading axis next to the publisher colour: which research
+                area this paper belongs to, before any keyword is read. */}
+            {topic && (
+              <span className="keyword-topic" title={`研究主题：${topicLabel(topic)}`}>
+                <TopicIcon topic={topic} size={15} />
+              </span>
+            )}
             {keywords.slice(0, KEYWORD_PREVIEW_LIMIT).map((keyword, index) => (
               <button
                 type="button"

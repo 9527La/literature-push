@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownUp, Check, ChevronDown, Download, Eye, EyeOff, Filter, Inbox, Keyboard, RefreshCw, Search, SearchX, Star, X } from "lucide-react";
+import { ArrowDownUp, Check, ChevronDown, Download, Eye, EyeOff, Filter, Keyboard, RefreshCw, Search, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { ARTICLE_PAGE_SIZE, DEFAULT_FILTERS } from "../../lib/constants.js";
 import { downloadTextFile, toBibtex, toRis } from "../../lib/export.js";
@@ -7,6 +7,7 @@ import { isChineseJournalArticle, isChineseSourceText } from "../../lib/format.j
 import { groupJournals, journalAbbr } from "../../lib/journal.js";
 import ArticleCard from "../../components/ArticleCard.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
+import FeedHero from "../../components/FeedHero.jsx";
 import useListShortcuts from "../../hooks/useListShortcuts.js";
 import ArticleDialog from "./ArticleDialog.jsx";
 
@@ -617,6 +618,8 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           </div>
         )}
 
+        <FeedHero articles={sortedArticles} />
+
         <div className="article-count" role="status" aria-live="polite">
           共 <strong>{sortedArticles.length}</strong> 篇文献
           {counts.read > 0 && <>，已读 <strong>{counts.read}</strong> 篇</>}
@@ -647,14 +650,14 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           {sortedArticles.length === 0 ? (
             activeFilterCount > 0 ? (
               <EmptyState
-                icon={SearchX}
+                art="search"
                 title="没有符合当前条件的文献"
                 description="期刊、关键词、时间范围、未读与收藏筛选的组合没有命中任何记录。清空条件即可回到完整列表。"
                 action={<button className="secondary" type="button" onClick={() => setFilters({ ...DEFAULT_FILTERS })}>清除全部筛选条件</button>}
               />
             ) : (
               <EmptyState
-                icon={Inbox}
+                art="inbox"
                 title="还没有文献数据"
                 description="数据库中暂时没有可显示的文献，可以立即从公开数据源刷新获取。"
                 action={onRefresh ? (

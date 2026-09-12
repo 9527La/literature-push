@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import EmptyState from "../../components/EmptyState.jsx";
 
 const MIN_SIZE = 12;
@@ -27,7 +27,7 @@ function WordCloud({ keywords, maxCount, onSelect, selectedKeyword }) {
   if (!keywords || keywords.length === 0) {
     return (
       <EmptyState
-        icon={Search}
+        art="keywords"
         title="没有关键词数据"
         description="所选期刊与时间范围内还没有可统计的关键词。放宽条件后再试一次。"
       />

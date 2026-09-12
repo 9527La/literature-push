@@ -547,6 +547,24 @@ test("adds the generated Markdown file as a digest attachment", () => {
   assert.deepEqual(message.attachments, [{ filename: "report.md", path: "data/digests/report.md" }]);
 });
 
+test("digest email renders a branded HTML brief instead of a raw text block", () => {
+  const message = mailInternals.buildDigestMailOptions("", {
+    recipients: ["reader@example.com"],
+    subject: "电力文献周报 2026-09-06 至 2026-09-12",
+    attachFile: false,
+    bodyMarkdown: "# 电力文献周报\n\n- 文献数量：3\n\n## 1. A title\n\n**作者**：Ada Chen\n\n---\n\n## 2. Another title\n"
+  });
+  // The plain-text alternative must stay intact for text-only clients.
+  assert.match(message.text, /^# 电力文献周报/);
+  assert.ok(!message.html.includes("<pre"), "email should no longer be a monospace blob");
+  assert.ok(message.html.includes("电力文献"), "brand name should be present");
+  assert.match(message.html, /background:#3157d5/, "brand accent should be inlined");
+  assert.match(message.html, /<h1 [^>]*>电力文献周报<\/h1>/, "markdown headings should become real headings");
+  assert.match(message.html, /<li [^>]*>文献数量：3<\/li>/, "bullets should become list items");
+  assert.match(message.html, /<strong style="color:#171b24">作者<\/strong>/, "bold should survive escaping");
+  assert.match(message.html, /<hr /, "rules should become dividers");
+});
+
 import { fetchIeeeArticleDetails } from "./ieee.js";
 import { isNonResearchTitle, isUsableMetadataText, safeExternalError } from "./utils.js";
 

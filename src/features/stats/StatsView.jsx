@@ -157,7 +157,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
               ) : (
                 filteredKeywords.length === 0 ? (
                   <EmptyState
-                    icon={Search}
+                    art="keywords"
                     title="所选条件下没有关键词"
                     description="换一个期刊或放宽时间范围，通常会带回可统计的关键词。"
                   />

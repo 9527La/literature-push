@@ -5,7 +5,6 @@ import {
   ArrowDownUp,
   BarChart3,
   Bell,
-  BookOpen,
   Check,
   CloudDownload,
   CloudUpload,
@@ -43,6 +42,7 @@ import {
 } from "lucide-react";
 import "./fonts.css";
 import "./styles.css";
+import BrandMark from "./components/BrandMark.jsx";
 import Modal from "./components/Modal.jsx";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import InternalUseNotice from "./components/InternalUseNotice.jsx";
@@ -147,7 +147,7 @@ function LoginGate({ onAuthenticate }) {
   return (
     <main className="login-shell">
       <section className="login-panel" aria-labelledby="login-title">
-        <div className="login-brand"><BookOpen size={26} /><span>电力文献</span></div>
+        <div className="login-brand"><BrandMark size={26} /><span>电力文献</span></div>
         <span className="eyebrow">受限访问</span>
         <h1 id="login-title">输入网页通行证</h1>
         <p>通行证用于进入网页。进入后可游客浏览，也可以注册或登录独立的个人账户。</p>
@@ -748,7 +748,7 @@ function App() {
         <div className="topbar-row-main">
         <div className="topbar-left">
           <div className="brand">
-            <BookOpen size={26} />
+            <BrandMark size={26} />
             <span>电力文献</span>
           </div>
           <nav className="nav" aria-label="主导航">
