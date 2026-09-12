@@ -4,6 +4,7 @@ import { api } from "../../lib/api.js";
 import { ARTICLE_PAGE_SIZE, DEFAULT_FILTERS } from "../../lib/constants.js";
 import { downloadTextFile, toBibtex, toRis } from "../../lib/export.js";
 import { isChineseJournalArticle, isChineseSourceText } from "../../lib/format.js";
+import { groupJournals, journalAbbr } from "../../lib/journal.js";
 import ArticleCard from "../../components/ArticleCard.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
 import useListShortcuts from "../../hooks/useListShortcuts.js";
@@ -372,6 +373,8 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     notify?.(`已导出 ${selectedArticles.length} 篇文献（${format === "ris" ? "RIS" : "BibTeX"}）。`, { type: "success" });
   }
 
+  const journalGroups = useMemo(() => groupJournals(journals), [journals]);
+
   const activeFilterCount = filters.journal.length + filters.keyword.length
     + (filters.q ? 1 : 0) + (filters.from ? 1 : 0) + (filters.to ? 1 : 0)
     + (filters.unread ? 1 : 0) + (filters.favorite ? 1 : 0);
@@ -410,23 +413,34 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
         <div className={`filter-group ${collapsedFilterGroups.journal ? "is-collapsed" : ""}`}>
           {filterGroupHeader("journal", "期刊")}
           <div className="filter-group-content" id="feed-filter-group-journal" hidden={collapsedFilterGroups.journal}>
-            <div className="keyword-filter-list journal-filter-list">
-              {journals.map((j) => (
-                <button
-                  key={j.name}
-                  className={`keyword-filter-chip ${filters.journal.includes(j.name) ? "active" : ""}`}
-                  onClick={() => {
-                    const next = filters.journal.includes(j.name)
-                      ? filters.journal.filter((k) => k !== j.name)
-                      : [...filters.journal, j.name];
-                    setFilters({ ...filters, journal: next });
-                  }}
-                  title={j.name}
-                >
-                  <span className="kw-name">{j.name}</span>
-                </button>
-              ))}
-            </div>
+            {/* Grouped by publisher so a 15-journal catalogue reads as four
+                blocks instead of one long list. Empty groups never render. */}
+            {journalGroups.map((group) => (
+              <div className="journal-group" key={group.key}>
+                <div className="journal-group-head">
+                  <span className={`journal-group-dot tone-${group.key}`} aria-hidden="true" />
+                  <span className="journal-group-label">{group.label}</span>
+                  <span className="journal-group-count">{group.items.length} 本</span>
+                </div>
+                <div className="keyword-filter-list journal-filter-list">
+                  {group.items.map((j) => (
+                    <button
+                      key={j.name}
+                      className={`keyword-filter-chip journal-filter-chip tone-${group.key} ${filters.journal.includes(j.name) ? "active" : ""}`}
+                      onClick={() => {
+                        const next = filters.journal.includes(j.name)
+                          ? filters.journal.filter((k) => k !== j.name)
+                          : [...filters.journal, j.name];
+                        setFilters({ ...filters, journal: next });
+                      }}
+                      title={j.name}
+                    >
+                      <span className="kw-name">{j.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
         <div className={`filter-group ${collapsedFilterGroups.date ? "is-collapsed" : ""}`}>
@@ -512,13 +526,18 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
       </aside>
       <section className="content-main">
         <div className="feed-toolbar">
-          <button className="secondary filter-toggle" type="button" aria-expanded={filterOpen} aria-controls="feed-filters" onClick={() => setFilterOpen((current) => !current)}>
-            <Filter size={15} /> {filterOpen ? "收起筛选" : "打开筛选"}
-            {activeFilterCount > 0 && <span className="filter-count-badge">{activeFilterCount}</span>}
-          </button>
-          <button className="secondary shortcuts-toggle" type="button" aria-expanded={shortcutsOpen} aria-controls="feed-shortcuts" onClick={() => setShortcutsOpen((current) => !current)}>
-            <Keyboard size={15} /> 快捷键
-          </button>
+          {/* Two equal columns instead of two free-floating buttons: the pair
+              used to share one flex row with the display toggles and collapsed
+              into a vertical stack as soon as the list area got narrow. */}
+          <div className="feed-toolbar-actions">
+            <button className="secondary filter-toggle" type="button" aria-expanded={filterOpen} aria-controls="feed-filters" onClick={() => setFilterOpen((current) => !current)}>
+              <Filter size={15} /> {filterOpen ? "收起筛选" : "打开筛选"}
+              {activeFilterCount > 0 && <span className="filter-count-badge">{activeFilterCount}</span>}
+            </button>
+            <button className="secondary shortcuts-toggle" type="button" aria-expanded={shortcutsOpen} aria-controls="feed-shortcuts" onClick={() => setShortcutsOpen((current) => !current)}>
+              <Keyboard size={15} /> 快捷键
+            </button>
+          </div>
         <div className="display-toggles">
           <span className="display-toggles-label">显示内容</span>
           <button type="button" className={`display-toggle ${displayPreferences.authors ? "active" : ""}`} onClick={() => toggleDisplay("authors")}>

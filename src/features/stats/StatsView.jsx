@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, Cloud, ExternalLink, Filter, Search, Share2, X } from "lucide-react";
+import { BarChart3, Cloud, Filter, Globe, Network, Search, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { formatDate, isChineseJournalArticle } from "../../lib/format.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
@@ -124,7 +124,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
               className={`stats-view-btn ${viewMode === "cooccurrence" ? "active" : ""}`}
               onClick={() => setViewMode("cooccurrence")}
             >
-              <Share2 size={14} /> 共现
+              <Network size={14} /> 共现
             </button>
           </div>
 
@@ -213,7 +213,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                           rel="noreferrer"
                           className="keyword-article-link"
                         >
-                          <ExternalLink size={12} /> 原文链接
+                          <Globe size={14} /> 原文链接
                         </a>
                       )}
                     </div>

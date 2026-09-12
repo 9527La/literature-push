@@ -12,13 +12,11 @@ import {
   CircleStop,
   ChevronDown,
   Database,
-  ExternalLink,
   Eye,
   EyeOff,
   FileText,
   Filter,
   FolderPlus,
-  Globe,
   Heart,
   HardDrive,
   HelpCircle,
@@ -750,7 +748,7 @@ function App() {
         <div className="topbar-row-main">
         <div className="topbar-left">
           <div className="brand">
-            <BookOpen size={22} />
+            <BookOpen size={26} />
             <span>电力文献</span>
           </div>
           <nav className="nav" aria-label="主导航">
@@ -798,11 +796,11 @@ function App() {
             <span className="stat-chip stat-badge stat-badge-unread">未读 <strong>{status?.unreadCount ?? 0}</strong></span>
             <span className="stat-chip">已读 <strong>{status?.readCount ?? 0}</strong></span>
             <span className="stat-chip stat-badge stat-badge-fav">收藏 <strong>{status?.favoriteCount ?? 0}</strong></span>
-            <span className="stat-chip stat-badge stat-badge-new" title="按首次进入数据库的时间统计">
-              最近一周新增 <strong>{status?.newArticleCount7d ?? 0}</strong>
+            <span className="stat-chip stat-badge stat-badge-new" title="按文献的实际出版日期统计；提前出版（Online First）的按实际发布日期计入">
+              最近一周出版 <strong>{status?.newArticleCount7d ?? 0}</strong>
             </span>
-            <span className="stat-chip stat-badge stat-badge-new stat-badge-new-month" title="按首次进入数据库的时间统计">
-              最近一月新增 <strong>{status?.newArticleCount30d ?? 0}</strong>
+            <span className="stat-chip stat-badge stat-badge-new stat-badge-new-month" title="按文献的实际出版日期统计；提前出版（Online First）的按实际发布日期计入">
+              最近一月出版 <strong>{status?.newArticleCount30d ?? 0}</strong>
             </span>
           </div>
         </div>

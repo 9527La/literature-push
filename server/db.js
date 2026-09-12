@@ -336,6 +336,10 @@ export function normalizeJournals(journals) {
       const preset = DEFAULT_JOURNAL_BY_NAME.get(journal.name);
       return {
         publisher: journal.publisher || "",
+        // `group` is the editorial publisher bucket (ieee / elsevier / cn /
+        // other) and may differ from `publisher`: JMPSCE is crawled through
+        // IEEE Xplore but published by State Grid.
+        group: journal.group || preset?.group || "",
         platform: journal.platform,
         name: journal.name,
         issns: Array.isArray(journal.issns) ? journal.issns.filter(Boolean) : (preset?.issns || []),
@@ -855,18 +859,25 @@ export function getUserStatus(userId) {
   // These two counters describe the shared literature database rather than a
   // personal account. Keep them available in guest mode as well, so the
   // top-right summary does not silently turn into zero before login.
-  const newArticleCount7d = db.prepare(`
+  //
+  // "Recent" is measured by *publication* date, not by crawl time: readers care
+  // when a paper came out, not when our crawler happened to see it. Publishers
+  // release online-first long before an issue date exists, so roughly a quarter
+  // of the records carry a published_at in the future; those fall back to the
+  // date the record actually arrived instead of counting as a future paper.
+  const effectivePublishedAt = `datetime(CASE
+      WHEN datetime(published_at) IS NULL THEN COALESCE(NULLIF(first_seen_at, ''), fetched_at)
+      WHEN datetime(published_at) > datetime('now') THEN COALESCE(NULLIF(first_seen_at, ''), fetched_at)
+      ELSE published_at
+    END)`;
+  const countPublishedWithin = (days) => db.prepare(`
     SELECT COUNT(*) AS count
     FROM articles
     WHERE is_non_research_title(title) = 0
-      AND datetime(COALESCE(NULLIF(first_seen_at, ''), fetched_at)) >= datetime('now', '-7 days')
+      AND ${effectivePublishedAt} >= datetime('now', '-${days} days')
   `).get().count;
-  const newArticleCount30d = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM articles
-    WHERE is_non_research_title(title) = 0
-      AND datetime(COALESCE(NULLIF(first_seen_at, ''), fetched_at)) >= datetime('now', '-30 days')
-  `).get().count;
+  const newArticleCount7d = countPublishedWithin(7);
+  const newArticleCount30d = countPublishedWithin(30);
   if (!userId) {
     return { articleCount, unreadCount: 0, favoriteCount: 0, readCount: 0, newArticleCount7d, newArticleCount30d };
   }

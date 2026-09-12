@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Filter, Mail, Save, Send, Settings, UserRound } from "lucide-react";
 import { api } from "../../lib/api.js";
+import { groupJournals } from "../../lib/journal.js";
 
 function SettingsView(props) {
   if (!props.canEdit) return <GuestSettingsView />;
@@ -23,6 +24,8 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
     new Set(settings.journals.map((j) => j.name))
   );
   const [refreshCron, setRefreshCron] = useState(settings.refreshCron);
+  // Same publisher buckets as the feed filter, so the two lists agree.
+  const journalGroups = useMemo(() => groupJournals(availableJournals), [availableJournals]);
 
   const [userEmail, setUserEmail] = useState("");
   const [savedEmail, setSavedEmail] = useState("");
@@ -439,11 +442,20 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
               </div>
             </div>
             <div className="journal-list-compact">
-              {availableJournals.map((j) => (
-                <label className="journal-item" key={j.name}>
-                  <input type="checkbox" checked={selectedJournalNames.has(j.name)} onChange={() => toggleJournal(j.name)} />
-                  <span>{j.name}</span>
-                </label>
+              {journalGroups.map((group) => (
+                <div className="journal-group" key={group.key}>
+                  <div className="journal-group-head">
+                    <span className={`journal-group-dot tone-${group.key}`} aria-hidden="true" />
+                    <span className="journal-group-label">{group.label}</span>
+                    <span className="journal-group-count">{group.items.length} 本</span>
+                  </div>
+                  {group.items.map((j) => (
+                    <label className="journal-item" key={j.name}>
+                      <input type="checkbox" checked={selectedJournalNames.has(j.name)} onChange={() => toggleJournal(j.name)} />
+                      <span>{j.name}</span>
+                    </label>
+                  ))}
+                </div>
               ))}
             </div>
             <div className="settings-actions">

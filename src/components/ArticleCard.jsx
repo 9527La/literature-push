@@ -1,7 +1,11 @@
 import { memo } from "react";
-import { Check, Globe, Heart, Languages, ScrollText, Star } from "lucide-react";
+import { Check, FileText, Globe, Heart, Languages, Star } from "lucide-react";
 import Highlight from "./Highlight.jsx";
 import { formatDate, formatRelativeDate, isChineseJournalArticle } from "../lib/format.js";
+import { findJournal, journalAbbr, journalGroup } from "../lib/journal.js";
+
+/** Cards show the three strongest keywords; the rest collapse into "+N". */
+const KEYWORD_PREVIEW_LIMIT = 3;
 
 function ArticleCard({
   article,
@@ -25,6 +29,14 @@ function ArticleCard({
   const prepare = () => requestPreparation([article.id], { force: true });
   const absoluteDate = formatDate(article.published_at);
 
+  const journalRecord = findJournal(journals, article.journal);
+  const tone = journalGroup(journalRecord || article.journal);
+  const keywords = String(article.keywords || "")
+    .split(/[;；]/)
+    .map((keyword) => keyword.trim())
+    .filter(Boolean);
+  const hiddenKeywordCount = Math.max(0, keywords.length - KEYWORD_PREVIEW_LIMIT);
+
   return (
     <article className={`article ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}${isCursor ? " is-cursor" : ""}${selected ? " is-selected" : ""}${selectable ? " has-select" : ""}`}>
       {selectable && (
@@ -38,12 +50,13 @@ function ArticleCard({
         </label>
       )}
       <div className="article-main">
+        {/* Publication date leads the row: it is the axis a reader scans on, and
+            the journal identity follows as one visual unit after the divider. */}
         <div className="article-meta">
-          <span>{article.journal || "未知期刊"}</span>
-          {/* Relative time answers "is this new?" at a glance; the exact date
-              stays available on hover and for anything older than a month. */}
           <time dateTime={absoluteDate} title={absoluteDate}>{formatRelativeDate(article.published_at)}</time>
-          {article.year && <span>{article.year}</span>}
+          <span className="meta-divider" aria-hidden="true" />
+          <span className={`journal-mark tone-${tone}`} aria-hidden="true">{journalAbbr(article.journal)}</span>
+          <span className="article-journal">{article.journal || "未知期刊"}</span>
           {/* Unread is already carried by the 3px colour bar and the title
               weight, so only the exceptions (已读 / 收藏) get a badge. */}
           {article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : null}
@@ -61,19 +74,29 @@ function ArticleCard({
           </button>
         )}
         {displayPreferences.authors && article.authors && <p className="authors"><Highlight text={article.authors} terms={highlightTerms} /></p>}
-        {displayPreferences.keywords && article.keywords && (
+        {displayPreferences.keywords && keywords.length > 0 && (
           <div className="keywords">
-            {article.keywords.split(/[;；]/).map((kw) => kw.trim()).filter(Boolean).map((kw, i) => (
+            {keywords.slice(0, KEYWORD_PREVIEW_LIMIT).map((keyword, index) => (
               <button
                 type="button"
-                className={`keyword-tag ${highlightTerms.some((t) => kw.toLowerCase().includes(t.toLowerCase())) ? "keyword-tag-highlight" : ""}`}
-                key={i}
-                title={`按关键词「${kw}」筛选`}
-                onClick={() => onSelectKeyword?.(kw)}
+                className={`keyword-tag ${highlightTerms.some((term) => keyword.toLowerCase().includes(term.toLowerCase())) ? "keyword-tag-highlight" : ""}`}
+                key={index}
+                title={`按关键词「${keyword}」筛选`}
+                onClick={() => onSelectKeyword?.(keyword)}
               >
-                <Highlight text={kw} terms={highlightTerms} />
+                <Highlight text={keyword} terms={highlightTerms} />
               </button>
             ))}
+            {hiddenKeywordCount > 0 && (
+              <button
+                type="button"
+                className="keyword-more"
+                title={`还有 ${hiddenKeywordCount} 个关键词，打开详情查看`}
+                onClick={() => onOpen(article)}
+              >
+                +{hiddenKeywordCount}
+              </button>
+            )}
           </div>
         )}
         {displayPreferences.abstract && (
@@ -92,7 +115,7 @@ function ArticleCard({
       </div>
       <div className="article-actions">
         <button type="button" title="查看摘要" aria-label="查看摘要" onClick={() => onOpen(article)}>
-          <ScrollText size={18} />
+          <FileText size={18} />
         </button>
         <button
           type="button"
