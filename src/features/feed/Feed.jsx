@@ -7,7 +7,6 @@ import { isChineseJournalArticle, isChineseSourceText } from "../../lib/format.j
 import { groupJournals, journalAbbr } from "../../lib/journal.js";
 import ArticleCard from "../../components/ArticleCard.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
-import FeedHero from "../../components/FeedHero.jsx";
 import useListShortcuts from "../../hooks/useListShortcuts.js";
 import ArticleDialog from "./ArticleDialog.jsx";
 
@@ -617,8 +616,6 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
             )}
           </div>
         )}
-
-        <FeedHero articles={sortedArticles} />
 
         <div className="article-count" role="status" aria-live="polite">
           共 <strong>{sortedArticles.length}</strong> 篇文献
