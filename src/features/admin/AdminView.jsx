@@ -221,6 +221,9 @@ function AdminView({ onDataChanged }) {
               {TRANSLATE_ROUND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
+          <button className="secondary compact" type="button" disabled={Boolean(runningAction)} onClick={checkTranslationHealth}>
+            <ShieldCheck size={14} className={runningAction === "translate-health" ? "spin" : ""} /> {runningAction === "translate-health" ? "体检中…" : "翻译服务体检"}
+          </button>
           {budgetLimit > 0 && (
             <div
               className={`translate-quota level-${budgetLevel}`}
@@ -247,9 +250,6 @@ function AdminView({ onDataChanged }) {
               </span>
             </div>
           )}
-          <button className="secondary compact" type="button" disabled={Boolean(runningAction)} onClick={checkTranslationHealth}>
-            <ShieldCheck size={14} className={runningAction === "translate-health" ? "spin" : ""} /> {runningAction === "translate-health" ? "体检中…" : "翻译服务体检"}
-          </button>
           <span className="admin-translate-hint">体检会对每个翻译来源各发一条极短文本（约几个字符）。</span>
         </div>
       </header>
