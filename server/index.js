@@ -997,7 +997,10 @@ app.get("/api/admin/session", (req, res) => {
 });
 
 app.get("/api/admin/overview", requireSiteAdmin, (req, res) => {
-  res.json(getAdminOverview());
+  // The remaining translation allowance ships with the overview so the admin
+  // page shows it on load instead of only after running a probe. Reading it is a
+  // local file lookup, so this costs nothing.
+  res.json({ ...getAdminOverview(), translationBudget: translationTencentBudget() });
 });
 
 app.post("/api/admin/users", requireSiteAdmin, (req, res) => {

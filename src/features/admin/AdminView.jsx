@@ -100,8 +100,9 @@ function AdminView({ onDataChanged }) {
           ? `${provider.provider} 可用（示例：${provider.sample}）`
           : `${provider.provider} 不可用——${provider.error || "未知错误"}`
       ));
-      const budget = result.budget || {};
-      setMessage(`翻译服务体检：${parts.join("；") || "没有配置任何翻译来源"}。腾讯云本月已用 ${budget.used || 0} / ${budget.limit || 0} 字符（${budget.month || ""}）。`);
+      setMessage(`翻译服务体检：${parts.join("；") || "没有配置任何翻译来源"}。`);
+      // The probe spends a few characters, so refresh the allowance readout.
+      await loadOverview();
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -169,6 +170,14 @@ function AdminView({ onDataChanged }) {
   ];
   const coverageDetails = overview.coverageDetails || {};
   const recentRefreshes = Array.isArray(overview.recentRefreshes) ? overview.recentRefreshes.slice(0, 10) : [];
+  const budget = overview.translationBudget || null;
+  const budgetLimit = Number(budget?.limit) || 0;
+  const budgetUsed = Number(budget?.used) || 0;
+  const budgetPercent = budgetLimit > 0 ? Math.min(100, (budgetUsed / budgetLimit) * 100) : 0;
+  // Three levels so the indicator answers "am I about to be cut off?" at a
+  // glance. Colour is never the only signal — the percentage is always printed.
+  const budgetLevel = budget?.exhausted || budgetPercent >= 95 ? "danger" : budgetPercent >= 70 ? "warn" : "ok";
+  const formatNumber = (value) => Number(value || 0).toLocaleString("zh-CN");
   const taskLabels = {
     refresh: "刷新文献",
     abstracts: "补全摘要",
@@ -212,10 +221,36 @@ function AdminView({ onDataChanged }) {
               {TRANSLATE_ROUND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
+          {budgetLimit > 0 && (
+            <div
+              className={`translate-quota level-${budgetLevel}`}
+              title={`腾讯云文本翻译每月 500 万字符免费，超出按 58 元/百万字符计费。本系统设有本地硬上限 ${formatNumber(budgetLimit)} 字符，触及即停止调用，不会产生费用。`}
+            >
+              <span className="translate-quota-label">腾讯云翻译额度</span>
+              <span
+                className="translate-quota-track"
+                role="progressbar"
+                aria-label="本月翻译额度使用比例"
+                aria-valuemin={0}
+                aria-valuemax={budgetLimit}
+                aria-valuenow={budgetUsed}
+                aria-valuetext={`已用 ${budgetPercent.toFixed(1)}%`}
+              >
+                <span className="translate-quota-fill" style={{ width: `${Math.max(budgetPercent, budgetUsed > 0 ? 1.5 : 0)}%` }} />
+              </span>
+              <span className="translate-quota-value">
+                已用 <strong>{formatNumber(budgetUsed)}</strong> / {formatNumber(budgetLimit)} 字符
+                <span className="translate-quota-percent">{budgetPercent < 1 && budgetUsed > 0 ? budgetPercent.toFixed(2) : budgetPercent.toFixed(1)}%</span>
+              </span>
+              <span className="translate-quota-remaining">
+                {budget?.exhausted ? "本月已用尽，已停止调用" : `剩余 ${formatNumber(budget?.remaining ?? Math.max(0, budgetLimit - budgetUsed))} 字符`}
+              </span>
+            </div>
+          )}
           <button className="secondary compact" type="button" disabled={Boolean(runningAction)} onClick={checkTranslationHealth}>
             <ShieldCheck size={14} className={runningAction === "translate-health" ? "spin" : ""} /> {runningAction === "translate-health" ? "体检中…" : "翻译服务体检"}
           </button>
-          <span className="admin-translate-hint">体检会各发一条极短文本，用于确认密钥是否可用、免费额度是否充足。</span>
+          <span className="admin-translate-hint">体检会对每个翻译来源各发一条极短文本（约几个字符）。</span>
         </div>
       </header>
       {message && <div className="admin-notice" role="status">{message}</div>}

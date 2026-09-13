@@ -4576,6 +4576,60 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
 }
 .admin-translate-hint { font-size: 12px; color: var(--text-tertiary); }
 
+/* Monthly translation allowance. Always visible rather than hidden behind the
+   probe button, because "how much of the free quota is left" decides whether the
+   next batch is safe to run. */
+.translate-quota {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 5px 12px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  /* Level colours, overridden by the level-* classes below. The normal state
+     stays on the site accent so the amber / red steps mean something, and no
+     sixth palette sneaks in next to the four publisher tones. Plain variables
+     instead of color-mix() so older Chromium builds still render. */
+  --quota-ink: #3157d5;
+  --quota-chip: #eff3fa;
+  --quota-track: #dfe4ee;
+}
+.translate-quota-label { color: var(--text-tertiary); }
+.translate-quota-track {
+  position: relative;
+  display: inline-block;
+  width: 96px;
+  height: 6px;
+  background: var(--quota-track);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.translate-quota-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--quota-ink);
+  transition: width var(--transition);
+}
+.translate-quota-value strong { color: var(--text-primary); font-weight: 700; }
+.translate-quota-percent {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--quota-chip);
+  color: var(--quota-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+.translate-quota-remaining { color: var(--text-tertiary); }
+.translate-quota.level-warn { --quota-ink: #a8681f; --quota-chip: #f7ecdc; --quota-track: #f0e5d6; }
+.translate-quota.level-danger { --quota-ink: #a8341f; --quota-chip: #f6e2de; --quota-track: #f1dcd8; }
+
 /* ──────────────────────────────────────────
    Five colour systems
 
