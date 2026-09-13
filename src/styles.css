@@ -908,13 +908,13 @@ button.compact {
   border-color: rgba(49, 87, 213, 0.28);
 }
 
+/* 底色交给下面的「五色系」规则统一处理：整卡带所属出版社的淡色调，
+   未读更实、已读更淡，状态区分仍由左侧色条与标题字重承担。 */
 .article.unread {
   border-left: 3px solid var(--accent-primary);
-  background: #f7f8fa;
 }
 
 .article.favorited {
-  background: #fbfaf7;
   border-color: rgba(217, 119, 6, 0.15);
 }
 
@@ -3065,12 +3065,13 @@ textarea::placeholder,
 .admin-reply strong { color: var(--accent-hover); }
 .display-toggle.active, .keyword-filter-chip.active { background: var(--accent-primary); border-color: var(--accent-primary); color: #ffffff; }
 
-/* Collapse legacy semantic accents into the single index-blue system. */
+/* Collapse legacy semantic accents into the single index-blue system.
+   卡片底色不再在这里强制为白：交给文件末尾的「五色系」规则按出版社给色。 */
 .article,
 .article.unread,
 .article.read,
 .article.favorited {
-  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
 }
 
 .article::before { display: none; }
@@ -4392,16 +4393,14 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
   width: 38px;
   height: 26px;
   flex: 0 0 auto;
-  border: 1px solid transparent;
+  border: 1px solid var(--tone-line, var(--border-color));
   border-radius: 7px;
+  background: var(--tone-soft, var(--surface-subtle));
+  color: var(--tone, var(--text-secondary));
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
 }
-.journal-mark.tone-ieee { background: #edf1f8; border-color: #d5deec; color: #3f5d93; }
-.journal-mark.tone-elsevier { background: #f8f2e9; border-color: #e8dbc6; color: #8a6238; }
-.journal-mark.tone-cn { background: #ecf4f2; border-color: #cfe0dc; color: #3d6e66; }
-.journal-mark.tone-other { background: #f1f3f5; border-color: #dce0e5; color: #5f6773; }
 
 .meta-divider {
   display: inline-block;
@@ -4422,11 +4421,7 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
   font-weight: 600;
   color: var(--text-primary);
 }
-.journal-group-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 3px; }
-.journal-group-dot.tone-ieee { background: #3f5d93; }
-.journal-group-dot.tone-elsevier { background: #8a6238; }
-.journal-group-dot.tone-cn { background: #3d6e66; }
-.journal-group-dot.tone-other { background: #5f6773; }
+.journal-group-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 3px; background: var(--tone, var(--text-tertiary)); }
 .journal-group-count {
   margin-left: auto;
   font-size: 12px;
@@ -4503,3 +4498,132 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
 }
 
 .brand-mark { display: block; flex: 0 0 auto; }
+
+/* ──────────────────────────────────────────
+   Card colour follows the publisher
+
+   Five palettes ship in total: the site accent plus one per publisher group.
+   A card adopts its journal's palette for every local surface — left rule,
+   journal name, keyword pills, topic glyph, hover, action hover — so a screen of
+   cards reads as blocks of publisher identity. Global chrome, real buttons and
+   links stay on the site accent, and the favourite ring stays accent-coloured
+   because "you starred this" is a user state rather than publisher identity.
+   ────────────────────────────────────────── */
+.article.tone-ieee { --tone-ink: #3f5d93; --tone-soft: #edf1f8; --tone-line: #d5deec; }
+.article.tone-elsevier { --tone-ink: #8a6238; --tone-soft: #f8f2e9; --tone-line: #e8dbc6; }
+.article.tone-cn { --tone-ink: #3d6e66; --tone-soft: #ecf4f2; --tone-line: #cfe0dc; }
+.article.tone-other { --tone-ink: #5f6773; --tone-soft: #f1f3f5; --tone-line: #dce0e5; }
+
+/* Same hue, two intensities: the rule is always the publisher colour, and its
+   strength is what carries read / unread. */
+.article { border-left-color: var(--tone-line, #c5cad3); }
+.article.unread { border-left-color: var(--tone-ink, var(--accent-primary)); }
+.article:hover { border-color: var(--tone-line, #c5cad3); }
+.article .article-journal { color: var(--tone-ink, var(--text-primary)); }
+.article .title-button:hover { color: var(--tone-ink, var(--accent-hover)); }
+.article .translated-title { color: var(--tone-ink, var(--accent-hover)); }
+.article .keyword-tag { background: var(--tone-soft, var(--accent-light)); color: var(--tone-ink, var(--accent-hover)); }
+.article .keyword-topic { color: var(--tone-ink, var(--accent-primary)); }
+.article .keyword-more:hover {
+  border-color: var(--tone-ink, var(--accent-primary));
+  background: var(--tone-soft, var(--accent-light));
+  color: var(--tone-ink, var(--accent-hover));
+}
+.article .article-actions button:hover,
+.article .article-actions a:hover {
+  color: var(--tone-ink, var(--accent-hover));
+  background: var(--tone-soft, var(--accent-light));
+}
+.article .article-actions button.action-done {
+  color: var(--tone-ink, var(--accent-hover));
+  background: var(--tone-soft, var(--accent-light));
+}
+/* The search highlight inside a card picks up the same hue, so a filtered list
+   stays one colour family per card. */
+.article mark { background: var(--tone-soft, #fff2b8); color: var(--tone-ink, inherit); }
+
+/* ──────────────────────────────────────────
+   Admin translation controls
+   ────────────────────────────────────────── */
+.admin-translate-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+}
+.admin-translate-controls .checkline { gap: 8px; font-size: 13px; color: var(--text-secondary); }
+.admin-translate-controls select {
+  min-height: 34px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+.admin-translate-hint { font-size: 12px; color: var(--text-tertiary); }
+
+/* ──────────────────────────────────────────
+   Five colour systems
+
+   1) 网站主题（accent blue）—— 全局可操作层：导航激活、主按钮、链接、焦点环、
+      筛选选中态、统计胶囊、空状态插画、翻译相关面板。
+   2)–5) 四个出版社色系 —— 只承载"身份"：卡片状态条、期刊徽标、关键词胶囊、
+      中文标题、卡片与图标的悬停色、详情弹窗的关键词带。
+
+   每张卡片只取用它所属出版社的那一套变量，因此整张卡读起来是一个色系；
+   页面外壳继续使用网站主题色，两套不混用。
+   ────────────────────────────────────────── */
+.tone-ieee { --tone: #3f5d93; --tone-soft: #edf1f8; --tone-line: #d5deec; --tone-ring: rgba(63, 93, 147, 0.34); }
+.tone-elsevier { --tone: #8a6238; --tone-soft: #f8f2e9; --tone-line: #e8dbc6; --tone-ring: rgba(138, 98, 56, 0.32); }
+.tone-cn { --tone: #3d6e66; --tone-soft: #ecf4f2; --tone-line: #cfe0dc; --tone-ring: rgba(61, 110, 102, 0.32); }
+.tone-other { --tone: #5f6773; --tone-soft: #f1f3f5; --tone-line: #dce0e5; --tone-ring: rgba(95, 103, 115, 0.30); }
+
+/* 卡片：整卡取用所属出版社色系（未读状态条不再固定用网站主题色）
+   底色与描边只带该色系极淡的色调（45% 浅底 + 白），既让整卡读起来是一个色系，
+   又与页底 #f2f4f7 保持明度差，不会糊成一片。color-mix 不被支持时会自动退回
+   上一条 background/border 声明。左边框留空，交给「已读 / 未读」状态使用。 */
+.article {
+  background: color-mix(in srgb, var(--tone-soft, #ffffff) 46%, #ffffff);
+  border-top-color: var(--tone-line, var(--border-color));
+  border-right-color: var(--tone-line, var(--border-color));
+  border-bottom-color: var(--tone-line, var(--border-color));
+}
+/* 已读条目更淡：保留「已读更安静」的旧观感，同时仍在同一色系里。 */
+.article.read { background: color-mix(in srgb, var(--tone-soft, #ffffff) 22%, #ffffff); }
+.article.unread { border-left-color: var(--tone, var(--accent-primary)); }
+/* 悬停只加强三边，避免把左侧「已读 / 未读」状态条盖掉。 */
+.article:hover {
+  border-top-color: var(--tone-ring, rgba(49, 87, 213, 0.28));
+  border-right-color: var(--tone-ring, rgba(49, 87, 213, 0.28));
+  border-bottom-color: var(--tone-ring, rgba(49, 87, 213, 0.28));
+}
+/* 收藏是语义状态：用与「收藏」徽章一致的暖色，避免在卡片里再插入一个主题蓝。 */
+.article.favorited { box-shadow: inset 0 0 0 1px rgba(180, 117, 23, 0.34), var(--shadow-sm); }
+
+.article .title-button:hover,
+.article.read .title-button:hover { color: var(--tone, var(--accent-primary)); }
+.article .translated-title { color: var(--tone, var(--accent-hover)); }
+.article .translation-missing:not(:disabled),
+.article .abstract-missing:not(:disabled) { color: var(--tone, var(--accent-primary)); }
+
+.article .keyword-tag { background: var(--tone-soft, #eff3fa); color: var(--tone, #185fa5); }
+.article .keyword-tag:hover { background: var(--tone-line, #dfe8fa); }
+/* 检索命中仍是语义高亮（暖色），不能被上面的卡片色系规则吃掉。 */
+.article .keyword-tag.keyword-tag-highlight { background: #faeeda; color: #854f0b; }
+.article .keyword-topic { color: var(--tone, var(--accent-primary)); }
+
+.article .article-actions button:hover,
+.article .article-actions a:hover { color: var(--tone, var(--accent-hover)); background: var(--tone-soft, var(--accent-light)); }
+.article .article-actions button.action-done { color: var(--tone, var(--accent-hover)); background: var(--tone-soft, var(--accent-light)); }
+
+/* 详情弹窗继承同一色系，卡片与"打开的卡片"是同一个颜色身份 */
+.article-dialog .keywords-band { background: var(--tone-soft, var(--surface-subtle)); border-color: var(--tone-line, var(--border-light)); }
+.article-dialog .keywords-band-label { color: var(--tone, var(--text-secondary)); }
+.article-dialog .keyword-tag { background: var(--tone-soft, #eff3fa); color: var(--tone, #185fa5); }
+.article-dialog .translated-title { color: var(--tone, var(--accent-hover)); }

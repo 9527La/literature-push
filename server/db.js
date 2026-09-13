@@ -258,7 +258,12 @@ for (const migration of [
   "ALTER TABLE refresh_runs ADD COLUMN translation_request_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE refresh_runs ADD COLUMN remaining_abstract_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE refresh_runs ADD COLUMN remaining_keyword_count INTEGER NOT NULL DEFAULT 0",
-  "ALTER TABLE refresh_runs ADD COLUMN remaining_translation_count INTEGER NOT NULL DEFAULT 0"
+  "ALTER TABLE refresh_runs ADD COLUMN remaining_translation_count INTEGER NOT NULL DEFAULT 0",
+  // Translation attempt memory. Without it a permanently failing article sits at
+  // the front of the "missing translation" queue forever and every run spends
+  // requests on the same handful of records while the rest are never reached.
+  "ALTER TABLE translations ADD COLUMN title_attempt_at TEXT",
+  "ALTER TABLE translations ADD COLUMN abstract_attempt_at TEXT"
 ]) {
   try { db.exec(migration); } catch (error) {
     if (!error.message?.includes("duplicate column")) throw error;
@@ -1328,6 +1333,7 @@ export function getMetadataGaps() {
 export function listArticlesMissingTranslation(field = "title", targetLanguage = "zh", limit = 20) {
   const sourceColumn = field === "abstract" ? "abstract" : "title";
   const translatedColumn = field === "abstract" ? "abstract" : "title";
+  const attemptColumn = field === "abstract" ? "abstract_attempt_at" : "title_attempt_at";
   return db.prepare(`
     SELECT a.*
     FROM articles a
@@ -1337,9 +1343,48 @@ export function listArticlesMissingTranslation(field = "title", targetLanguage =
       AND length(trim(coalesce(a.${sourceColumn}, ''))) > 0
       AND contains_chinese_text(a.${sourceColumn}) = 0
       AND length(trim(coalesce(t.${translatedColumn}, ''))) = 0
-    ORDER BY COALESCE(a.first_seen_at, a.fetched_at) DESC, a.id DESC
+    -- Never-attempted first, then least-recently-attempted. A record whose
+    -- translation keeps failing therefore rotates to the back instead of
+    -- occupying the same slot on every run.
+    ORDER BY
+      CASE WHEN t.${attemptColumn} IS NULL THEN 0 ELSE 1 END,
+      t.${attemptColumn} ASC,
+      COALESCE(a.first_seen_at, a.fetched_at) DESC,
+      a.id DESC
     LIMIT ?
-  `).all(targetLanguage, Math.min(Math.max(Number(limit) || 20, 1), 100));
+  `).all(targetLanguage, Math.min(Math.max(Number(limit) || 20, 1), 500));
+}
+
+/**
+ * Remember that a translation was attempted for these articles, whether it
+ * succeeded or failed. Rows are created on demand: an attempt-only row carries
+ * no text, which every coverage query already treats as "not translated".
+ */
+export function markTranslationAttempts(articleIds, field = "title", targetLanguage = "zh") {
+  const column = field === "abstract" ? "abstract_attempt_at" : "title_attempt_at";
+  const ids = [...new Set((Array.isArray(articleIds) ? articleIds : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0))];
+  if (!ids.length) return 0;
+  const stamp = new Date().toISOString();
+  const statement = db.prepare(`
+    INSERT INTO translations (article_id, target_language, translated_at, ${column})
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(article_id, target_language) DO UPDATE SET ${column} = excluded.${column}
+  `);
+  let updated = 0;
+  db.exec("BEGIN");
+  try {
+    for (const id of ids) {
+      const result = statement.run(id, targetLanguage, stamp, stamp);
+      if (result.changes) updated += 1;
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return updated;
 }
 
 export function getKeywordStats(filters = {}) {
@@ -1669,7 +1714,14 @@ export function getAdminOverview() {
   const articleCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0");
   const abstractCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(abstract, ''))) > 0");
   const keywordCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(keywords, ''))) > 0");
-  const translationCount = scalar("SELECT COUNT(*) AS count FROM translations");
+  // `translations` also stores attempt timestamps for records that have no text
+  // yet, so a bare row count would overstate coverage.
+  const translationCount = scalar(`
+    SELECT COUNT(*) AS count FROM translations
+    WHERE length(trim(coalesce(title, ''))) > 0
+       OR length(trim(coalesce(abstract, ''))) > 0
+       OR length(trim(coalesce(keywords, ''))) > 0
+  `);
   const translatableTitleCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(title, ''))) > 0 AND contains_chinese_text(title) = 0");
   const translatableAbstractCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(abstract, ''))) > 0 AND contains_chinese_text(abstract) = 0");
   const translatedTitleCount = scalar(`

@@ -78,6 +78,7 @@ import {
 } from "./user-auth.js";
 import { crawlArticleDetails } from "./crawler.js";
 import { refreshArticles, rescheduleRefresh, scheduleRefresh, enrichMissingKeywords, enrichMissingAbstracts, enrichAllMissingMetadata, translateMissingArticles } from "./refresh.js";
+import { probeTranslationProviders, translationBudgetNotice, translationProvidersInUse, translationTencentBudget } from "./translate.js";
 import { generateWeeklyDigestMarkdown } from "./digest.js";
 import { sendMarkdownDigestEmail } from "./mail.js";
 import { calculatePushDays } from "./utils.js";
@@ -407,12 +408,23 @@ app.post("/api/admin/translate", requireSiteAdmin, asyncHandler(async (req, res)
     res.status(400).json({ error: "只支持标题或摘要翻译" });
     return;
   }
-  const limit = Math.min(Math.max(Number(req.body?.limit) || 20, 1), 100);
+  // `batchSize` is how many articles one round takes; `maxBatches` lets the
+  // administrator drain a backlog in a single action instead of clicking the
+  // same button over and over. The loop stops on its own when a round
+  // translates nothing, so a broken provider cannot be hammered.
+  const limit = Math.min(Math.max(Number(req.body?.batchSize ?? req.body?.limit) || 20, 1), 200);
+  const maxBatches = Math.min(Math.max(Number(req.body?.maxBatches) || 1, 1), 40);
   const runId = createRefreshRun({ taskType: field === "title" ? "translate_title" : "translate_abstract" });
   try {
-    const result = await translateMissingArticles(field, "zh", limit);
+    const result = await translateMissingArticles(field, "zh", limit, { maxBatches });
     const gaps = getMetadataGaps();
     const remainingTranslationCount = countArticlesMissingTranslation(field, "zh");
+    const stopNote = {
+      "no-progress": "（本轮无成功翻译，已提前停止，避免重复消耗请求）",
+      "queue-empty": "（已无待翻译条目）",
+      "queue-drained": "（已排空）",
+      "batch-limit": "（达到设定轮次上限）"
+    }[result.stoppedReason] || "";
     finishRefreshRun(runId, {
       status: result.failed ? (result.translated ? "partial" : "error") : "success",
       translatedCount: result.translated,
@@ -424,13 +436,28 @@ app.post("/api/admin/translate", requireSiteAdmin, asyncHandler(async (req, res)
       remainingAbstractCount: gaps.abstracts,
       remainingKeywordCount: gaps.keywords,
       remainingTranslationCount,
-      message: `新增文献 0 篇 · 补全摘要 0 篇 · 补全关键词 0 篇 · 新增翻译 ${result.translated || 0} 篇 · 翻译单元 ${result.translatedUnits || 0} · API 请求 ${result.requests || 0} 次 · 失败：文献 0 / 摘要 0 / 关键词 0 / 翻译 ${result.failed || 0} · 待补全：摘要 ${gaps.abstracts} 篇 / 关键词 ${gaps.keywords} 篇 · 待翻译 ${remainingTranslationCount} 篇`
+      message: `新增文献 0 篇 · 补全摘要 0 篇 · 补全关键词 0 篇 · 新增翻译 ${result.translated || 0} 篇 · 翻译单元 ${result.translatedUnits || 0} · API 请求 ${result.requests || 0} 次 · 批次 ${result.batches || 0} 轮${stopNote} · 失败：文献 0 / 摘要 0 / 关键词 0 / 翻译 ${result.failed || 0} · 待补全：摘要 ${gaps.abstracts} 篇 / 关键词 ${gaps.keywords} 篇 · 待翻译 ${remainingTranslationCount} 篇`
     });
     res.json({ status: result.failed ? (result.translated ? "partial" : "error") : "success", ...result });
   } catch (error) {
     finishRefreshRun(runId, { status: "error", message: `翻译${field === "title" ? "标题" : "摘要"}失败：${error.message}` });
     throw error;
   }
+}));
+
+/**
+ * Which translation providers actually work right now, plus how much of the
+ * paid-adjacent monthly allowance has been spent. Answering this before a batch
+ * is the difference between "translating" and "spending requests on a dead key".
+ */
+app.get("/api/admin/translate/health", requireSiteAdmin, asyncHandler(async (req, res) => {
+  const providers = await probeTranslationProviders("zh");
+  res.json({
+    providers,
+    budget: translationTencentBudget(),
+    notice: translationBudgetNotice(),
+    order: translationProvidersInUse()
+  });
 }));
 
 app.get("/api/settings", (req, res) => {

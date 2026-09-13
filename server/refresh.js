@@ -13,6 +13,7 @@ import {
   countArticlesWithoutKeywords,
   listArticlesMissingAbstract,
   listArticlesMissingTranslation,
+  markTranslationAttempts,
   listArticlesWithoutKeywords,
   listArticlesWithoutTranslation,
   updateArticleDetails,
@@ -374,29 +375,89 @@ export async function enrichAllMissingMetadata(options = {}) {
 // backlog without re-translating fields that are already present. The
 // translation table stores all fields in one row, therefore existing values
 // are preserved when only the title or abstract is requested.
-export async function translateMissingArticles(field, targetLanguage = "zh", limit = TRANSLATE_BATCH_LIMIT) {
+export async function translateMissingArticles(field, targetLanguage = "zh", limit = TRANSLATE_BATCH_LIMIT, options = {}) {
   if (!['title', 'abstract'].includes(field)) {
     throw new Error("只支持标题或摘要翻译");
   }
 
-  const articles = listArticlesMissingTranslation(field, targetLanguage, limit);
-  const batch = await ensureTranslations(articles, targetLanguage, { fields: [field] });
-  const translated = batch.translated || 0;
-  const failed = batch.failed || 0;
+  // The administrator can ask for several batches in one action, because a
+  // single batch of 20 leaves a long backlog behind. The loop stops early when a
+  // batch translates nothing: that almost always means a credential or quota
+  // problem, and repeating it would only spend requests to learn the same fact.
+  const maxBatches = Math.max(1, Math.min(Number(options.maxBatches) || 1, 40));
+  const totals = {
+    processed: 0,
+    translated: 0,
+    failed: 0,
+    translatedUnits: 0,
+    requests: 0,
+    batches: 0,
+    attemptedIds: [],
+    providers: [],
+    errors: [],
+    stoppedReason: ""
+  };
+
+  for (let index = 0; index < maxBatches; index += 1) {
+    const articles = listArticlesMissingTranslation(field, targetLanguage, limit);
+    if (!articles.length) {
+      totals.stoppedReason = "queue-empty";
+      break;
+    }
+    const batch = await ensureTranslations(articles, targetLanguage, { fields: [field] });
+    // Record the attempt whether it worked or not so a permanently failing
+    // record rotates to the back of the queue instead of blocking the front.
+    markTranslationAttempts(articles.map((article) => article.id), field, targetLanguage);
+
+    totals.batches += 1;
+    totals.processed += articles.length;
+    totals.translated += batch.translated || 0;
+    totals.failed += batch.failed || 0;
+    totals.translatedUnits += batch.translatedUnits || 0;
+    totals.requests += batch.requests || 0;
+    totals.attemptedIds.push(...articles.map((article) => article.id));
+    for (const provider of batch.providers || []) {
+      const known = totals.providers.find((item) => item.provider === provider.provider);
+      if (known) {
+        known.requests += provider.requests || 0;
+        known.failed = (known.failed || 0) + (provider.failed || 0);
+        if (provider.error && !known.error) known.error = provider.error;
+      } else {
+        totals.providers.push({ ...provider });
+      }
+    }
+    for (const error of batch.errors || []) {
+      if (totals.errors.length < 20) totals.errors.push(error);
+    }
+
+    if (!batch.translated) {
+      totals.stoppedReason = "no-progress";
+      break;
+    }
+    if (articles.length < limit) {
+      totals.stoppedReason = "queue-drained";
+      break;
+    }
+    if (index === maxBatches - 1) totals.stoppedReason = "batch-limit";
+  }
+
+  if (!totals.stoppedReason) totals.stoppedReason = "batch-limit";
 
   return {
     field,
     targetLanguage,
-    processed: articles.length,
-    attemptedIds: articles.map((article) => article.id),
-    translated,
-    translatedTitleCount: field === "title" ? batch.translatedUnits || 0 : 0,
-    translatedAbstractCount: field === "abstract" ? batch.translatedUnits || 0 : 0,
-    failed,
-    translatedUnits: batch.translatedUnits || 0,
-    requests: batch.requests || 0,
-    providers: batch.providers || [],
-    errors: batch.errors || [],
+    processed: totals.processed,
+    attemptedIds: totals.attemptedIds,
+    translated: totals.translated,
+    translatedTitleCount: field === "title" ? totals.translatedUnits : 0,
+    translatedAbstractCount: field === "abstract" ? totals.translatedUnits : 0,
+    failed: totals.failed,
+    translatedUnits: totals.translatedUnits,
+    requests: totals.requests,
+    batches: totals.batches,
+    stoppedReason: totals.stoppedReason,
+    providers: totals.providers,
+    errors: totals.errors,
     remaining: countArticlesMissingTranslation(field, targetLanguage)
   };
 }

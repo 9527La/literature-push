@@ -57,6 +57,15 @@ export const config = {
   // advanced endpoint.  Set to 0 only when the account's quota explicitly
   // permits a higher rate.
   baiduTranslateRequestIntervalMs: Number(process.env.BAIDU_TRANSLATE_REQUEST_INTERVAL_MS || 125),
+  // 腾讯云机器翻译。免费额度为每月 500 万字符，用尽后按 58 元/百万字符计费，
+  // 所以除了密钥还要有预算闸：tencentMonthlyCharBudget 是本地硬上限，默认
+  // 480 万（低于免费额度），一旦触及就停止调用而不是继续花钱。
+  tencentSecretId: process.env.TENCENT_SECRET_ID || "",
+  tencentSecretKey: process.env.TENCENT_SECRET_KEY || "",
+  tencentRegion: process.env.TENCENT_REGION || "ap-guangzhou",
+  // 默认接口限频 5 次/秒，250ms 间隔留出余量。
+  tencentRequestIntervalMs: Number(process.env.TENCENT_REQUEST_INTERVAL_MS || 250),
+  tencentMonthlyCharBudget: Number(process.env.TENCENT_MONTHLY_CHAR_BUDGET ?? 4800000),
   refreshCron: process.env.REFRESH_CRON || "0 8 * * *",
   collectionMaxRecords: Math.max(1, Math.min(10000, Number(process.env.COLLECTION_MAX_RECORDS || 1000))),
   lookbackDays: Number(process.env.LOOKBACK_DAYS || 45),

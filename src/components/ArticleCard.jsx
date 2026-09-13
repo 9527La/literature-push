@@ -41,7 +41,7 @@ function ArticleCard({
   const topic = articleTopic(keywords);
 
   return (
-    <article className={`article ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}${isCursor ? " is-cursor" : ""}${selected ? " is-selected" : ""}${selectable ? " has-select" : ""}`}>
+    <article className={`article tone-${tone} ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}${isCursor ? " is-cursor" : ""}${selected ? " is-selected" : ""}${selectable ? " has-select" : ""}`}>
       {selectable && (
         <label className="article-select" title="选中后可批量操作">
           <input

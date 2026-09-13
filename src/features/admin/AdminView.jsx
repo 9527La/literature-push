@@ -1,8 +1,16 @@
 import { useEffect, useState } from "react";
-import { Activity, BookOpen, ChevronDown, Database, FileText, Languages, RefreshCw, Trash2, UserPlus, Users } from "lucide-react";
+import { Activity, BookOpen, ChevronDown, Database, FileText, Languages, RefreshCw, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { formatDate, formatDateTime } from "../../lib/format.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
+
+/** Batch sizes offered for translation runs. */
+const TRANSLATE_BATCH_SIZES = [20, 50, 100];
+/** Rounds per click: 1 keeps a single round, 8 drains a backlog in one action. */
+const TRANSLATE_ROUND_OPTIONS = [
+  { value: 1, label: "1 轮" },
+  { value: 8, label: "连做 8 轮（排空为止）" }
+];
 
 function AdminView({ onDataChanged }) {
   const [overview, setOverview] = useState(null);
@@ -15,6 +23,8 @@ function AdminView({ onDataChanged }) {
   const [deleteUserId, setDeleteUserId] = useState(null);
   const [expandedCoverageKey, setExpandedCoverageKey] = useState(null);
   const [selectedCoverageArticle, setSelectedCoverageArticle] = useState(null);
+  const [translateBatchSize, setTranslateBatchSize] = useState(20);
+  const [translateRounds, setTranslateRounds] = useState(1);
 
   async function loadOverview() {
     setOverview(await api.get("/api/admin/overview"));
@@ -53,12 +63,45 @@ function AdminView({ onDataChanged }) {
       } else {
         const field = action === "titles" ? "title" : "abstract";
         const label = action === "titles" ? "标题" : "摘要";
-        const result = await api.post("/api/admin/translate", { field, limit: 20 });
+        const result = await api.post("/api/admin/translate", {
+          field,
+          batchSize: translateBatchSize,
+          maxBatches: translateRounds
+        });
         const state = result.status === "error" ? "失败" : result.status === "partial" ? "部分完成" : "完成";
-        const detail = result.errors?.[0]?.message ? ` 首条失败：${result.errors[0].message}` : "";
-        setMessage(`${label}翻译${state}：本次处理 ${result.processed || 0} 篇，成功 ${result.translated || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待翻译。${detail}`);
+        // Show several reasons, not just the first: when every provider is dead
+        // the first message alone hides which one could be fixed.
+        const reasons = (result.errors || []).slice(0, 3).map((item) => item.message).filter(Boolean).join("；");
+        const stopNote = result.stoppedReason === "no-progress"
+          ? "（本轮没有成功翻译，已提前停止以免反复消耗请求）"
+          : "";
+        setMessage(`${label}翻译${state}：${result.batches || 1} 轮共处理 ${result.processed || 0} 篇，成功 ${result.translated || 0} 篇，失败 ${result.failed || 0} 篇，API 请求 ${result.requests || 0} 次${stopNote}；仍有 ${result.remaining || 0} 篇待翻译。${reasons ? ` 失败原因：${reasons}` : ""}`);
       }
       await Promise.all([loadOverview(), onDataChanged()]);
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setRunningAction("");
+    }
+  }
+
+  /**
+   * Probe every configured translation provider with one tiny request each.
+   * Without this an administrator only learns that "translation failed" after a
+   * whole batch has already been spent on a dead key.
+   */
+  async function checkTranslationHealth() {
+    setRunningAction("translate-health");
+    setMessage("");
+    try {
+      const result = await api.get("/api/admin/translate/health");
+      const parts = (result.providers || []).map((provider) => (
+        provider.ok
+          ? `${provider.provider} 可用（示例：${provider.sample}）`
+          : `${provider.provider} 不可用——${provider.error || "未知错误"}`
+      ));
+      const budget = result.budget || {};
+      setMessage(`翻译服务体检：${parts.join("；") || "没有配置任何翻译来源"}。腾讯云本月已用 ${budget.used || 0} / ${budget.limit || 0} 字符（${budget.month || ""}）。`);
     } catch (error) {
       setMessage(error.message);
     } finally {
@@ -153,6 +196,26 @@ function AdminView({ onDataChanged }) {
           <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("metadata")}><Database size={15} className={runningAction === "metadata" ? "spin" : ""} /> {runningAction === "metadata" ? "摘要和关键词补全中…" : "补全摘要和关键词"}</button>
           <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("titles")}><Languages size={15} className={runningAction === "titles" ? "spin" : ""} /> {runningAction === "titles" ? "标题翻译中…" : "翻译标题"}</button>
           <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("translate-abstracts")}><Languages size={15} className={runningAction === "translate-abstracts" ? "spin" : ""} /> {runningAction === "translate-abstracts" ? "摘要翻译中…" : "翻译摘要"}</button>
+        </div>
+        {/* Translation controls sit next to the buttons that use them: batch size
+            covers "how many per round", rounds covers "keep going until done". */}
+        <div className="admin-translate-controls">
+          <label className="checkline">
+            <span>每轮篇数</span>
+            <select value={translateBatchSize} onChange={(event) => setTranslateBatchSize(Number(event.target.value))} disabled={Boolean(runningAction)}>
+              {TRANSLATE_BATCH_SIZES.map((size) => <option key={size} value={size}>{size} 篇</option>)}
+            </select>
+          </label>
+          <label className="checkline">
+            <span>翻译轮次</span>
+            <select value={translateRounds} onChange={(event) => setTranslateRounds(Number(event.target.value))} disabled={Boolean(runningAction)}>
+              {TRANSLATE_ROUND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <button className="secondary compact" type="button" disabled={Boolean(runningAction)} onClick={checkTranslationHealth}>
+            <ShieldCheck size={14} className={runningAction === "translate-health" ? "spin" : ""} /> {runningAction === "translate-health" ? "体检中…" : "翻译服务体检"}
+          </button>
+          <span className="admin-translate-hint">体检会各发一条极短文本，用于确认密钥是否可用、免费额度是否充足。</span>
         </div>
       </header>
       {message && <div className="admin-notice" role="status">{message}</div>}

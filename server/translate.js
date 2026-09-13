@@ -1,6 +1,13 @@
 import { config } from "./config.js";
 import crypto from "node:crypto";
 import { containsChineseText, sleep } from "./utils.js";
+import {
+  TENCENT_MAX_BATCH_SIZE,
+  TENCENT_MAX_REQUEST_CHARS,
+  requestTencentBatch,
+  tencentBudgetNotice,
+  tencentBudgetStatus
+} from "./translate-tencent.js";
 
 const TRANSLATION_TIMEOUT_MS = 30_000;
 const TRANSLATION_RETRY_LIMIT = 1;
@@ -17,7 +24,9 @@ const VOLCENGINE_MAX_BATCH_LENGTH = 4_800;
 const VOLCENGINE_MAX_BATCH_SIZE = 16;
 const DEFAULT_PROVIDER_REQUEST_INTERVALS = {
   volcengine: 250,
-  baidu: 125
+  baidu: 125,
+  // Tencent TMT allows 5 requests per second by default.
+  tencent: 250
 };
 const providerQueues = new Map();
 const providerLastRequestAt = new Map();
@@ -203,7 +212,9 @@ function providerRequestInterval(provider) {
     ? config.volcengineRequestIntervalMs
     : key === "baidu"
       ? config.baiduTranslateRequestIntervalMs
-      : DEFAULT_PROVIDER_REQUEST_INTERVALS[key];
+      : key === "tencent"
+        ? config.tencentRequestIntervalMs
+        : DEFAULT_PROVIDER_REQUEST_INTERVALS[key];
   const value = Number(configured);
   return Number.isFinite(value) && value >= 0
     ? value
@@ -483,6 +494,7 @@ async function translateBaiduText(text, targetLanguage) {
 }
 
 function providerChunkLength(provider) {
+  if (provider === "tencent") return TENCENT_MAX_REQUEST_CHARS;
   if (provider === "volcengine" || provider === "volc") return VOLCENGINE_MAX_TEXT_LENGTH;
   if (provider === "baidu") return 1_200;
   return 420;
@@ -585,15 +597,25 @@ function mapBaiduBatchTranslations(translations, batch) {
 function translationProviderList() {
   const configuredProvider = String(config.translationProvider || "auto").trim().toLowerCase();
   if (configuredProvider === "auto") {
-    return [
+    // Only keyed providers belong in the automatic chain: the two keyless
+    // endpoints issue one request per chunk and are currently dead in this
+    // deployment (403 / daily quota), so including them meant up to 20 doomed
+    // requests per batch whenever the chain fell through. They stay reachable
+    // via TRANSLATION_PROVIDER, and remain the last resort when no credential at
+    // all is configured, so the feature degrades instead of silently doing
+    // nothing.
+    const keyed = [
+      ...(config.tencentSecretId && config.tencentSecretKey ? ["tencent"] : []),
       ...(config.volcengineAccessKeyId && config.volcengineSecretAccessKey ? ["volcengine"] : []),
-      ...(config.baiduTranslateAppId && config.baiduTranslateKey ? ["baidu"] : []),
-      "libretranslate",
-      "mymemory"
+      ...(config.baiduTranslateAppId && config.baiduTranslateKey ? ["baidu"] : [])
     ];
+    return keyed.length ? keyed : ["libretranslate", "mymemory"];
   }
-  if (["volcengine", "volc", "baidu", "libretranslate", "mymemory"].includes(configuredProvider)) {
+  if (["tencent", "volcengine", "volc", "baidu", "libretranslate", "mymemory"].includes(configuredProvider)) {
     return [configuredProvider];
+  }
+  if (configuredProvider === "keyless") {
+    return ["libretranslate", "mymemory"];
   }
   throw new Error(`Unsupported translation provider: ${configuredProvider}`);
 }
@@ -621,7 +643,31 @@ async function translateChunkUnitsWithProvider(units, targetLanguage, provider) 
   const errors = [];
   let requests = 0;
 
-  if (provider === "volcengine" || provider === "volc") {
+  if (provider === "tencent") {
+    const batches = splitTranslationUnitBatches(chunkUnits, {
+      maxChars: TENCENT_MAX_REQUEST_CHARS,
+      maxItems: TENCENT_MAX_BATCH_SIZE,
+      // TargetTextList is positional, so the separator only has to stay out of
+      // the way: none is inserted.
+      separatorLength: 0
+    });
+    for (const batch of batches) {
+      requests += 1;
+      try {
+        const translations = await requestTencentBatch(batch.map((unit) => unit.text), targetLanguage);
+        translations.forEach((value, index) => setChunkResult(groups, batch[index], value));
+        if (translations.length < batch.length) {
+          addProviderError(errors, provider, batch.slice(translations.length), new Error("未返回完整翻译结果"));
+        }
+      } catch (error) {
+        addProviderError(errors, provider, batch, error);
+        // A quota, credential or configuration problem repeats verbatim for
+        // every remaining batch; stop after the first so an exhausted budget
+        // cannot burn one request per batch to learn the same fact.
+        if (/额度已用尽|尚未开通|欠费|停服|SecretId|SecretKey|签名/.test(error.message)) break;
+      }
+    }
+  } else if (provider === "volcengine" || provider === "volc") {
     const batches = splitTranslationUnitBatches(chunkUnits, {
       maxChars: VOLCENGINE_MAX_BATCH_LENGTH,
       maxItems: VOLCENGINE_MAX_BATCH_SIZE,
@@ -819,6 +865,45 @@ export async function translateArticle(article, targetLanguage, fields = TRANSLA
     throw new Error(`翻译服务不可用：${batch.failed.map((item) => item.message).join("；") || "未返回有效译文"}`);
   }
   return result;
+}
+
+/**
+ * One tiny translation per configured provider, so an administrator can see
+ * which credentials actually work before running a large batch. Costs a handful
+ * of characters; every call is metered by the provider module itself.
+ */
+export async function probeTranslationProviders(targetLanguage = "zh") {
+  const providers = translationProviderList();
+  const results = [];
+  for (const provider of providers) {
+    const unit = { key: "probe:title", articleId: "probe", field: "title", text: "power system" };
+    try {
+      const attempt = await translateChunkUnitsWithProvider([unit], targetLanguage, provider);
+      const sample = attempt.results.get(unit.key) || "";
+      results.push({
+        provider: canonicalProvider(provider),
+        ok: hasText(sample),
+        sample: String(sample).slice(0, 40),
+        requests: attempt.requests,
+        error: attempt.errors[0]?.message || ""
+      });
+    } catch (error) {
+      results.push({ provider: canonicalProvider(provider), ok: false, sample: "", requests: 0, error: error.message });
+    }
+  }
+  return results;
+}
+
+export function translationProvidersInUse() {
+  return translationProviderList().map(canonicalProvider);
+}
+
+export function translationTencentBudget() {
+  return tencentBudgetStatus();
+}
+
+export function translationBudgetNotice() {
+  return tencentBudgetNotice();
 }
 
 export const internals = {

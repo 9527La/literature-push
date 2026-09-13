@@ -115,7 +115,7 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
   const hasBothAbstracts = Boolean(String(detail.abstract || "").trim() && translatedAbstract);
 
   return (
-    <Modal open onClose={close} labelledBy="article-dialog-title" className="article-dialog">
+    <Modal open onClose={close} labelledBy="article-dialog-title" className={`article-dialog tone-${tone}`}>
         <header className="dialog-header">
           <div>
             {/* Publication date first, then journal identity: same reading order
