@@ -3417,7 +3417,9 @@ mark {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 18px;
+  /* Tighter row gap than column gap: the translation controls form a deliberate
+     second row rather than a separate block. */
+  gap: 12px 18px;
   padding: 24px 0 18px;
   border-bottom: 1px solid var(--border-color);
 }
@@ -4546,18 +4548,24 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
    Admin translation controls
    ────────────────────────────────────────── */
 .admin-translate-controls {
+  /* The hero is a fixed three-column grid (seal | title | command bar). Without
+     this the controls become a fourth grid item and get squeezed into the 52px
+     seal column, which shreds the whole header. Span the full width instead, so
+     they read as a second row of the header. */
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 18px;
-  margin-top: 12px;
   padding: 10px 14px;
   background: var(--surface-subtle);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
 }
-.admin-translate-controls .checkline { gap: 8px; font-size: 13px; color: var(--text-secondary); }
+.admin-translate-controls .checkline { gap: 8px; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
 .admin-translate-controls select {
+  /* Equal widths keep the two selectors aligned instead of ragging. */
+  width: 148px;
   min-height: 34px;
   padding: 4px 10px;
   border: 1px solid var(--border-color);

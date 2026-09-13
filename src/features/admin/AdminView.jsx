@@ -9,7 +9,7 @@ const TRANSLATE_BATCH_SIZES = [20, 50, 100];
 /** Rounds per click: 1 keeps a single round, 8 drains a backlog in one action. */
 const TRANSLATE_ROUND_OPTIONS = [
   { value: 1, label: "1 轮" },
-  { value: 8, label: "连做 8 轮（排空为止）" }
+  { value: 8, label: "8 轮（排空）" }
 ];
 
 function AdminView({ onDataChanged }) {
