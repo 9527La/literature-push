@@ -4631,6 +4631,38 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
 .translate-quota.level-danger { --quota-ink: #a8341f; --quota-chip: #f6e2de; --quota-track: #f1dcd8; }
 
 /* ──────────────────────────────────────────
+   One-click maintenance progress
+
+   一次点击跑到排空的作业是服务端的长循环，这里只负责把它的进度画出来：
+   进度条 + 已处理/剩余/速率/预计剩余时间。数字全部用等宽数字排版，避免
+   每 2 秒一次的轮询让整块文字左右跳动。
+   ────────────────────────────────────────── */
+.admin-maintenance { display: grid; gap: 12px; }
+.admin-maintenance.status-running { border-color: rgba(49, 87, 213, 0.3); }
+
+.maintenance-track {
+  position: relative;
+  display: block;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.maintenance-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent-primary);
+  transition: width var(--transition);
+}
+.maintenance-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 10px 18px; }
+.maintenance-metrics > div { display: grid; gap: 2px; min-width: 0; }
+.maintenance-metrics span { color: var(--text-tertiary); font-size: 12px; }
+.maintenance-metrics strong { color: var(--text-primary); font-size: 15px; font-variant-numeric: tabular-nums; }
+.maintenance-note { color: var(--text-secondary); font-size: 13px; line-height: 1.65; }
+.maintenance-note strong { color: var(--text-primary); }
+
+/* ──────────────────────────────────────────
    Five colour systems
 
    1) 网站主题（accent blue）—— 全局可操作层：导航激活、主按钮、链接、焦点环、

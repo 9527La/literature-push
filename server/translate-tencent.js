@@ -1,8 +1,7 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { config } from "./config.js";
-import { resolveFromRoot } from "./paths.js";
+// The monthly ledger is shared with the Baidu provider; see translation-ledger.js.
+import { addUsage, budgetStatus, currentMonth, ledgerPath, markExhausted } from "./translation-ledger.js";
 
 /**
  * Tencent Cloud Machine Translation (TMT) provider.
@@ -35,75 +34,24 @@ export const TENCENT_MAX_BATCH_SIZE = 10;
 /** An unknown source language is detected for free ("语种识别不计费"). */
 const TENCENT_SOURCE_LANGUAGE = "auto";
 
-const LEDGER_FILE = "data/translation-usage.json";
-
-function ledgerPath() {
-  return resolveFromRoot(LEDGER_FILE);
-}
-
-function currentMonth(now = new Date()) {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function readLedger() {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(ledgerPath(), "utf8"));
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeLedger(ledger) {
-  try {
-    const file = ledgerPath();
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`, "utf8");
-  } catch {
-    // Metering must never break translation; a missing ledger only means the
-    // guard restarts from zero, which the monthly budget still bounds.
-  }
-}
+const LEDGER_KEY = "tencent";
 
 function monthlyLimit() {
-  const value = Number(config.tencentMonthlyCharBudget);
-  return Number.isFinite(value) && value > 0 ? value : 0;
+  return config.tencentMonthlyCharBudget;
 }
 
 /** Characters already spent this calendar month, as reported by the API. */
 export function tencentBudgetStatus(now = new Date()) {
-  const month = currentMonth(now);
-  const used = Number(readLedger().tencent?.[month] || 0);
-  const limit = monthlyLimit();
-  return {
-    month,
-    used,
-    limit,
-    remaining: Math.max(0, limit - used),
-    exhausted: limit > 0 && used >= limit
-  };
+  return budgetStatus(LEDGER_KEY, monthlyLimit(), now);
 }
 
 export function recordTencentUsage(characters) {
-  const amount = Math.max(0, Math.round(Number(characters) || 0));
-  if (!amount) return;
-  const month = currentMonth();
-  const ledger = readLedger();
-  const bucket = ledger.tencent && typeof ledger.tencent === "object" ? ledger.tencent : {};
-  bucket[month] = Number(bucket[month] || 0) + amount;
-  ledger.tencent = bucket;
-  writeLedger(ledger);
+  addUsage(LEDGER_KEY, characters);
 }
 
 /** Force the month to "used up" after the API says the free allowance is gone. */
 function markBudgetExhausted() {
-  const limit = monthlyLimit();
-  const month = currentMonth();
-  const ledger = readLedger();
-  const bucket = ledger.tencent && typeof ledger.tencent === "object" ? ledger.tencent : {};
-  bucket[month] = Math.max(Number(bucket[month] || 0), limit);
-  ledger.tencent = bucket;
-  writeLedger(ledger);
+  markExhausted(LEDGER_KEY, monthlyLimit());
 }
 
 export function tencentBudgetNotice() {

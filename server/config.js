@@ -39,6 +39,12 @@ export const config = {
   semanticScholarWebTimeoutMs: Number(process.env.SEMANTIC_SCHOLAR_WEB_TIMEOUT_MS || 30000),
   semanticScholarBrowserExecutable: process.env.SEMANTIC_SCHOLAR_BROWSER_EXECUTABLE || "",
   translationProvider: String(process.env.TRANSLATION_PROVIDER || "auto").trim().toLowerCase(),
+  // 自动链路的候选与顺序。火山、LibreTranslate、MyMemory 已暂停：前者的临时令牌
+  // 失效，后两者逐分片请求且在本环境是 403 / 当日额度用尽，留在链路里只会在
+  // 兜底时白白打掉几十次请求。需要时用 TRANSLATION_PROVIDER 显式指定单一路径，
+  // 或用 TRANSLATION_PROVIDERS 临时把它们加回来。
+  translationProviders: String(process.env.TRANSLATION_PROVIDERS || "tencent,baidu")
+    .split(",").map((item) => item.trim().toLowerCase()).filter(Boolean),
   volcengineAccessKeyId: process.env.VOLCENGINE_ACCESS_KEY_ID || "",
   volcengineSecretAccessKey: process.env.VOLCENGINE_SECRET_ACCESS_KEY || "",
   volcengineRegion: process.env.VOLCENGINE_REGION || "cn-north-1",
@@ -57,6 +63,10 @@ export const config = {
   // advanced endpoint.  Set to 0 only when the account's quota explicitly
   // permits a higher rate.
   baiduTranslateRequestIntervalMs: Number(process.env.BAIDU_TRANSLATE_REQUEST_INTERVAL_MS || 125),
+  // 百度翻译没有额度查询接口（控制台的用量每 5 分钟才刷新一次），所以这里按
+  // 「本地记账 + 可配置上限」显示。默认为个人认证高级版的 100 万字符/月；
+  // 未认证标准版是 5 万，企业尊享版是 200 万，0 表示只统计不限制。
+  baiduMonthlyCharLimit: Number(process.env.BAIDU_MONTHLY_CHAR_LIMIT ?? 1000000),
   // 腾讯云机器翻译。免费额度为每月 500 万字符，用尽后按 58 元/百万字符计费，
   // 所以除了密钥还要有预算闸：tencentMonthlyCharBudget 是本地硬上限，默认
   // 480 万（低于免费额度），一旦触及就停止调用而不是继续花钱。

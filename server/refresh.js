@@ -245,11 +245,19 @@ function metadataFieldLabel(field) {
   return field === "abstract" ? "摘要" : "关键词";
 }
 
-async function enrichArticles(articles, fields = ["abstract", "keywords"]) {
+async function enrichArticles(articles, fields = ["abstract", "keywords"], options = {}) {
   const requestedFields = [...new Set(fields.filter((field) => field === "abstract" || field === "keywords"))];
   const results = new Array(articles.length);
   const errors = [];
+  // A "drain the whole backlog" run can be cancelled mid-batch. Checking between
+  // articles keeps a stop responsive (seconds, not minutes); the partial batch is
+  // still saved, so nothing already fetched is thrown away.
+  const shouldStop = typeof options.shouldStop === "function" ? options.shouldStop : null;
+  const onArticle = typeof options.onArticle === "function" ? options.onArticle : null;
+  let processed = 0;
+  let stopped = false;
   for (const [index, article] of articles.entries()) {
+    if (shouldStop && shouldStop()) { stopped = true; break; }
     try {
       const details = await crawlArticleDetails(article, { fields: requestedFields });
       results[index] = updateArticleDetails(article.id, details) || article;
@@ -271,9 +279,11 @@ async function enrichArticles(articles, fields = ["abstract", "keywords"]) {
       });
       console.warn(`[enrich] #${article.id} failed: ${error.message}`);
     }
+    processed += 1;
+    if (onArticle) onArticle({ processed, total: articles.length, articleId: article.id, fields: requestedFields });
     await sleep(ENRICH_DELAY_MS);
   }
-  return { articles: results, errors };
+  return { articles: results, errors, processed, stopped };
 }
 
 export async function enrichMissingKeywords(options = {}) {
@@ -291,21 +301,24 @@ export async function enrichMissingKeywords(options = {}) {
       errors: []
     };
   }
-  const enrichment = await enrichArticles(articles, ["keywords"]);
+  const enrichment = await enrichArticles(articles, ["keywords"], options);
   const results = enrichment.articles;
+  // `results` is sparse when a cancel landed mid-batch, so the attempted count —
+  // not the requested batch size — is what the failure totals are measured against.
+  const attempted = Number.isFinite(enrichment.processed) ? enrichment.processed : articles.length;
   const enrichedKeywords = results.filter((article, index) =>
     hasText(article.keywords) && !hasText(articles[index].keywords)
   ).length;
   const enrichedAbstracts = results.filter((article, index) =>
     hasText(article.abstract) && !hasText(articles[index].abstract)
   ).length;
-  const failedKeywords = articles.length - enrichedKeywords;
+  const failedKeywords = attempted - enrichedKeywords;
   const failedAbstracts = results.filter((article, index) =>
     !hasText(articles[index].abstract) && !hasText(article.abstract)
   ).length;
   return {
-    processed: articles.length,
-    attemptedIds: articles.map((article) => article.id),
+    processed: attempted,
+    attemptedIds: articles.slice(0, attempted).map((article) => article.id),
     enriched: enrichedKeywords,
     failed: failedKeywords,
     enrichedKeywords,
@@ -332,21 +345,22 @@ export async function enrichMissingAbstracts(options = {}) {
       errors: []
     };
   }
-  const enrichment = await enrichArticles(articles, ["abstract"]);
+  const enrichment = await enrichArticles(articles, ["abstract"], options);
   const results = enrichment.articles;
+  const attempted = Number.isFinite(enrichment.processed) ? enrichment.processed : articles.length;
   const enrichedAbstracts = results.filter((article, index) =>
     hasText(article.abstract) && !hasText(articles[index].abstract)
   ).length;
   const enrichedKeywords = results.filter((article, index) =>
     hasText(article.keywords) && !hasText(articles[index].keywords)
   ).length;
-  const failedAbstracts = articles.length - enrichedAbstracts;
+  const failedAbstracts = attempted - enrichedAbstracts;
   const failedKeywords = results.filter((article, index) =>
     !hasText(articles[index].keywords) && !hasText(article.keywords)
   ).length;
   return {
-    processed: articles.length,
-    attemptedIds: articles.map((article) => article.id),
+    processed: attempted,
+    attemptedIds: articles.slice(0, attempted).map((article) => article.id),
     enriched: enrichedAbstracts,
     failed: failedAbstracts,
     enrichedAbstracts,

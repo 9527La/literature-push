@@ -259,6 +259,9 @@ test("batch translation falls back to Baidu with a provider-specific payload", a
   const previousFetch = globalThis.fetch;
   const previousConfig = {
     translationProvider: config.translationProvider,
+    translationProviders: config.translationProviders,
+    tencentSecretId: config.tencentSecretId,
+    tencentSecretKey: config.tencentSecretKey,
     volcengineAccessKeyId: config.volcengineAccessKeyId,
     volcengineSecretAccessKey: config.volcengineSecretAccessKey,
     baiduTranslateAppId: config.baiduTranslateAppId,
@@ -267,6 +270,10 @@ test("batch translation falls back to Baidu with a provider-specific payload", a
   const calls = [];
   Object.assign(config, {
     translationProvider: "auto",
+    translationProviders: ["tencent", "baidu"],
+    tencentSecretId: "TC_TEST",
+    tencentSecretKey: "TC_SECRET",
+    // Configured but paused: it must not be contacted even as a fallback.
     volcengineAccessKeyId: "AK_TEST",
     volcengineSecretAccessKey: "SK_TEST",
     baiduTranslateAppId: "BAIDU_TEST",
@@ -275,7 +282,7 @@ test("batch translation falls back to Baidu with a provider-specific payload", a
   globalThis.fetch = async (url) => {
     const value = String(url);
     calls.push(value);
-    if (value.includes("translate.volcengineapi.com")) {
+    if (value.includes("tmt.tencentcloudapi.com")) {
       return { ok: false, status: 400, text: async () => "invalid request" };
     }
     return {
@@ -293,8 +300,16 @@ test("batch translation falls back to Baidu with a provider-specific payload", a
     assert.equal(result.translatedUnits, 2);
     assert.equal(result.failed.length, 0);
     assert.ok(result.results.every((item) => item.provider === "baidu"));
-    assert.equal(calls.filter((url) => url.includes("translate.volcengineapi.com")).length, 1);
+    // Tencent is tried first (its own client retries a failed request, so the
+    // count is not pinned to one) and Baidu answers only after it gives up.
+    assert.ok(calls.filter((url) => url.includes("tmt.tencentcloudapi.com")).length >= 1, "tencent is tried first");
+    assert.equal(calls.filter((url) => url.includes("translate.volcengineapi.com")).length, 0, "paused providers stay out of the chain");
     assert.equal(calls.filter((url) => url.includes("fanyi-api.baidu.com")).length, 1);
+    assert.ok(
+      calls.findIndex((url) => url.includes("fanyi-api.baidu.com"))
+        > calls.findIndex((url) => url.includes("tmt.tencentcloudapi.com")),
+      "baidu is used as the fallback, not the first choice"
+    );
     const baiduUrl = calls.find((url) => url.includes("fanyi-api.baidu.com"));
     assert.match(decodeURIComponent(new URL(baiduUrl).searchParams.get("q")), /English title\nEnglish abstract/);
   } finally {

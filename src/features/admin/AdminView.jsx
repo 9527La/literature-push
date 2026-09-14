@@ -1,16 +1,73 @@
 import { useEffect, useState } from "react";
-import { Activity, BookOpen, ChevronDown, Database, FileText, Languages, RefreshCw, ShieldCheck, Trash2, UserPlus, Users } from "lucide-react";
+import { Activity, BookOpen, ChevronDown, Database, FileText, Languages, RefreshCw, ShieldCheck, Square, Trash2, UserPlus, Users } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { formatDate, formatDateTime } from "../../lib/format.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
 
-/** Batch sizes offered for translation runs. */
-const TRANSLATE_BATCH_SIZES = [20, 50, 100];
-/** Rounds per click: 1 keeps a single round, 8 drains a backlog in one action. */
-const TRANSLATE_ROUND_OPTIONS = [
-  { value: 1, label: "1 轮" },
-  { value: 8, label: "8 轮（排空）" }
+/** One-click maintenance entry points; the server decides the batching. */
+const MAINTENANCE_ACTIONS = [
+  { task: "abstracts", label: "补全摘要", runningLabel: "摘要补全中…", icon: FileText },
+  { task: "keywords", label: "补全关键词", runningLabel: "关键词补全中…", icon: Activity },
+  { task: "metadata", label: "补全摘要和关键词", runningLabel: "摘要和关键词补全中…", icon: Database },
+  { task: "translate_title", label: "翻译标题", runningLabel: "标题翻译中…", icon: Languages },
+  { task: "translate_abstract", label: "翻译摘要", runningLabel: "摘要翻译中…", icon: Languages }
 ];
+
+const MAINTENANCE_STATUS_LABELS = {
+  running: "进行中",
+  success: "已完成",
+  partial: "部分完成",
+  error: "失败"
+};
+
+const formatNumber = (value) => Number(value || 0).toLocaleString("zh-CN");
+
+/**
+ * One provider's monthly allowance. Colour answers "am I about to be cut off?"
+ * at a glance, but never alone — the percentage is always printed next to it.
+ */
+function TranslationQuota({ title, budget, hint }) {
+  const limit = Number(budget?.limit) || 0;
+  if (limit <= 0) return null;
+  const used = Number(budget?.used) || 0;
+  const percent = Math.min(100, (used / limit) * 100);
+  const level = budget?.exhausted || percent >= 95 ? "danger" : percent >= 70 ? "warn" : "ok";
+  return (
+    <div className={`translate-quota level-${level}`} title={hint}>
+      <span className="translate-quota-label">{title}</span>
+      <span
+        className="translate-quota-track"
+        role="progressbar"
+        aria-label={`${title}使用比例`}
+        aria-valuemin={0}
+        aria-valuemax={limit}
+        aria-valuenow={used}
+        aria-valuetext={`已用 ${percent.toFixed(1)}%`}
+      >
+        <span className="translate-quota-fill" style={{ width: `${Math.max(percent, used > 0 ? 1.5 : 0)}%` }} />
+      </span>
+      <span className="translate-quota-value">
+        已用 <strong>{formatNumber(used)}</strong> / {formatNumber(limit)} 字符
+        <span className="translate-quota-percent">{percent < 1 && used > 0 ? percent.toFixed(2) : percent.toFixed(1)}%</span>
+      </span>
+      <span className="translate-quota-remaining">
+        {budget?.exhausted ? "本月已用尽，已停止调用" : `剩余 ${formatNumber(budget?.remaining ?? Math.max(0, limit - used))} 字符`}
+      </span>
+    </div>
+  );
+}
+
+/** Seconds → a compact Chinese duration; null means "not enough data yet". */
+function formatEta(seconds) {
+  if (seconds === null || seconds === undefined) return "计算中";
+  const total = Math.max(0, Math.round(seconds));
+  if (total <= 0) return "即将完成";
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours > 0) return `${hours} 小时 ${minutes} 分`;
+  if (minutes > 0) return `${minutes} 分 ${total % 60} 秒`;
+  return `${total} 秒`;
+}
 
 function AdminView({ onDataChanged }) {
   const [overview, setOverview] = useState(null);
@@ -23,12 +80,16 @@ function AdminView({ onDataChanged }) {
   const [deleteUserId, setDeleteUserId] = useState(null);
   const [expandedCoverageKey, setExpandedCoverageKey] = useState(null);
   const [selectedCoverageArticle, setSelectedCoverageArticle] = useState(null);
-  const [translateBatchSize, setTranslateBatchSize] = useState(20);
-  const [translateRounds, setTranslateRounds] = useState(1);
+  const [maintenance, setMaintenance] = useState(null);
 
   async function loadOverview() {
-    setOverview(await api.get("/api/admin/overview"));
+    const next = await api.get("/api/admin/overview");
+    setOverview(next);
+    // The overview carries the current job so a reloaded page resumes its
+    // progress bar instead of waiting a poll cycle to find out it is running.
+    if (next?.maintenance !== undefined) setMaintenance(next.maintenance);
     setLoading(false);
+    return next;
   }
 
   useEffect(() => {
@@ -38,6 +99,60 @@ function AdminView({ onDataChanged }) {
     });
   }, []);
 
+  // Poll the job while it runs. A maintenance drain is a long-lived server-side
+  // loop now, so the progress bar and the remaining-time estimate come from the
+  // server's own counters rather than from an open HTTP request.
+  useEffect(() => {
+    if (!maintenance?.running) return undefined;
+    let cancelled = false;
+    const timer = setInterval(async () => {
+      try {
+        const { state } = await api.get("/api/admin/maintenance");
+        if (cancelled) return;
+        setMaintenance(state);
+        if (state && !state.running) {
+          clearInterval(timer);
+          setMessage(state.message || "");
+          await Promise.all([loadOverview(), onDataChanged()]);
+        }
+      } catch (error) {
+        if (!cancelled) setMessage(error.message);
+      }
+    }, 2000);
+    return () => { cancelled = true; clearInterval(timer); };
+    // `maintenance.running` alone drives it: the interval body must not be
+    // recreated by every progress tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maintenance?.running]);
+
+  /** Start a one-click drain. The response is immediate; progress arrives by poll. */
+  async function startMaintenance(task) {
+    setRunningAction(task);
+    setMessage("");
+    try {
+      const result = await api.post("/api/admin/maintenance", { task });
+      setMaintenance(result.state);
+      if (!result.started) setMessage(result.error || "已有补全任务在运行。");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setRunningAction("");
+    }
+  }
+
+  async function stopMaintenance() {
+    setRunningAction("maintenance-stop");
+    try {
+      const result = await api.post("/api/admin/maintenance/stop");
+      if (result.state) setMaintenance(result.state);
+      setMessage(result.stopped ? "已请求停止，当前这一小批处理完就会停下。" : "当前没有正在运行的任务。");
+    } catch (error) {
+      setMessage(error.message);
+    } finally {
+      setRunningAction("");
+    }
+  }
+
   async function runDataAction(action) {
     setRunningAction(action);
     setMessage("");
@@ -45,37 +160,6 @@ function AdminView({ onDataChanged }) {
       if (action === "refresh") {
         const result = await api.post("/api/refresh");
         setMessage(result.status === "success" ? `文献刷新完成，新增 ${result.addedCount || 0} 篇。` : result.message);
-      } else if (action === "keywords") {
-        const result = await api.post("/api/enrich-keywords");
-        const state = result.status === "error" ? "失败" : result.status === "partial" ? "部分完成" : "完成";
-        const detail = result.errors?.[0]?.message ? ` 首条失败：${result.errors[0].message}` : "";
-        setMessage(`关键词补全${state}：本次处理 ${result.processed || 0} 篇，成功 ${result.enriched || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待补全。${detail}`);
-      } else if (action === "abstracts") {
-        const result = await api.post("/api/enrich-abstracts");
-        const state = result.status === "error" ? "失败" : result.status === "partial" ? "部分完成" : "完成";
-        const detail = result.errors?.[0]?.message ? ` 首条失败：${result.errors[0].message}` : "";
-        setMessage(`摘要补全${state}：本次处理 ${result.processed || 0} 篇，成功 ${result.enriched || 0} 篇，失败 ${result.failed || 0} 篇；仍有 ${result.remaining || 0} 篇待补全。${detail}`);
-      } else if (action === "metadata") {
-        const result = await api.post("/api/enrich-metadata");
-        const state = result.status === "error" ? "失败" : result.status === "partial" ? "部分完成" : "完成";
-        const detail = result.errors?.[0]?.message ? ` 首条失败：${result.errors[0].message}` : "";
-        setMessage(`摘要和关键词补全${state}：摘要 +${result.enrichedAbstracts || 0}，关键词 +${result.enrichedKeywords || 0}；失败：摘要 ${result.failedAbstracts || 0}、关键词 ${result.failedKeywords || 0}；剩余摘要 ${result.remaining?.abstracts || 0}、关键词 ${result.remaining?.keywords || 0}。${detail}`);
-      } else {
-        const field = action === "titles" ? "title" : "abstract";
-        const label = action === "titles" ? "标题" : "摘要";
-        const result = await api.post("/api/admin/translate", {
-          field,
-          batchSize: translateBatchSize,
-          maxBatches: translateRounds
-        });
-        const state = result.status === "error" ? "失败" : result.status === "partial" ? "部分完成" : "完成";
-        // Show several reasons, not just the first: when every provider is dead
-        // the first message alone hides which one could be fixed.
-        const reasons = (result.errors || []).slice(0, 3).map((item) => item.message).filter(Boolean).join("；");
-        const stopNote = result.stoppedReason === "no-progress"
-          ? "（本轮没有成功翻译，已提前停止以免反复消耗请求）"
-          : "";
-        setMessage(`${label}翻译${state}：${result.batches || 1} 轮共处理 ${result.processed || 0} 篇，成功 ${result.translated || 0} 篇，失败 ${result.failed || 0} 篇，API 请求 ${result.requests || 0} 次${stopNote}；仍有 ${result.remaining || 0} 篇待翻译。${reasons ? ` 失败原因：${reasons}` : ""}`);
       }
       await Promise.all([loadOverview(), onDataChanged()]);
     } catch (error) {
@@ -171,13 +255,8 @@ function AdminView({ onDataChanged }) {
   const coverageDetails = overview.coverageDetails || {};
   const recentRefreshes = Array.isArray(overview.recentRefreshes) ? overview.recentRefreshes.slice(0, 10) : [];
   const budget = overview.translationBudget || null;
-  const budgetLimit = Number(budget?.limit) || 0;
-  const budgetUsed = Number(budget?.used) || 0;
-  const budgetPercent = budgetLimit > 0 ? Math.min(100, (budgetUsed / budgetLimit) * 100) : 0;
-  // Three levels so the indicator answers "am I about to be cut off?" at a
-  // glance. Colour is never the only signal — the percentage is always printed.
-  const budgetLevel = budget?.exhausted || budgetPercent >= 95 ? "danger" : budgetPercent >= 70 ? "warn" : "ok";
-  const formatNumber = (value) => Number(value || 0).toLocaleString("zh-CN");
+  const baiduBudget = overview.baiduTranslationBudget || null;
+  const providerOrder = Array.isArray(overview.translationProviders) ? overview.translationProviders : [];
   const taskLabels = {
     refresh: "刷新文献",
     abstracts: "补全摘要",
@@ -192,6 +271,16 @@ function AdminView({ onDataChanged }) {
     error: "失败",
     running: "进行中"
   };
+  // A running drain owns the buttons: a second click would only be answered with
+  // "already running", and two overlapping crawls fetch the same records twice.
+  const maintenanceRunning = Boolean(maintenance?.running);
+  const maintenanceStatusLabel = maintenance ? (MAINTENANCE_STATUS_LABELS[maintenance.status] || maintenance.status) : "";
+  const maintenancePercent = Number(maintenance?.percent || 0);
+  const maintenanceEta = maintenanceRunning || maintenance?.status === "partial"
+    ? formatEta(maintenance?.etaSeconds)
+    : "—";
+  const plan = maintenance?.plan || null;
+  const busy = Boolean(runningAction) || maintenanceRunning;
 
   return (
     <section className="admin-dashboard" aria-labelledby="admin-title">
@@ -199,61 +288,117 @@ function AdminView({ onDataChanged }) {
         <div className="admin-seal"><Database size={24} /></div>
         <div><span className="eyebrow">仅最高管理员可见</span><h1 id="admin-title">网站管理中心</h1><p>查看远端数据库的完整度、用户与社区状态，并执行受保护的数据维护。</p></div>
         <div className="admin-command-bar">
-          <button className="primary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("refresh")}><RefreshCw size={15} className={runningAction === "refresh" ? "spin" : ""} /> {runningAction === "refresh" ? "刷新中…" : "刷新文献数据"}</button>
-          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("keywords")}><Activity size={15} className={runningAction === "keywords" ? "spin" : ""} /> {runningAction === "keywords" ? "补全中…" : "补全关键词"}</button>
-          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("abstracts")}><FileText size={15} className={runningAction === "abstracts" ? "spin" : ""} /> {runningAction === "abstracts" ? "摘要补全中…" : "补全摘要"}</button>
-          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("metadata")}><Database size={15} className={runningAction === "metadata" ? "spin" : ""} /> {runningAction === "metadata" ? "摘要和关键词补全中…" : "补全摘要和关键词"}</button>
-          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("titles")}><Languages size={15} className={runningAction === "titles" ? "spin" : ""} /> {runningAction === "titles" ? "标题翻译中…" : "翻译标题"}</button>
-          <button className="secondary" type="button" disabled={Boolean(runningAction)} onClick={() => runDataAction("translate-abstracts")}><Languages size={15} className={runningAction === "translate-abstracts" ? "spin" : ""} /> {runningAction === "translate-abstracts" ? "摘要翻译中…" : "翻译摘要"}</button>
+          <button className="primary" type="button" disabled={busy} onClick={() => runDataAction("refresh")}><RefreshCw size={15} className={runningAction === "refresh" ? "spin" : ""} /> {runningAction === "refresh" ? "刷新中…" : "刷新文献数据"}</button>
+          {MAINTENANCE_ACTIONS.map(({ task, label, runningLabel, icon: Icon }) => (
+            <button
+              className="secondary"
+              type="button"
+              key={task}
+              disabled={busy}
+              title={`一次点击跑到排空：服务端会一小批一小批地处理，直到没有可处理的条目或连续多轮没有进展。`}
+              onClick={() => startMaintenance(task)}
+            >
+              <Icon size={15} className={runningAction === task ? "spin" : ""} />
+              {" "}
+              {runningAction === task ? "启动中…" : (maintenanceRunning && maintenance?.task === task ? runningLabel : `一键${label}`)}
+            </button>
+          ))}
         </div>
-        {/* Translation controls sit next to the buttons that use them: batch size
-            covers "how many per round", rounds covers "keep going until done". */}
+        {/* Batch sizes and round counts are gone: the server drains the whole
+            backlog in one go and sizes translation runs to the remaining
+            allowance, so there is nothing left for the administrator to guess. */}
         <div className="admin-translate-controls">
-          <label className="checkline">
-            <span>每轮篇数</span>
-            <select value={translateBatchSize} onChange={(event) => setTranslateBatchSize(Number(event.target.value))} disabled={Boolean(runningAction)}>
-              {TRANSLATE_BATCH_SIZES.map((size) => <option key={size} value={size}>{size} 篇</option>)}
-            </select>
-          </label>
-          <label className="checkline">
-            <span>翻译轮次</span>
-            <select value={translateRounds} onChange={(event) => setTranslateRounds(Number(event.target.value))} disabled={Boolean(runningAction)}>
-              {TRANSLATE_ROUND_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
-          <button className="secondary compact" type="button" disabled={Boolean(runningAction)} onClick={checkTranslationHealth}>
+          <button className="secondary compact" type="button" disabled={busy} onClick={checkTranslationHealth}>
             <ShieldCheck size={14} className={runningAction === "translate-health" ? "spin" : ""} /> {runningAction === "translate-health" ? "体检中…" : "翻译服务体检"}
           </button>
-          {budgetLimit > 0 && (
-            <div
-              className={`translate-quota level-${budgetLevel}`}
-              title={`腾讯云文本翻译每月 500 万字符免费，超出按 58 元/百万字符计费。本系统设有本地硬上限 ${formatNumber(budgetLimit)} 字符，触及即停止调用，不会产生费用。`}
-            >
-              <span className="translate-quota-label">腾讯云翻译额度</span>
-              <span
-                className="translate-quota-track"
-                role="progressbar"
-                aria-label="本月翻译额度使用比例"
-                aria-valuemin={0}
-                aria-valuemax={budgetLimit}
-                aria-valuenow={budgetUsed}
-                aria-valuetext={`已用 ${budgetPercent.toFixed(1)}%`}
-              >
-                <span className="translate-quota-fill" style={{ width: `${Math.max(budgetPercent, budgetUsed > 0 ? 1.5 : 0)}%` }} />
-              </span>
-              <span className="translate-quota-value">
-                已用 <strong>{formatNumber(budgetUsed)}</strong> / {formatNumber(budgetLimit)} 字符
-                <span className="translate-quota-percent">{budgetPercent < 1 && budgetUsed > 0 ? budgetPercent.toFixed(2) : budgetPercent.toFixed(1)}%</span>
-              </span>
-              <span className="translate-quota-remaining">
-                {budget?.exhausted ? "本月已用尽，已停止调用" : `剩余 ${formatNumber(budget?.remaining ?? Math.max(0, budgetLimit - budgetUsed))} 字符`}
-              </span>
-            </div>
+          <TranslationQuota
+            title="腾讯云翻译额度"
+            budget={budget}
+            hint="腾讯云文本翻译每月 500 万字符免费，超出按 58 元/百万字符计费。本系统设有本地硬上限，触及即停止调用，不会产生费用。用量取自接口返回的计费字符数。"
+          />
+          <TranslationQuota
+            title="百度翻译额度"
+            budget={baiduBudget}
+            hint="百度没有额度查询接口（控制台用量每 5 分钟才刷新），这里是本系统按提交字符数自己统计的月度用量，上限由 .env 的 BAIDU_MONTHLY_CHAR_LIMIT 决定：标准版 5 万 / 高级版 100 万 / 尊享版 200 万，0 表示只统计不限制。"
+          />
+          <span className="admin-translate-hint">体检会对每个翻译来源各发一条极短文本（约几个字符）。翻译按每请求 10 条 / 1800 字符分包，额度不足时会自动停在可负担的篇数上。</span>
+          {providerOrder.length > 0 && (
+            <span className="admin-translate-hint">
+              当前翻译链路：<strong>{providerOrder.join(" → ")}</strong>
+              （火山引擎、LibreTranslate、MyMemory 已暂停；如需临时启用，改 .env 的 TRANSLATION_PROVIDERS 或 TRANSLATION_PROVIDER）
+            </span>
           )}
-          <span className="admin-translate-hint">体检会对每个翻译来源各发一条极短文本（约几个字符）。</span>
+          {baiduBudget?.lastError && (
+            <span className="admin-translate-hint">
+              百度上次调用失败：{baiduBudget.lastError.message}
+              {baiduBudget.lastErrorHint ? `（${baiduBudget.lastErrorHint}）` : ""}
+            </span>
+          )}
         </div>
       </header>
       {message && <div className="admin-notice" role="status">{message}</div>}
+
+      {maintenance && (
+        <section className={`admin-panel-card admin-maintenance status-${maintenance.status}`} aria-label="补全任务进度">
+          <header>
+            <div>
+              <span className="eyebrow">{maintenanceRunning ? "进行中" : "最近一次补全"}</span>
+              <h2>{maintenance.label}</h2>
+            </div>
+            {maintenanceRunning ? (
+              <button className="secondary compact" type="button" disabled={runningAction === "maintenance-stop"} onClick={stopMaintenance}>
+                <Square size={13} /> {runningAction === "maintenance-stop" ? "停止中…" : "停止"}
+              </button>
+            ) : (
+              <span className={`run-state ${maintenance.status}`}>{maintenanceStatusLabel}</span>
+            )}
+          </header>
+          <span
+            className="maintenance-track"
+            role="progressbar"
+            aria-label={`${maintenance.label}进度`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(maintenancePercent)}
+            aria-valuetext={`已完成 ${maintenancePercent.toFixed(1)}%，剩余 ${maintenance.remaining} 篇`}
+          >
+            <span className="maintenance-fill" style={{ width: `${Math.max(maintenancePercent, maintenance.done > 0 ? 1 : 0)}%` }} />
+          </span>
+          <div className="maintenance-metrics">
+            <div><span>进度</span><strong>{maintenancePercent.toFixed(1)}%</strong></div>
+            <div><span>已处理</span><strong>{formatNumber(maintenance.processed)} / {formatNumber(maintenance.total)}</strong></div>
+            <div><span>成功</span><strong>{formatNumber(maintenance.succeeded)}</strong></div>
+            <div><span>剩余</span><strong>{formatNumber(maintenance.remaining)}</strong></div>
+            <div><span>速率</span><strong>{maintenance.ratePerMinute > 0 ? `${Math.round(maintenance.ratePerMinute)} 篇/分` : "计算中"}</strong></div>
+            <div><span>预计剩余时间</span><strong>{maintenanceEta}</strong></div>
+          </div>
+          {plan && (
+            <p className="maintenance-note">
+              本次队列约 {formatNumber(maintenance.total)} 篇，按样本估算需 <strong>{formatNumber(plan.estimatedChars)}</strong> 字符
+              （平均每篇 {formatNumber(plan.avgCharsPerArticle)} 字符）。
+              {plan.budgetExhausted
+                ? " 腾讯与百度的本月额度都已用尽，暂时无法继续翻译。"
+                : plan.budgetLimited
+                  ? ` 两家合计剩余额度只够约 ${formatNumber(plan.affordableCount)} 篇，将在额度允许处停止；调高 .env 的 TENCENT_MONTHLY_CHAR_BUDGET 或 BAIDU_MONTHLY_CHAR_LIMIT 可继续。`
+                  : " 两家合计额度足够翻完整个队列。"}
+            </p>
+          )}
+          {!maintenanceRunning && (maintenance.stopReasonLabel || maintenance.message) && (
+            <p className="maintenance-note">
+              {maintenance.stopReasonLabel && <strong>{maintenance.stopReasonLabel}</strong>}
+              {maintenance.stopReasonLabel && maintenance.message ? " · " : ""}
+              {maintenance.message}
+            </p>
+          )}
+          {maintenanceRunning && maintenance.remainingBacklog && (
+            <p className="maintenance-note">
+              {maintenance.kind === "translate"
+                ? `待翻译 ${formatNumber(maintenance.remainingBacklog.translation || 0)} 篇`
+                : `待补全：摘要 ${formatNumber(maintenance.remainingBacklog.abstracts || 0)} 篇 · 关键词 ${formatNumber(maintenance.remainingBacklog.keywords || 0)} 篇`}
+            </p>
+          )}
+        </section>
+      )}
 
       <section className="admin-ledger" aria-label="网站总览">
         <header><span>远端数据总账</span><small>实时读取</small></header>

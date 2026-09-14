@@ -78,12 +78,13 @@ import {
 } from "./user-auth.js";
 import { crawlArticleDetails } from "./crawler.js";
 import { refreshArticles, rescheduleRefresh, scheduleRefresh, enrichMissingKeywords, enrichMissingAbstracts, enrichAllMissingMetadata, translateMissingArticles } from "./refresh.js";
-import { probeTranslationProviders, translationBudgetNotice, translationProvidersInUse, translationTencentBudget } from "./translate.js";
+import { probeTranslationProviders, translationBaiduBudget, translationBudgetNotice, translationProvidersInUse, translationTencentBudget } from "./translate.js";
 import { generateWeeklyDigestMarkdown } from "./digest.js";
 import { sendMarkdownDigestEmail } from "./mail.js";
 import { calculatePushDays } from "./utils.js";
 import { createArticlePreparationService } from "./prepare.js";
 import { ensureTranslation, ensureTranslations } from "./translation-cache.js";
+import { getMaintenanceState, requestMaintenanceStop, startMaintenance } from "./maintenance.js";
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -455,10 +456,38 @@ app.get("/api/admin/translate/health", requireSiteAdmin, asyncHandler(async (req
   res.json({
     providers,
     budget: translationTencentBudget(),
+    baiduBudget: translationBaiduBudget(),
     notice: translationBudgetNotice(),
     order: translationProvidersInUse()
   });
 }));
+
+/**
+ * One-click maintenance. The heavy loop runs detached from the request, so the
+ * dashboard gets an immediate 202 with a snapshot it can poll — a drain of a few
+ * thousand records would otherwise sit inside one HTTP response for an hour.
+ */
+app.post("/api/admin/maintenance", requireSiteAdmin, (req, res) => {
+  const task = String(req.body?.task || "").trim();
+  const result = startMaintenance(task);
+  if (!result.started) {
+    const unknown = result.reason === "unknown-task";
+    res.status(unknown ? 400 : 409).json({
+      ...result,
+      error: unknown ? "不支持的任务类型" : "已有补全任务在运行，请等它结束或先停止"
+    });
+    return;
+  }
+  res.status(202).json(result);
+});
+
+app.get("/api/admin/maintenance", requireSiteAdmin, (req, res) => {
+  res.json({ state: getMaintenanceState() });
+});
+
+app.post("/api/admin/maintenance/stop", requireSiteAdmin, (req, res) => {
+  res.json(requestMaintenanceStop());
+});
 
 app.get("/api/settings", (req, res) => {
   const userId = getPrincipalId(req);
@@ -999,8 +1028,16 @@ app.get("/api/admin/session", (req, res) => {
 app.get("/api/admin/overview", requireSiteAdmin, (req, res) => {
   // The remaining translation allowance ships with the overview so the admin
   // page shows it on load instead of only after running a probe. Reading it is a
-  // local file lookup, so this costs nothing.
-  res.json({ ...getAdminOverview(), translationBudget: translationTencentBudget() });
+  // local file lookup, so this costs nothing. The maintenance snapshot rides
+  // along for the same reason: a reloaded dashboard can resume the progress bar
+  // without waiting for its first poll.
+  res.json({
+    ...getAdminOverview(),
+    translationBudget: translationTencentBudget(),
+    baiduTranslationBudget: translationBaiduBudget(),
+    translationProviders: translationProvidersInUse(),
+    maintenance: getMaintenanceState()
+  });
 });
 
 app.post("/api/admin/users", requireSiteAdmin, (req, res) => {

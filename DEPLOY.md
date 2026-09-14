@@ -168,5 +168,17 @@ sc_run: Set-Location 'E:\SC\文献推送'; powershell -NoProfile -ExecutionPolic
 
 - `package.json` / `package-lock.json` 变化 → `scripts\redeploy.ps1 -InstallDeps`。
 - `.env` 变化 → 只改远端文件；同步不会覆盖，也不要把密钥提交进 Git。
+- 翻译相关的环境变量（默认值即当前生产配置，通常不需要动）：
+
+  | 变量 | 默认 | 作用 |
+  | --- | --- | --- |
+  | `TRANSLATION_PROVIDERS` | `tencent,baidu` | 自动链路的候选与顺序。火山、LibreTranslate、MyMemory 默认**不在**链路里 |
+  | `TRANSLATION_PROVIDER` | `auto` | 显式指定单一路径（应急用），或填 `keyless` 走无密钥来源 |
+  | `TENCENT_MONTHLY_CHAR_BUDGET` | `4800000` | 腾讯云本地月度硬上限，触及即拒发请求 |
+  | `BAIDU_MONTHLY_CHAR_LIMIT` | `1000000` | 百度翻译本地月度上限（5 万标准版 / 100 万高级版 / 200 万尊享版，0 = 只统计） |
+
+  两家都是「本地记账 + 硬上限」：百度没有额度查询接口，用量是本系统按提交字符数
+  自己数出来的（落在 `data/translation-usage.json`，按自然月分桶），管理中心的
+  百度额度条据此显示，并标注为本地记账。改上限后要重启服务才生效。
 - 端口变化 → 远端 `.env` 的 `PORT`，同时用 `redeploy.ps1 -Port <端口>` 做自检。
 - 想要固定域名，需要 Cloudflare Zone + Named Tunnel；Quick Tunnel 地址本身不固定。

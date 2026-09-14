@@ -8,6 +8,17 @@ import {
   tencentBudgetNotice,
   tencentBudgetStatus
 } from "./translate-tencent.js";
+import {
+  baiduBudgetNotice,
+  baiduBudgetStatus,
+  baiduErrorHint,
+  baiduLastError,
+  clearBaiduError,
+  markBaiduExhausted,
+  noteBaiduError,
+  recordBaiduUsage
+} from "./translate-baidu-usage.js";
+import { combineBudgets } from "./translation-ledger.js";
 
 const TRANSLATION_TIMEOUT_MS = 30_000;
 const TRANSLATION_RETRY_LIMIT = 1;
@@ -547,11 +558,36 @@ function sourceLanguageForBaiduBatch(batch, targetLanguage) {
   return baiduSource(batch.map((unit) => unit.text).join("\n"), targetLanguage);
 }
 
+/**
+ * Baidu bills the *source* text and counts every code point — Chinese characters,
+ * letters, spaces, punctuation and markup alike — so `String.length` (UTF-16
+ * units) would undercount anything outside the BMP.
+ */
+function countBaiduCharacters(text) {
+  return [...String(text || "")].length;
+}
+
+/**
+ * Same spending guard as Tencent's: once the monthly free allowance is gone the
+ * account is billed 49 元/百万字符, and Baidu offers no quota endpoint to check
+ * against. So the run stops at the locally configured ceiling instead of
+ * discovering the overage on the next invoice.
+ */
+function assertBaiduBudget(characters) {
+  const status = baiduBudgetStatus();
+  if (!status.limit) return;
+  if (status.used + characters > status.limit) {
+    throw new Error(`${baiduBudgetNotice()} 本次请求需要 ${characters} 字符。`);
+  }
+}
+
 async function requestBaiduBatchUnthrottled(textList, targetLanguage, sourceLanguage) {
   if (!config.baiduTranslateAppId || !config.baiduTranslateKey) {
     throw new Error("Baidu Translate requires BAIDU_TRANSLATE_APPID and BAIDU_TRANSLATE_KEY");
   }
   const q = textList.join("\n");
+  const characters = countBaiduCharacters(q);
+  assertBaiduBudget(characters);
   const salt = String(Date.now() + Math.floor(Math.random() * 100000));
   const sign = crypto
     .createHash("md5")
@@ -572,8 +608,17 @@ async function requestBaiduBatchUnthrottled(textList, targetLanguage, sourceLang
   );
   const data = await response.json();
   if (data.error_code) {
-    throw new Error(`Baidu Translate error ${data.error_code}: ${data.error_msg || "unknown error"}`);
+    const message = `Baidu Translate error ${data.error_code}: ${data.error_msg || "unknown error"}`;
+    // Keep the reason for the dashboard: unlike a quota figure, Baidu does tell
+    // us exactly why a call was refused.
+    noteBaiduError(message);
+    // 54004 is "账户余额不足". Retrying the remaining batches would only
+    // rediscover the same fact, so mark the month spent and let the chain stop.
+    if (String(data.error_code) === "54004") markBaiduExhausted();
+    throw new Error(message);
   }
+  recordBaiduUsage(characters);
+  clearBaiduError();
   return Array.isArray(data.trans_result)
     ? data.trans_result.map((item) => String(item?.dst || "").trim())
     : [];
@@ -594,29 +639,41 @@ function mapBaiduBatchTranslations(translations, batch) {
   return translations.slice(0, batch.length);
 }
 
+const SUPPORTED_PROVIDERS = ["tencent", "volcengine", "baidu", "libretranslate", "mymemory"];
+
+/**
+ * Does this provider have what it needs to be attempted? A keyed provider without
+ * credentials is not a fallback, it is a guaranteed failure that still costs a
+ * request, so it never enters the automatic chain.
+ */
+function providerHasCredentials(provider) {
+  if (provider === "tencent") return Boolean(config.tencentSecretId && config.tencentSecretKey);
+  if (provider === "baidu") return Boolean(config.baiduTranslateAppId && config.baiduTranslateKey);
+  if (provider === "volcengine") return Boolean(config.volcengineAccessKeyId && config.volcengineSecretAccessKey);
+  return true;
+}
+
+/**
+ * The automatic chain is the configured `TRANSLATION_PROVIDERS` list (tencent,
+ * baidu by default), filtered to providers that actually have credentials.
+ *
+ * Volcengine, LibreTranslate and MyMemory are switched off: Volcengine's
+ * temporary token is dead, and the two keyless endpoints issue one request per
+ * chunk — with up to 20 doomed requests per batch whenever the chain fell
+ * through. They remain reachable through an explicit TRANSLATION_PROVIDER, and
+ * keyless is still the last resort when no credential at all is configured, so
+ * the feature degrades instead of silently doing nothing.
+ */
 function translationProviderList() {
   const configuredProvider = String(config.translationProvider || "auto").trim().toLowerCase();
+  const configuredChain = (Array.isArray(config.translationProviders) ? config.translationProviders : [])
+    .map(canonicalProvider);
   if (configuredProvider === "auto") {
-    // Only keyed providers belong in the automatic chain: the two keyless
-    // endpoints issue one request per chunk and are currently dead in this
-    // deployment (403 / daily quota), so including them meant up to 20 doomed
-    // requests per batch whenever the chain fell through. They stay reachable
-    // via TRANSLATION_PROVIDER, and remain the last resort when no credential at
-    // all is configured, so the feature degrades instead of silently doing
-    // nothing.
-    const keyed = [
-      ...(config.tencentSecretId && config.tencentSecretKey ? ["tencent"] : []),
-      ...(config.volcengineAccessKeyId && config.volcengineSecretAccessKey ? ["volcengine"] : []),
-      ...(config.baiduTranslateAppId && config.baiduTranslateKey ? ["baidu"] : [])
-    ];
-    return keyed.length ? keyed : ["libretranslate", "mymemory"];
+    const chain = configuredChain.filter((provider) => providerHasCredentials(provider));
+    return chain.length ? chain : ["libretranslate", "mymemory"];
   }
-  if (["tencent", "volcengine", "volc", "baidu", "libretranslate", "mymemory"].includes(configuredProvider)) {
-    return [configuredProvider];
-  }
-  if (configuredProvider === "keyless") {
-    return ["libretranslate", "mymemory"];
-  }
+  if (configuredProvider === "keyless") return ["libretranslate", "mymemory"];
+  if (SUPPORTED_PROVIDERS.includes(configuredProvider)) return [configuredProvider];
   throw new Error(`Unsupported translation provider: ${configuredProvider}`);
 }
 
@@ -900,6 +957,35 @@ export function translationProvidersInUse() {
 
 export function translationTencentBudget() {
   return tencentBudgetStatus();
+}
+
+/**
+ * Baidu is metered locally (it exposes no quota endpoint), so the status carries
+ * the caveat and the provider's own last refusal — the balance error is the real
+ * signal that the account needs attention.
+ */
+export function translationBaiduBudget() {
+  const status = baiduBudgetStatus();
+  const lastError = baiduLastError();
+  return {
+    ...status,
+    notice: baiduBudgetNotice(),
+    lastError,
+    lastErrorHint: lastError ? baiduErrorHint(lastError.message) : ""
+  };
+}
+
+/**
+ * What the chain as a whole can still spend. Translation falls through
+ * tencent → baidu, so "will this queue fit?" is answered by the total, and a run
+ * is only budget-limited when every provider in the chain is spent.
+ */
+export function translationBudgets() {
+  return {
+    tencent: translationTencentBudget(),
+    baidu: translationBaiduBudget(),
+    combined: combineBudgets([tencentBudgetStatus(), baiduBudgetStatus()])
+  };
 }
 
 export function translationBudgetNotice() {
