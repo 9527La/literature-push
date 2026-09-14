@@ -133,6 +133,19 @@ sc_run: Set-Location 'E:\SC\文献推送'; powershell -NoProfile -ExecutionPolic
 | `GET /api/status`（带 `x-passport-token`） | 200，`articleCount > 0` |
 | 端口 4177 | 有监听进程 |
 
+第 8 项必须单独做——**脚本验不出前端白屏**：`-VerifyOnly` 只看端口与接口，一个启动即崩进错误边界的 bundle，上面每一项照样返回 200。用真实浏览器跑一遍：
+
+```
+node scripts/verify-render.mjs https://<本次隧道地址>        # 默认 1440px 视口
+node scripts/verify-render.mjs http://192.168.31.233:4177 1280
+```
+
+它会用 `.env` 里的管理员通行证登录（不打印通行证），打开管理中心并断言：页面没有进入错误边界、两条翻译额度条存在且同排、没有内容溢出、命令栏按钮文案与预期一致。任一项失败即以 1 退出。依赖项目自带的 `playwright-core` 与本机的 Edge / Chrome（可用 `VERIFY_BROWSER=chrome` 切换）。
+
+> 2026-09-14 就是靠它发现问题的：本机 `vite build` 产出的 bundle 会在启动时抛
+> `Cannot read properties of null (reading 'useState')`（React internals 为 null），
+> 而 HTTP 层全绿。当次部署用的是远端自己构建的产物、渲染正常，但这个盲区是真实存在的。
+
 需要手工确认的两项：
 
 ```powershell
