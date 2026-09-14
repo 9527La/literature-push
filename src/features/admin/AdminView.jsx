@@ -50,8 +50,10 @@ function TranslationQuota({ title, budget, hint }) {
         已用 <strong>{formatNumber(used)}</strong> / {formatNumber(limit)} 字符
         <span className="translate-quota-percent">{percent < 1 && used > 0 ? percent.toFixed(2) : percent.toFixed(1)}%</span>
       </span>
+      {/* No unit here: the "已用 … 字符" right next to it already carries it, and
+          the saved width is what keeps both allowance bars on one row. */}
       <span className="translate-quota-remaining">
-        {budget?.exhausted ? "本月已用尽，已停止调用" : `剩余 ${formatNumber(budget?.remaining ?? Math.max(0, limit - used))} 字符`}
+        {budget?.exhausted ? "本月已用尽，已停止调用" : `剩余 ${formatNumber(budget?.remaining ?? Math.max(0, limit - used))}`}
       </span>
     </div>
   );
@@ -300,7 +302,7 @@ function AdminView({ onDataChanged }) {
             >
               <Icon size={15} className={runningAction === task ? "spin" : ""} />
               {" "}
-              {runningAction === task ? "启动中…" : (maintenanceRunning && maintenance?.task === task ? runningLabel : `一键${label}`)}
+              {runningAction === task ? "启动中…" : (maintenanceRunning && maintenance?.task === task ? runningLabel : label)}
             </button>
           ))}
         </div>
@@ -308,7 +310,15 @@ function AdminView({ onDataChanged }) {
             backlog in one go and sizes translation runs to the remaining
             allowance, so there is nothing left for the administrator to guess. */}
         <div className="admin-translate-controls">
-          <button className="secondary compact" type="button" disabled={busy} onClick={checkTranslationHealth}>
+          {/* The chain order used to sit under the bars as small print; it lives in
+              the tooltip now, where it is still discoverable but takes no space. */}
+          <button
+            className="secondary compact"
+            type="button"
+            disabled={busy}
+            title={providerOrder.length ? `当前翻译链路：${providerOrder.join(" → ")}（火山引擎、LibreTranslate、MyMemory 已暂停；如需临时启用，改 .env 的 TRANSLATION_PROVIDERS）` : "逐个来源各发一条极短文本，确认哪个密钥还活着"}
+            onClick={checkTranslationHealth}
+          >
             <ShieldCheck size={14} className={runningAction === "translate-health" ? "spin" : ""} /> {runningAction === "translate-health" ? "体检中…" : "翻译服务体检"}
           </button>
           <TranslationQuota
@@ -321,13 +331,6 @@ function AdminView({ onDataChanged }) {
             budget={baiduBudget}
             hint="百度没有额度查询接口（控制台用量每 5 分钟才刷新），这里是本系统按提交字符数自己统计的月度用量，上限由 .env 的 BAIDU_MONTHLY_CHAR_LIMIT 决定：标准版 5 万 / 高级版 100 万 / 尊享版 200 万，0 表示只统计不限制。"
           />
-          <span className="admin-translate-hint">体检会对每个翻译来源各发一条极短文本（约几个字符）。翻译按每请求 10 条 / 1800 字符分包，额度不足时会自动停在可负担的篇数上。</span>
-          {providerOrder.length > 0 && (
-            <span className="admin-translate-hint">
-              当前翻译链路：<strong>{providerOrder.join(" → ")}</strong>
-              （火山引擎、LibreTranslate、MyMemory 已暂停；如需临时启用，改 .env 的 TRANSLATION_PROVIDERS 或 TRANSLATION_PROVIDER）
-            </span>
-          )}
           {baiduBudget?.lastError && (
             <span className="admin-translate-hint">
               百度上次调用失败：{baiduBudget.lastError.message}

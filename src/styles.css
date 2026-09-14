@@ -4554,9 +4554,13 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
      they read as a second row of the header. */
   grid-column: 1 / -1;
   display: flex;
+  /* The probe button plus both monthly allowance bars want one row. `wrap` is
+     still the outer rule so a genuinely narrow window degrades to two rows
+     instead of pushing text over its neighbour; the bars carry a min-width that
+     matches their content, so at desktop widths they always land side by side. */
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 18px;
+  gap: 10px 12px;
   padding: 10px 14px;
   background: var(--surface-subtle);
   border: 1px solid var(--border-light);
@@ -4582,9 +4586,14 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
 .translate-quota {
   display: flex;
   align-items: center;
-  gap: 10px;
+  /* Measured, not guessed: at these sizes the probe button plus both bars need
+     ~1204px of the 1240px dashboard, so they share one row on any desktop
+     window and only wrap when the window is genuinely too narrow. */
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: min(500px, 100%);
   min-height: 34px;
-  padding: 5px 12px;
+  padding: 5px 10px;
   background: var(--surface-raised);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -4599,11 +4608,17 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
   --quota-chip: #eff3fa;
   --quota-track: #dfe4ee;
 }
-.translate-quota-label { color: var(--text-tertiary); }
+/* Text keeps its width; the bar absorbs any squeeze first. */
+.translate-quota-label { flex: 0 0 auto; color: var(--text-tertiary); }
 .translate-quota-track {
   position: relative;
   display: inline-block;
-  width: 96px;
+  /* Growth goes into the bar, not the text, so the row never overflows. The
+     60px basis is what keeps the two bars inside 1240 with room to spare; with
+     slack available the bar grows back past 90px anyway. */
+  flex: 1 1 60px;
+  width: 60px;
+  min-width: 34px;
   height: 6px;
   background: var(--quota-track);
   border-radius: 999px;
@@ -4616,8 +4631,10 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
   background: var(--quota-ink);
   transition: width var(--transition);
 }
+.translate-quota-value { flex: 0 0 auto; }
 .translate-quota-value strong { color: var(--text-primary); font-weight: 700; }
 .translate-quota-percent {
+  flex: 0 0 auto;
   margin-left: 6px;
   padding: 1px 6px;
   border-radius: 999px;
@@ -4626,7 +4643,7 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
   font-size: 12px;
   font-weight: 700;
 }
-.translate-quota-remaining { color: var(--text-tertiary); }
+.translate-quota-remaining { flex: 0 0 auto; color: var(--text-tertiary); }
 .translate-quota.level-warn { --quota-ink: #a8681f; --quota-chip: #f7ecdc; --quota-track: #f0e5d6; }
 .translate-quota.level-danger { --quota-ink: #a8341f; --quota-chip: #f6e2de; --quota-track: #f1dcd8; }
 
