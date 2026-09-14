@@ -7,7 +7,8 @@ npm-debug.log*
 .mimocode/
 artifacts/
 .workbuddy/
-# Not part of this project: unrelated scaffolds that appeared in the worktree.
+# Not part of this project: an unrelated scaffold (`frontend/`) plus the
+# CloudStudio app registration for it (`.cloudstudio`, a file, hence no slash).
 # Ignored so they are neither committed nor carried into the remote deploy.
 frontend/
-.cloudstudio/
+.cloudstudio
