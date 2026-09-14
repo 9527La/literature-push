@@ -109,3 +109,15 @@ export const ELECTRICAL_FILTER_KEYWORDS = [
   "control", "stability", "oscillation", "oscillat",
   "island", "off-grid", "standalone"
 ];
+
+// Journals whose remit is wider than this site's electrical scope declare
+// `filterKeywords`; an article survives when any of them appears in its title,
+// abstract, or keywords. Every collection source must apply the same gate, so
+// the IEEE adapter uses this too, not just the Crossref/OpenAlex paths.
+export function matchesJournalFilter(article, journal) {
+  const keywords = journal?.filterKeywords;
+  if (!Array.isArray(keywords) || !keywords.length) return true;
+  const text = [article?.title, article?.abstract, article?.keywords].filter(Boolean).join(" ").toLowerCase();
+  if (!text) return false;
+  return keywords.some((keyword) => text.includes(String(keyword).toLowerCase()));
+}

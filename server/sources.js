@@ -3,7 +3,7 @@ import { collectJournal } from "./publishers.js";
 import { config } from "./config.js";
 import { normalizeArticle as normalizeIeeeArticle, fetchJournalArticles as fetchIeeeArticles } from "./ieee.js";
 import { fetchWanfangArticles } from "./wanfang.js";
-import { decodeBasicEntities, stripTags, ELECTRICAL_FILTER_KEYWORDS, isNonResearchTitle } from "./utils.js";
+import { decodeBasicEntities, stripTags, ELECTRICAL_FILTER_KEYWORDS, isNonResearchTitle, matchesJournalFilter } from "./utils.js";
 
 const CROSSREF_API = "https://api.crossref.org";
 const OPENALEX_API = "https://api.openalex.org/works";
@@ -52,13 +52,6 @@ function articleKey(doi, fallback) {
 
 function isResearchArticle(title) {
   return title && !isNonResearchTitle(title) && !SKIP_TITLE_PATTERNS.some((pattern) => pattern.test(title.trim()));
-}
-
-function matchesJournalFilter(article, journal) {
-  if (!journal.filterKeywords || !journal.filterKeywords.length) return true;
-  const text = [article.title, article.abstract, article.keywords].filter(Boolean).join(" ").toLowerCase();
-  if (!text) return false;
-  return journal.filterKeywords.some((kw) => text.includes(kw.toLowerCase()));
 }
 
 function containsChinese(text) {

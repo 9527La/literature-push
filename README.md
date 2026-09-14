@@ -128,6 +128,8 @@
 - IEEE Transactions on Power Delivery
 - IEEE Transactions on Sustainable Energy
 - IEEE Transactions on Energy Conversion
+- IEEE Transactions on Industrial Informatics
+- IEEE Transactions on Transportation Electrification
 - Applied Energy
 - Energy
 - International Journal of Electrical Power & Energy Systems

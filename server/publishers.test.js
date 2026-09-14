@@ -8,7 +8,7 @@ import { requestJson } from './http.js';
 import { enrichAllMissingMetadata } from './metadata-backfill.js';
 
 test('every configured journal resolves to a supported platform',()=>{
- assert.equal(DEFAULT_JOURNALS.length,15);
+ assert.equal(DEFAULT_JOURNALS.length,17);
  for(const journal of DEFAULT_JOURNALS) assert.ok(validateJournal(journal).platform);
  assert.equal(validateJournal({name:'New Journal',publisher:'elsevier',issns:['1234-567X']}).platform,'elsevier');
  assert.throws(()=>validateJournal({name:'Bad',platform:'wanfang'}),/source id/);

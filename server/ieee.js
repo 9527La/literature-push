@@ -1,5 +1,6 @@
 import { requestJson, collectionLimits } from "./http.js";
 import { config } from "./config.js";
+import { matchesJournalFilter } from "./utils.js";
 
 const API_URL = "https://ieeexploreapi.ieee.org/api/v1/search/articles";
 
@@ -94,7 +95,12 @@ export async function fetchJournalArticles(journal, options = {}) {
     params.set("start_record", String(page * pageSize + 1));
     const data = await requestJson(`${API_URL}?${params}`);
     const batch = data.articles || [];
-    records.push(...batch.map((article) => normalizeArticle(article, journal)));
+    // The topical gate is applied here as well: IEEE Xplore is the primary
+    // source for its own journals, so leaving it out would let everything the
+    // Crossref/OpenAlex paths reject slip back in.
+    records.push(...batch
+      .map((article) => normalizeArticle(article, journal))
+      .filter((article) => matchesJournalFilter(article, journal)));
     if (records.length >= maxRecords || batch.length < pageSize) break;
   }
   return records.slice(0, maxRecords);

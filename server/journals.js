@@ -38,6 +38,25 @@ export const DEFAULT_JOURNALS = [
     issns: ["0885-8969", "1558-0059"]
   },
   {
+    publisher: "ieee",
+    platform: "ieee",
+    name: "IEEE Transactions on Industrial Informatics",
+    group: "ieee",
+    issns: ["1551-3203", "1941-0050"],
+    // TII's remit reaches well beyond power and energy (manufacturing, vision,
+    // process control), so it carries the same electrical gate as the broad
+    // energy journals. TTE is left unfiltered: transportation electrification
+    // is entirely in scope.
+    filterKeywords: ELECTRICAL_FILTER_KEYWORDS
+  },
+  {
+    publisher: "ieee",
+    platform: "ieee",
+    name: "IEEE Transactions on Transportation Electrification",
+    group: "ieee",
+    issns: ["2332-7782", "2577-4212"]
+  },
+  {
     publisher: "elsevier",
     platform: "elsevier",
     name: "Applied Energy",
