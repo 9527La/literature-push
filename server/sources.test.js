@@ -37,6 +37,49 @@ test("Chinese journals use Wanfang first and do not call Crossref/OpenAlex on su
   }
 });
 
+test("Crossref pages by offset, because cursor combined with sort is rejected", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSources = config.publicDataSources;
+  const calls = [];
+  config.publicDataSources = ["crossref"];
+  const item = (n, title) => ({
+    DOI: `10.1109/tte.2026.000${n}`,
+    title: [title || `Transportation electrification study ${n}`],
+    "container-title": ["IEEE Transactions on Transportation Electrification"],
+    published: { "date-parts": [[2026, 8, 3]] },
+    author: [{ given: "Ada", family: "Chen" }],
+    URL: `https://doi.org/10.1109/tte.2026.000${n}`
+  });
+  let page = 0;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    page += 1;
+    // A full first page of which only one record is research, then a short
+    // second page: forces two requests without tripping the maxRecords stop.
+    const items = page === 1
+      ? [item(1), item(2, "Editorial Board"), item(3, "Table of Contents"), item(4, "Front Cover")]
+      : [item(5)];
+    return new Response(JSON.stringify({ message: { items } }), { status: 200 });
+  };
+  try {
+    const articles = await fetchJournalArticles(
+      { name: "IEEE Transactions on Transportation Electrification", issns: ["2332-7782"] },
+      { maxRecords: 4 }
+    );
+    assert.equal(calls.length, 2);
+    assert.ok(calls.every((url) => !url.includes("cursor")), "cursor paging must be gone");
+    assert.ok(calls.every((url) => url.includes("sort=published")), "the sort must survive");
+    assert.match(calls[0], /offset=0(&|$)/);
+    assert.match(calls[1], /offset=4(&|$)/);
+    assert.deepEqual(articles.map((article) => article.external_id), [
+      "doi:10.1109/tte.2026.0001", "doi:10.1109/tte.2026.0005"
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    config.publicDataSources = originalSources;
+  }
+});
+
 test("OpenAlex is used only as a Chinese-record fallback after Wanfang fails", async () => {
   const originalFetch = globalThis.fetch;
   const originalSources = config.publicDataSources;

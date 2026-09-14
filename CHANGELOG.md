@@ -6,7 +6,28 @@
   - 部署后旧内容会自动保留在分隔线下方，作为历史记录
 -->
 
-## 期刊扩充：新增 IEEE TII 与 IEEE TTE（第七轮）
+## Crossref 取数通道修复 + 期刊扩充（第七轮）
+
+### 修复：Crossref 通道整体失效（影响最大的一条）
+- **症状**：线上所有走 Crossref 的期刊都取不到数据。采集日志里每个 ISSN 都是 `Metadata source returned 400`，7 个期刊直接失败，其余期刊只能靠 OpenAlex 兜底——**所有 IEEE 期刊长期是 0 条的根因就在这里**。
+- **根因**：请求把 Crossref 的**游标翻页**（`cursor=*`）和**排序**（`sort=published&order=desc`）拼在了同一个查询里，Crossref 对这种组合一律返回 400（逐项实测：只带 cursor 正常、只带 sort 正常、两者同时出现即 400）。
+- **修复**：改用 `offset` 翻页并保留排序，新增 9000 的偏移上限保护，与 Crossref 允许的最大偏移保持一致；分页终止条件由「无 next-cursor」改为「本页不足一页」。跨 ISSN 汇总后仍按出版日期倒序合并，排序行为不变。
+- **效果**：Crossref 恢复为可用主源。以 IEEE TTE 为例，近 45 天窗口 `total=119`，一页即可取满 50 条。
+
+### 新增两个 IEEE 期刊
+- 新增 **IEEE Transactions on Industrial Informatics**（TII）与 **IEEE Transactions on Transportation Electrification**（TTE），预置期刊由 15 个增至 **17 个**，两者均归入「IEEE 期刊」分组。
+- ISSN 以 ISSN Portal 官方记录为准：TII `1551-3203`（印）/ `1941-0050`（网）；TTE `2577-4212`（印）/ `2332-7782`（网）。期刊徽标缩写为 TII / TTE，色相仍按刊名稳定取色。
+
+### 相关性过滤口径统一
+- TII 选题偏工业自动化（制造、视觉、过程控制），因此与 Applied Energy 等综合刊一样挂上电气相关性过滤；TTE 不做过滤，交通电气化本身即在收录范围内。
+- **顺带修掉一处不一致**：相关性过滤此前只作用于 Crossref / OpenAlex 两条通道，**IEEE Xplore 主通道完全不过滤**——等于「设了过滤仍会混入大量无关文献」。现在三条通道共用同一个判定函数。
+
+### 升级提示
+- **已保存过订阅设置的用户不会自动订上新刊**，需要在「订阅期刊」里手动勾选 TII 与 TTE；从未保存过订阅的用户默认全选，已自动包含。
+
+---
+
+## 期刊扩充：新增 IEEE TII 与 IEEE TTE（第七轮·首次发布）
 
 ### 新增两个 IEEE 期刊
 - 新增 **IEEE Transactions on Industrial Informatics**（TII）与 **IEEE Transactions on Transportation Electrification**（TTE），预置期刊由 15 个增至 **17 个**，两者均归入「IEEE 期刊」分组，筛选面板与订阅设置同步出现。

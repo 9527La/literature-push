@@ -212,38 +212,43 @@ function reconstructOpenAlexAbstract(index) {
   return words.filter(Boolean).join(" ");
 }
 
+// Crossref documents 10,000 as the deepest reachable offset. Staying under it
+// keeps every page a plain offset request.
+const CROSSREF_MAX_OFFSET = 9000;
+
 async function fetchCrossrefBatch(journal, options = {}, dateFilter = "from-pub-date", sort = "published") {
   const issn = journal.issns?.[0];
   if (!issn) return [];
 
   const { maxRecords, pageSize, maxPages } = collectionLimits(options);
+  // Crossref answers 400 when deep paging is requested by cursoring *and*
+  // sorting at the same time, which silently killed this source for every
+  // journal. Walk the result set with `offset` instead and keep the sort, so
+  // the newest records still come first. fetchAcrossIssns re-sorts by
+  // publication date across ISSNs afterwards.
   const params = new URLSearchParams({
     filter: `${dateFilter}:${isoDateDaysAgo(options.lookbackDays || config.lookbackDays)},type:journal-article`,
     sort,
     order: "desc",
     rows: String(pageSize),
-    cursor: "*"
+    offset: "0"
   });
   if (config.crossrefMailto) {
     params.set("mailto", config.crossrefMailto);
   }
 
   const records = [];
-  const cursors = new Set();
   for (let page = 0; page < maxPages; page += 1) {
-    const cursor = params.get("cursor");
-    if (cursors.has(cursor)) break;
-    cursors.add(cursor);
+    const offset = page * pageSize;
+    if (offset >= CROSSREF_MAX_OFFSET) break;
+    params.set("offset", String(offset));
     const data = await requestJson(`${CROSSREF_API}/journals/${encodeURIComponent(issn)}/works?${params}`);
     const items = data.message?.items || [];
     records.push(...items.map((item) => normalizeCrossrefItem(item, journal))
       .filter((article) => isResearchArticle(article.title) && matchesJournalFilter(article, journal)));
-    const next = data.message?.["next-cursor"];
-    if (records.length >= maxRecords || !items.length || !next || next === cursor) break;
-    params.set("cursor", next);
+    if (records.length >= maxRecords || items.length < pageSize) break;
   }
   return records.slice(0, maxRecords);
-
 }
 
 async function fetchCrossrefArticles(journal, options = {}) {
