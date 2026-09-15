@@ -222,13 +222,24 @@ function normalizeOpenAlexDetail(item, fallbackDoi = "") {
   };
 }
 
+// OpenAlex moved to mandatory API keys plus usage-based billing in early 2026.
+// Without a key every call draws on a small anonymous pool that is regularly
+// exhausted, which shows up as an immediate HTTP 429 ("Insufficient budget")
+// and silently removes the main keyword source.  Send the key when we have one;
+// `mailto` remains as the courtesy identifier for the keyless path.
+function applyOpenAlexAuth(params) {
+  if (config.openAlexApiKey) params.set("api_key", config.openAlexApiKey);
+  if (config.crossrefMailto) params.set("mailto", config.crossrefMailto);
+  return params;
+}
+
 async function fetchOpenAlexDetails(doi) {
   const normalizedDoi = String(doi || "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").trim();
   if (!normalizedDoi) return {};
   const params = new URLSearchParams({
     select: "id,doi,title,publication_year,publication_date,biblio,authorships,primary_location,abstract_inverted_index,keywords,concepts,primary_topic"
   });
-  if (config.crossrefMailto) params.set("mailto", config.crossrefMailto);
+  applyOpenAlexAuth(params);
   const item = await fetchJson(`https://api.openalex.org/works/${encodeURIComponent(`https://doi.org/${normalizedDoi}`)}?${params}`);
   return normalizeOpenAlexDetail(item, normalizedDoi);
 }
@@ -260,6 +271,7 @@ async function fetchOpenAlexDetailsByTitle(article) {
   });
   const issn = journal.issns?.[0];
   if (issn) params.set("filter", `primary_location.source.issn:${issn},type:article`);
+  applyOpenAlexAuth(params);
   const data = await fetchJson(`${OPENALEX_API}?${params.toString()}`);
   const expectedTitle = normalizeTitleForMatch(title);
   const item = (data?.results || []).find((candidate) => (
@@ -617,6 +629,7 @@ export const internals = {
   parseElsevierMetadata,
   extractMetaContent,
   extractMetaContentAll,
+  applyOpenAlexAuth,
   fetchOpenAlexDetails,
   fetchOpenAlexDetailsByTitle,
   fetchCrossrefDetails,

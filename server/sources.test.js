@@ -16,6 +16,84 @@ const RSS = `<?xml version="1.0"?><rss><channel><item>
   <pubDate>Mon, 03 Aug 2026 16:00:00 GMT</pubDate>
 </item></channel></rss>`;
 
+// OpenAlex 自 2026-02 起要求所有生产请求带 API key，keyless 调用共用一个小额度池，
+// 额度一空就整批 429。采集侧调用量最大，必须带上 key。
+const OPENALEX_RECORD = {
+  id: "https://openalex.org/W900",
+  doi: "https://doi.org/10.1234/key-test",
+  title: "基于公开数据的电网稳定性分析",
+  publication_year: 2026,
+  publication_date: "2026-08-03",
+  primary_location: {
+    landing_page_url: "https://example.invalid/paper",
+    source: { display_name: "Power System Technology", issn_l: "1000-3673", issn: ["1000-3673"] }
+  },
+  abstract_inverted_index: { "电网": [0], "稳定性": [1] },
+  authorships: [],
+  keywords: [],
+  concepts: [],
+  primary_topic: null,
+  biblio: {}
+};
+
+function mockOpenAlexSources(calls) {
+  return async (url) => {
+    calls.push(String(url));
+    if (String(url).includes("apps.wanfangdata.com.cn")) return new Response("unavailable", { status: 503 });
+    return new Response(JSON.stringify({ results: [OPENALEX_RECORD], meta: { next_cursor: null } }), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+}
+
+test("OpenAlex collection carries the API key when one is configured", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSources = config.publicDataSources;
+  const originalKey = config.openAlexApiKey;
+  const originalMailto = config.crossrefMailto;
+  const calls = [];
+  config.publicDataSources = ["openalex"];
+  config.openAlexApiKey = "oa-test-key";
+  config.crossrefMailto = "someone@example.com";
+  globalThis.fetch = mockOpenAlexSources(calls);
+  try {
+    await fetchJournalArticles(CHINESE_JOURNAL, { maxRecords: 5 });
+    const openAlexCall = calls.find((call) => call.includes("api.openalex.org"));
+    assert.ok(openAlexCall, "expected an OpenAlex collection call");
+    assert.match(openAlexCall, /api_key=oa-test-key/);
+    assert.match(openAlexCall, /mailto=someone%40example\.com/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    config.publicDataSources = originalSources;
+    config.openAlexApiKey = originalKey;
+    config.crossrefMailto = originalMailto;
+  }
+});
+
+test("OpenAlex collection falls back to mailto when no API key is configured", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSources = config.publicDataSources;
+  const originalKey = config.openAlexApiKey;
+  const originalMailto = config.crossrefMailto;
+  const calls = [];
+  config.publicDataSources = ["openalex"];
+  config.openAlexApiKey = "";
+  config.crossrefMailto = "someone@example.com";
+  globalThis.fetch = mockOpenAlexSources(calls);
+  try {
+    await fetchJournalArticles(CHINESE_JOURNAL, { maxRecords: 5 });
+    const openAlexCall = calls.find((call) => call.includes("api.openalex.org"));
+    assert.match(openAlexCall, /mailto=someone%40example\.com/);
+    assert.doesNotMatch(openAlexCall, /api_key=/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    config.publicDataSources = originalSources;
+    config.openAlexApiKey = originalKey;
+    config.crossrefMailto = originalMailto;
+  }
+});
+
 test("Chinese journals use Wanfang first and do not call Crossref/OpenAlex on success", async () => {
   const originalFetch = globalThis.fetch;
   const originalSources = config.publicDataSources;

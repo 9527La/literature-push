@@ -58,6 +58,22 @@ function normalizeScopusItem(data) {
   };
 }
 
+// The Article Retrieval API exposes the author keywords as `dcterms:subject`.
+// `item.authKeywords["author-keyword"]` is only populated for some records (it
+// is routinely absent for Online-First articles), and when it is missing the
+// crawler used to fall through to OpenAlex concept tags, which are machine
+// classification labels rather than author keywords.  Reading
+// `dcterms:subject` recovers the real keyword list for the great majority of
+// Elsevier records using the same response we already pay for.
+function extractSubjects(coredata) {
+  const raw = coredata?.["dcterms:subject"];
+  if (!Array.isArray(raw)) return "";
+  return [...new Set(raw
+    .map((entry) => (typeof entry === "string" ? entry : entry?.$))
+    .map((value) => String(value || "").trim())
+    .filter(Boolean))].join("; ");
+}
+
 function normalizeElsevierItem(data) {
   const response = data?.["full-text-retrieval-response"];
   if (!response) {
@@ -76,8 +92,11 @@ function normalizeElsevierItem(data) {
   // Extract authors
   const authors = extractAuthors(item.authors?.author || []);
 
-  // Extract keywords (author keywords)
-  const keywords = extractKeywords(item.authKeywords?.["author-keyword"] || []);
+  // Extract author keywords, preferring the dedicated authKeywords node and
+  // falling back to the dcterms:subject list that the Article Retrieval API
+  // returns for every indexed article.
+  const keywords = extractKeywords(item.authKeywords?.["author-keyword"] || [])
+    || extractSubjects(coredata);
 
   // Extract DOI
   const doi = coredata["prism:doi"] || "";
@@ -140,5 +159,6 @@ export const internals = {
   normalizeElsevierItem,
   normalizeScopusItem,
   extractAuthors,
-  extractKeywords
+  extractKeywords,
+  extractSubjects
 };

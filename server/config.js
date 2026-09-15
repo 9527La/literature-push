@@ -24,6 +24,10 @@ export const config = {
   superAdminUsername: process.env.SUPER_ADMIN_USERNAME || "沈超2024",
   ieeeApiKey: process.env.IEEE_API_KEY || "",
   elsevierApiKey: process.env.ELSEVIER_API_KEY || "",
+  // OpenAlex 自 2026-02 起要求所有生产请求带 API key，并改为按日额度计费。
+  // 没有 key 时会落到一个极小的匿名共享额度上，额度一空整个接口立刻返回
+  // HTTP 429「Insufficient budget」，表现为关键词/摘要补全全线失败。
+  openAlexApiKey: process.env.OPENALEX_API_KEY || "",
   publicDataSources: (process.env.PUBLIC_DATA_SOURCES || "crossref,openalex")
     .split(",")
     .map((source) => source.trim().toLowerCase())

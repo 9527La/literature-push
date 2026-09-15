@@ -271,9 +271,13 @@ async function fetchOpenAlexBatch(journal, options = {}) {
     cursor: "*",
     select: "id,doi,title,display_name,publication_year,publication_date,biblio,authorships,primary_location,abstract_inverted_index,keywords,concepts,primary_topic"
   });
-  if (config.crossrefMailto) {
-    params.set("mailto", config.crossrefMailto);
-  }
+  // OpenAlex requires an API key for production use since early 2026 and bills
+  // calls against a per-day budget; keyless traffic shares a pool that is often
+  // already exhausted and answers 429.  Collection is the heaviest caller, so it
+  // must carry the key whenever one is configured.  `mailto` is kept as well —
+  // it is harmless alongside a key and preserves the previous behaviour.
+  if (config.openAlexApiKey) params.set("api_key", config.openAlexApiKey);
+  if (config.crossrefMailto) params.set("mailto", config.crossrefMailto);
 
   const results = [];
   const cursors = new Set();
