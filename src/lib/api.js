@@ -30,8 +30,8 @@ export function requestHeaders(hasBody = false) {
 }
 
 export const api = {
-  async get(path) {
-    return parseResponse(await fetch(path, { headers: requestHeaders() }));
+  async get(path, { signal } = {}) {
+    return parseResponse(await fetch(path, { headers: requestHeaders(), signal }));
   },
   async post(path, body) {
     return parseResponse(await fetch(path, {

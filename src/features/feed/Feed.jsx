@@ -255,24 +255,40 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   ), []);
 
   const hasMoreList = visibleCount < sortedArticles.length || hasMoreArticles;
-  const loadMore = useCallback(async () => {
-    if (visibleCount < sortedArticles.length) {
-      setVisibleCount((count) => count + ARTICLE_PAGE_SIZE);
-      return;
+  // 滚动哨兵和「加载下一批」按钮都会走到这里。实现放在 ref 里，observer 的
+  // effect 才能不依赖「每次父组件渲染都会换新引用」的回调：那个 effect 每重建
+  // 一次 IntersectionObserver 就会立刻回调一次，于是变成不停地自动重试加载。
+  // 并发也用 ref 拦，state 要等下一次渲染才生效，拦不住同一帧的两次触发。
+  const loadMoreImplRef = useRef(null);
+  const loadMoreBusyRef = useRef(false);
+  const loadStateRef = useRef({ loading: false });
+  loadStateRef.current.loading = loadingMoreArticles;
+  loadMoreImplRef.current = async () => {
+    if (loadMoreBusyRef.current || loadStateRef.current.loading) return false;
+    loadMoreBusyRef.current = true;
+    try {
+      if (visibleCount < sortedArticles.length) {
+        setVisibleCount((count) => count + ARTICLE_PAGE_SIZE);
+        return true;
+      }
+      const loaded = await onLoadMore?.();
+      if (loaded) setVisibleCount((count) => count + ARTICLE_PAGE_SIZE);
+      return Boolean(loaded);
+    } finally {
+      loadMoreBusyRef.current = false;
     }
-    const loaded = await onLoadMore?.();
-    if (loaded) setVisibleCount((count) => count + ARTICLE_PAGE_SIZE);
-  }, [visibleCount, sortedArticles.length, onLoadMore]);
+  };
+  const loadMore = useCallback(() => loadMoreImplRef.current(), []);
 
   useEffect(() => {
     const node = sentinelRef.current;
     if (!node || !hasMoreList) return undefined;
     const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && !loadingMoreArticles) void loadMore();
+      if (entries[0].isIntersecting) void loadMore();
     }, { rootMargin: "240px" });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [hasMoreList, loadingMoreArticles, loadMore]);
+  }, [hasMoreList, loadMore]);
 
   const openByIndex = useCallback((index) => {
     const article = visibleArticles[index];

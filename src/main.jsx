@@ -119,6 +119,11 @@ function UpdateModal({ versionInfo, onClose }) {
   );
 }
 
+// 列表接口查的是本地库，正常都在一秒内返回。这个上限只用来兜住「请求发出后
+// 永远不回来」的情况（隧道抖动、连接被中间设备静默丢弃）——没有它的时候
+// fetch 会一直挂着，页面上就永远停在「加载中…」。
+const ARTICLE_LIST_TIMEOUT_MS = 20000;
+
 // 通行证经常被从聊天窗口整段粘过来，或用全角输入法敲进来。
 // 服务端是逐字符严格比对（safeEqualText），首尾空格、换行、全角字符都会判为错误，
 // 所以提交前统一做一次归一化：NFKC 把全角折成半角，再去掉首尾空白。
@@ -194,6 +199,19 @@ function App() {
   const articleCacheRef = useRef(new Map());
   const articleRequestRef = useRef(0);
   const loadedArticleQueryRef = useRef(null);
+  // 列表的同步镜像。追加（翻页）请求是靠 `articles.length` 当 offset 的，
+  // 而 state 在 await 之后读到的永远是旧闭包值，所以基线判定必须走 ref，
+  // 并且每次写入列表都同步更新它，保证它与 state 不会错开一帧。
+  const articlesRef = useRef([]);
+  // 飞行中的追加请求。用它而不是 loadingMoreArticles 做并发守卫：
+  // state 的更新要等下一次渲染，同一帧里连点两次守卫会同时看到 false。
+  const appendInFlightRef = useRef(new Set());
+  const commitArticles = useCallback((updater) => {
+    const next = typeof updater === "function" ? updater(articlesRef.current) : updater;
+    articlesRef.current = next;
+    setArticles(next);
+    return next;
+  }, []);
   const initialLoadStartedRef = useRef(false);
   const accountBootstrapPromiseRef = useRef(null);
   const interactionPendingRef = useRef(new Set());
@@ -352,26 +370,61 @@ function App() {
     queryParams.set("offset", String(pageOffset));
     const cacheKey = `${getUserToken() || "guest"}::${normalizedQuery}::${pageOffset}::${pageSize}`;
     const requestId = ++articleRequestRef.current;
-    if (append) setLoadingMoreArticles(true);
+    // 这一批出发时的列表长度。返回时如果长度已经变了，说明中途发生过
+    // 替换式刷新（点已读/收藏都会触发 reload），这一批不再连续，直接丢弃。
+    const appendBaseLength = append ? articlesRef.current.length : 0;
+    if (append) {
+      appendInFlightRef.current.add(requestId);
+      setLoadingMoreArticles(true);
+    }
 
     try {
       let page = force ? null : articleCacheRef.current.get(cacheKey);
       if (!page) {
-        const result = await api.get(`/api/articles?${queryParams.toString()}`);
+        let result;
+        try {
+          result = await api.get(`/api/articles?${queryParams.toString()}`, {
+            signal: AbortSignal.timeout(ARTICLE_LIST_TIMEOUT_MS)
+          });
+        } catch (error) {
+          if (error?.name === "TimeoutError") {
+            throw new Error(`列表请求超过 ${ARTICLE_LIST_TIMEOUT_MS / 1000} 秒没有返回，已中止本次加载；请稍后重试。`);
+          }
+          throw error;
+        }
         page = Array.isArray(result)
           ? { articles: result, hasMore: false, total: result.length }
           : result;
         articleCacheRef.current.set(cacheKey, page);
       }
-      if (requestId !== articleRequestRef.current) return 0;
 
       const nextArticles = Array.isArray(page?.articles) ? page.articles : [];
+
+      if (append) {
+        // 查询换了、或列表已经被替换过，本批就不接了；调用方拿到 0 会放开
+        // 守卫，用户继续滚动即按新的列表长度重新取。
+        if (normalizedQuery !== (loadedArticleQueryRef.current ?? normalizedQuery)) return 0;
+        if (articlesRef.current.length !== appendBaseLength) return 0;
+        commitArticles((current) => (current.length === appendBaseLength ? [...current, ...nextArticles] : current));
+        setArticlesHasMore(Boolean(page?.hasMore));
+        return nextArticles.length;
+      }
+
+      // 替换式请求仍然是「只有最新的一次算数」，否则旧筛选的结果会盖掉新筛选。
+      if (requestId !== articleRequestRef.current) return 0;
       loadedArticleQueryRef.current = normalizedQuery;
-      setArticles((current) => append ? [...current, ...nextArticles] : nextArticles);
+      commitArticles(nextArticles);
       setArticlesHasMore(Boolean(page?.hasMore));
       return nextArticles.length;
     } finally {
-      if (append && requestId === articleRequestRef.current) setLoadingMoreArticles(false);
+      // 追加请求的 loading 必须以自己的 id 收尾：只要还有一批在飞就保持
+      // loading，最后一批结束一定清掉。这里过去用「自己是不是最新请求」来判断，
+      // 一旦期间有别的请求抢先（reload / 改筛选 / 第二批），finally 就会被跳过，
+      // 按钮永久停在「加载中…」且再也点不动 —— 这就是"一直卡在加载中"的根因。
+      if (append) {
+        appendInFlightRef.current.delete(requestId);
+        if (appendInFlightRef.current.size === 0) setLoadingMoreArticles(false);
+      }
     }
   }
 
@@ -452,13 +505,15 @@ function App() {
   }, [debouncedQuery, gateAuthenticated, initialDataLoaded]);
 
   async function loadMoreArticles() {
-    if (!articlesHasMore || loadingMoreArticles) return 0;
+    // 并发守卫用 ref：同一帧里按钮和滚动哨兵可能同时触发，读 state 拦不住。
+    if (!articlesHasMore || appendInFlightRef.current.size > 0) return 0;
     const queryString = loadedArticleQueryRef.current ?? debouncedQuery;
     try {
       return await loadArticles({
         append: true,
         queryString,
-        offset: articles.length
+        // offset 也取自 ref，避免两次触发都用同一个旧长度而拉回重复数据。
+        offset: articlesRef.current.length
       });
     } catch (error) {
       handleDataLoadError(error);
@@ -487,7 +542,7 @@ function App() {
 
   function updateLocalArticleInteraction(id, patch, statusDelta = {}) {
     articleCacheRef.current.clear();
-    setArticles((current) => current.map((article) => (
+    commitArticles((current) => current.map((article) => (
       article.id === id ? { ...article, ...patch } : article
     )));
     setStatus((current) => {
@@ -629,10 +684,10 @@ function App() {
     if (!updates.length) return;
     articleCacheRef.current.clear();
     const updatesById = new Map(updates.map((article) => [article.id, article]));
-    setArticles((current) => current.map((article) => (
+    commitArticles((current) => current.map((article) => (
       updatesById.has(article.id) ? { ...article, ...updatesById.get(article.id) } : article
     )));
-  }, []);
+  }, [commitArticles]);
 
   // Memoized article cards compare props by identity, so the interaction
   // callbacks must keep a stable identity while still calling the latest
