@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_JOURNALS } from "./config.js";
+import { config, DEFAULT_JOURNALS } from "./config.js";
 import { crawlArticleDetails } from "./crawler.js";
 import { fetchWanfangArticleDetails, internals, parseWanfangDetailResponse, parseWanfangRss } from "./wanfang.js";
 
@@ -159,6 +159,8 @@ test("crawler uses Wanfang detail metadata before generic HTML fallbacks", async
 
 test("crawler uses a DOI discovered by Wanfang to reach OpenAlex fallback", async () => {
   const originalFetch = globalThis.fetch;
+  const originalEnabled = config.openAlexEnabled;
+  config.openAlexEnabled = true;
   const calls = [];
   globalThis.fetch = async (url) => {
     calls.push(String(url));
@@ -194,11 +196,14 @@ test("crawler uses a DOI discovered by Wanfang to reach OpenAlex fallback", asyn
     assert.match(calls[1], /10\.1234%2Fexample/);
   } finally {
     globalThis.fetch = originalFetch;
+    config.openAlexEnabled = originalEnabled;
   }
 });
 
 test("crawler uses an exact Chinese title and ISSN OpenAlex fallback when Wanfang has no DOI", async () => {
   const originalFetch = globalThis.fetch;
+  const originalEnabled = config.openAlexEnabled;
+  config.openAlexEnabled = true;
   const calls = [];
   globalThis.fetch = async (url) => {
     const value = String(url);
@@ -251,6 +256,37 @@ test("crawler uses an exact Chinese title and ISSN OpenAlex fallback when Wanfan
     assert.match(calls[1], /primary_location\.source\.issn%3A1000-1026/);
   } finally {
     globalThis.fetch = originalFetch;
+    config.openAlexEnabled = originalEnabled;
+  }
+});
+
+test("OpenAlex is skipped entirely when the source is disabled", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnabled = config.openAlexEnabled;
+  const originalWeb = config.webFallbackEnabled;
+  const calls = [];
+  config.openAlexEnabled = false;
+  config.webFallbackEnabled = false;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response("unavailable", { status: 503 });
+  };
+  try {
+    await assert.rejects(
+      crawlArticleDetails({
+        external_id: "wanfang:dwjs202608031",
+        title: "中文标题",
+        abstract: "",
+        keywords: "",
+        url: "https://d.wanfangdata.com.cn/periodical/dwjs202608031"
+      }),
+      /503|公开来源/
+    );
+    assert.ok(!calls.some((call) => call.includes("api.openalex.org")), "禁用后不应再调用 OpenAlex");
+  } finally {
+    globalThis.fetch = originalFetch;
+    config.openAlexEnabled = originalEnabled;
+    config.webFallbackEnabled = originalWeb;
   }
 });
 

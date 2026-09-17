@@ -4,7 +4,17 @@ import { decodeEntities, stripTags, sleep, readResponseText, isUsableMetadataTex
 import { fetchElsevierArticleDetails, fetchScopusArticleDetails } from "./elsevier.js";
 import { fetchIeeeArticleDetails } from "./ieee.js";
 import { fetchWanfangArticleDetails } from "./wanfang.js";
-import { fetchSemanticScholarWebDetails } from "./semantic-scholar-web.js";
+import { fetchWebFallbackDetails } from "./web-fallback.js";
+// 纯 HTML 解析统一放在 html-metadata.js，纯 HTTP 抓取与浏览器兜底共用同一套解析器。
+import {
+  extractJsonAssignment,
+  extractMetaContent,
+  extractMetaContentAll,
+  normalizePublicationDate,
+  parseElsevierMetadata,
+  parseHtmlMetadata,
+  parseIeeeMetadata
+} from "./html-metadata.js";
 
 const CROSSREF_API = "https://api.crossref.org/works";
 const OPENALEX_API = "https://api.openalex.org/works";
@@ -12,175 +22,6 @@ const SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper";
 const DEFAULT_SEMANTIC_SCHOLAR_INTERVAL_MS = 1100;
 let semanticScholarQueue = Promise.resolve();
 let semanticScholarLastStartedAt = 0;
-
-function normalizePublicationDate(value) {
-  const text = stripTags(value);
-  if (!text) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-  const monthMatch = text.match(/^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})$/i);
-  if (monthMatch) {
-    const months = {
-      january: "01",
-      february: "02",
-      march: "03",
-      april: "04",
-      may: "05",
-      june: "06",
-      july: "07",
-      august: "08",
-      september: "09",
-      october: "10",
-      november: "11",
-      december: "12"
-    };
-    return `${monthMatch[2]}-${months[monthMatch[1].toLowerCase()]}-01`;
-  }
-  return text;
-}
-
-function parseTagAttributes(tag) {
-  const attributes = {};
-  const pattern = /([\w:-]+)\s*=\s*(["'])([\s\S]*?)\2/g;
-  let match;
-  while ((match = pattern.exec(tag)) !== null) {
-    attributes[match[1].toLowerCase()] = decodeEntities(match[3]);
-  }
-  return attributes;
-}
-
-function extractMetaContent(html, name) {
-  const wanted = String(name).toLowerCase();
-  for (const tag of html.match(/<meta\b[^>]*>/gi) || []) {
-    const attributes = parseTagAttributes(tag);
-    if ([attributes.name, attributes.property, attributes.itemprop].some((value) => String(value || "").toLowerCase() === wanted)) {
-      return stripTags(attributes.content || "");
-    }
-  }
-  return "";
-}
-
-function extractJsonAssignment(html, marker) {
-  const markerIndex = html.indexOf(marker);
-  if (markerIndex < 0) return null;
-  const start = html.indexOf("{", markerIndex);
-  if (start < 0) return null;
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let index = start; index < html.length; index += 1) {
-    const char = html[index];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char === "\"") {
-      inString = true;
-    } else if (char === "{") {
-      depth += 1;
-    } else if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return html.slice(start, index + 1);
-      }
-    }
-  }
-
-  return null;
-}
-
-function parseIeeeMetadata(html) {
-  const raw = extractJsonAssignment(html, "xplGlobal.document.metadata=");
-  if (!raw) return {};
-
-  try {
-    const metadata = JSON.parse(raw);
-    const authors = Array.isArray(metadata.authors)
-      ? metadata.authors.map((author) => author.name || author.preferredName).filter(Boolean).join(", ")
-      : "";
-
-    // Extract index terms (keywords) from IEEE metadata
-    const keywords = extractIndexTerms(metadata.indexTerms || metadata.keywords || null);
-
-    return {
-      title: stripTags(metadata.title || ""),
-      authors,
-      journal: stripTags(metadata.publicationTitle || metadata.displayPublicationTitle || ""),
-      year: Number(metadata.publicationYear || metadata.year || 0) || null,
-      volume: metadata.volume || "",
-      issue: metadata.issue || "",
-      doi: metadata.doi || "",
-      abstract: stripTags(metadata.abstract || ""),
-      url: metadata.articleUrl ? `https://ieeexplore.ieee.org${metadata.articleUrl}` : "",
-      published_at: normalizePublicationDate(metadata.publicationDate || metadata.onlineDate || ""),
-      keywords
-    };
-  } catch {
-    return {};
-  }
-}
-
-function extractIndexTerms(indexTerms) {
-  if (!indexTerms) return "";
-  const terms = [];
-  const allowedTypes = new Set(["ieee keywords", "author keywords"]);
-
-  if (Array.isArray(indexTerms)) {
-    for (const item of indexTerms) {
-      if (typeof item === "string") {
-        terms.push(item);
-      } else if (typeof item === "object" && item) {
-        // Only keep IEEE Keywords and Author Keywords, skip Index Terms and others
-        const type = String(item.type || "").toLowerCase();
-        if (type && !allowedTypes.has(type)) continue;
-
-        if (Array.isArray(item.kwd)) {
-          terms.push(...item.kwd.filter(Boolean));
-        } else if (Array.isArray(item.terms)) {
-          terms.push(...item.terms.filter(Boolean));
-        } else if (item.term) {
-          terms.push(item.term);
-        } else if (item.name) {
-          terms.push(item.name);
-        } else if (item.value) {
-          terms.push(item.value);
-        }
-      }
-    }
-  } else if (typeof indexTerms === "object") {
-    // Alternate structure: { "IEEE Author Keywords": [...], ... }
-    for (const [key, category] of Object.entries(indexTerms)) {
-      if (!allowedTypes.has(key.toLowerCase())) continue;
-      if (Array.isArray(category)) {
-        terms.push(...category.filter(Boolean));
-      } else if (typeof category === "string") {
-        terms.push(category);
-      }
-    }
-  }
-
-  return [...new Set(terms.map((term) => String(term).trim()).filter(Boolean))].join("; ");
-}
-
-function extractMetaContentAll(html, name) {
-  const wanted = String(name).toLowerCase();
-  const results = [];
-  for (const tag of html.match(/<meta\b[^>]*>/gi) || []) {
-    const attributes = parseTagAttributes(tag);
-    if (![attributes.name, attributes.property, attributes.itemprop].some((value) => String(value || "").toLowerCase() === wanted)) continue;
-    const value = stripTags(attributes.content || "");
-    if (value) results.push(value);
-  }
-  return results;
-}
 
 function reconstructOpenAlexAbstract(index) {
   if (!index || typeof index !== "object") return "";
@@ -198,13 +39,10 @@ function normalizeOpenAlexDetail(item, fallbackDoi = "") {
   const keywords = Array.isArray(item?.keywords)
     ? item.keywords.map((keyword) => keyword?.display_name || keyword?.name || keyword).filter(Boolean).join("; ")
     : "";
-  const conceptKeywords = Array.isArray(item?.concepts)
-    ? item.concepts
-      .filter((concept) => Number(concept?.score || 0) >= 0.35)
-      .map((concept) => concept?.display_name || concept?.name || "")
-      .filter(Boolean)
-      .join("; ")
-    : "";
+  // ⚠️ 不要再用 concepts / primary_topic 兜底。它们是 OpenAlex 自动打的学科标签
+  // （形如 "Control theory (sociology)"、"Energy (signal processing)"），不是作者
+  // 关键词；历史上就是靠这行把 2000 多条关键词污染成了机器标签。宁可留空，
+  // 让后面的源（Elsevier / 万方 / 统一爬虫兜底）去补，也不要写假关键词。
   return {
     title: stripTags(item?.title || ""),
     authors: Array.isArray(item?.authorships)
@@ -218,7 +56,7 @@ function normalizeOpenAlexDetail(item, fallbackDoi = "") {
     abstract: reconstructOpenAlexAbstract(item?.abstract_inverted_index),
     url: item?.primary_location?.landing_page_url || (normalizedDoi ? `https://doi.org/${normalizedDoi}` : item?.id || ""),
     published_at: item?.publication_date || "",
-    keywords: keywords || conceptKeywords || item?.primary_topic?.display_name || ""
+    keywords
   };
 }
 
@@ -391,66 +229,6 @@ async function fetchSemanticScholarDetails(doi) {
   };
 }
 
-function parseHtmlMetadata(html) {
-  const citationKeywords = extractMetaContentAll(html, "citation_keywords");
-  const metaKeywords = extractMetaContentAll(html, "keywords");
-  const allKeywords = [...new Set([...citationKeywords, ...metaKeywords])].join("; ");
-
-  return {
-    title: extractMetaContent(html, "citation_title") || extractMetaContent(html, "og:title"),
-    authors: extractMetaContentAll(html, "citation_author").join(", "),
-    journal: extractMetaContent(html, "citation_journal_title"),
-    year: Number(extractMetaContent(html, "citation_publication_date").slice(0, 4)) || null,
-    volume: extractMetaContent(html, "citation_volume"),
-    issue: extractMetaContent(html, "citation_issue"),
-    doi: extractMetaContent(html, "citation_doi"),
-    abstract: extractMetaContent(html, "citation_abstract") || extractMetaContent(html, "Description") || extractMetaContent(html, "description"),
-    url: extractMetaContent(html, "citation_abstract_html_url") || extractMetaContent(html, "og:url"),
-    published_at: normalizePublicationDate(extractMetaContent(html, "citation_publication_date")),
-    keywords: allKeywords
-  };
-}
-
-function parseElsevierMetadata(html) {
-  // Try to extract from JSON-LD structured data
-  const jsonLdMatch = html.match(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/i);
-  if (jsonLdMatch) {
-    try {
-      const jsonLd = JSON.parse(jsonLdMatch[1]);
-      if (jsonLd["@type"] === "ScholarlyArticle" || jsonLd["@type"] === "Article") {
-        const keywords = Array.isArray(jsonLd.keywords) 
-          ? jsonLd.keywords.join("; ")
-          : typeof jsonLd.keywords === "string" ? jsonLd.keywords : "";
-        return {
-          title: stripTags(jsonLd.name || ""),
-          abstract: stripTags(jsonLd.abstract || ""),
-          keywords,
-          authors: Array.isArray(jsonLd.author)
-            ? jsonLd.author.map((a) => a.name || [a.givenName, a.familyName].filter(Boolean).join(" ")).filter(Boolean).join(", ")
-            : "",
-          doi: jsonLd.identifier || jsonLd.sameAs?.match(/doi:(.+)/)?.[1] || ""
-        };
-      }
-    } catch {}
-  }
-
-  // Try to extract from Elsevier-specific meta tags
-  const elsevierAbstract = extractMetaContent(html, "description") ||
-                          extractMetaContent(html, "DC.description");
-  
-  const elsevierKeywords = extractMetaContentAll(html, "citation_keywords")
-    .concat(extractMetaContentAll(html, "DC.subject"))
-    .concat(extractMetaContentAll(html, "keywords"));
-
-  return {
-    title: extractMetaContent(html, "citation_title") || extractMetaContent(html, "og:title") || extractMetaContent(html, "DC.title"),
-    abstract: elsevierAbstract,
-    keywords: [...new Set(elsevierKeywords)].join("; "),
-    authors: extractMetaContentAll(html, "citation_author").join(", "),
-    doi: extractMetaContent(html, "citation_doi") || extractMetaContent(html, "prism:doi")
-  };
-}
-
 function mergeDetails(primary, fallback) {
   return Object.fromEntries(
     Object.keys({ ...fallback, ...primary }).map((key) => {
@@ -515,16 +293,18 @@ export async function crawlArticleDetails(article, options = {}) {
   const getFallbackDoi = () => String(details.doi || article.doi || "").trim();
 
   const sourceErrors = [];
+  // OpenAlex 默认关闭（config.openAlexEnabled）：没有 key 时每次调用都是 429，
+  // 关掉后这一步直接跳过，省下的时间留给真正能拿到数据的源。
+  const openAlexAllowed = config.openAlexEnabled !== false;
   const adapters = {
     ieee: () => getFallbackDoi() ? fetchIeeeArticleDetails(getFallbackDoi()) : null,
     scopus: () => getFallbackDoi() ? fetchScopusArticleDetails(getFallbackDoi()) : null,
     elsevier: () => config.elsevierApiKey && getFallbackDoi() ? fetchElsevierArticleDetails(getFallbackDoi()) : null,
     wanfang: () => fetchWanfangArticleDetails(article),
-    openalexTitle: () => !getFallbackDoi() ? fetchOpenAlexDetailsByTitle(details) : null,
-    openalex: () => getFallbackDoi() ? fetchOpenAlexDetails(getFallbackDoi()) : null,
+    openalexTitle: () => openAlexAllowed && !getFallbackDoi() ? fetchOpenAlexDetailsByTitle(details) : null,
+    openalex: () => openAlexAllowed && getFallbackDoi() ? fetchOpenAlexDetails(getFallbackDoi()) : null,
     crossref: () => getFallbackDoi() ? fetchCrossrefDetails(getFallbackDoi()) : null,
-    semanticScholar: () => getFallbackDoi() ? fetchSemanticScholarDetails(getFallbackDoi()) : null,
-    semanticScholarWeb: () => needsAbstract ? fetchSemanticScholarWebDetails(details) : null
+    semanticScholar: () => getFallbackDoi() ? fetchSemanticScholarDetails(getFallbackDoi()) : null
   };
   for (const source of PLATFORM_PROFILES[articlePlatform(article)].details) {
     if (source === "html" || isComplete()) break;
@@ -610,6 +390,31 @@ export async function crawlArticleDetails(article, options = {}) {
     }
     return details;
   } catch (error) {
+    // 最后一环：DOI 类 API 与纯 HTTP 抓取都拿不到 → 统一浏览器兜底
+    // （server/web-fallback.js：固定顺序取站 → 节流 → 真实浏览器渲染 →
+    //  统一解析 → 标题/DOI 校验 → 只补缺失字段）。
+    try {
+      const fallback = await fetchWebFallbackDetails(details, {
+        // 测试与排障可注入浏览器实现，生产用默认（本地 Edge/Chrome）。
+        executablePath: options.webFallbackExecutablePath,
+        chromium: options.webFallbackChromium,
+        isComplete: (collected) => {
+          const combined = { ...details, ...collected };
+          return (!needsAbstract || String(combined.abstract || "").trim().length > 0)
+            && (!needsKeywords || String(combined.keywords || "").trim().length > 0);
+        },
+        onDiagnostics: (entries) => {
+          for (const entry of entries || []) {
+            sourceErrors.push({ source: `webFallback:${entry.source}`, message: entry.message || entry.status });
+          }
+        }
+      });
+      mergeSource(fallback);
+      if (isComplete()) return details;
+    } catch (fallbackError) {
+      sourceErrors.push({ source: "webFallback", message: safeExternalError(fallbackError) });
+    }
+
     // Preserve fields collected by an earlier DOI/API source even when the
     // publisher page itself is unavailable. Callers can save the usable
     // portion and report only the field(s) that are still missing.
@@ -634,7 +439,8 @@ export const internals = {
   fetchOpenAlexDetailsByTitle,
   fetchCrossrefDetails,
   fetchSemanticScholarDetails,
-  fetchSemanticScholarWebDetails,
+  fetchWebFallbackDetails,
+  normalizeOpenAlexDetail,
   mergeDetails,
   normalizeRequestedFields,
   missingRequestedFields,

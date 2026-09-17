@@ -52,10 +52,12 @@ test("OpenAlex collection carries the API key when one is configured", async () 
   const originalSources = config.publicDataSources;
   const originalKey = config.openAlexApiKey;
   const originalMailto = config.crossrefMailto;
+  const originalEnabled = config.openAlexEnabled;
   const calls = [];
   config.publicDataSources = ["openalex"];
   config.openAlexApiKey = "oa-test-key";
   config.crossrefMailto = "someone@example.com";
+  config.openAlexEnabled = true;
   globalThis.fetch = mockOpenAlexSources(calls);
   try {
     await fetchJournalArticles(CHINESE_JOURNAL, { maxRecords: 5 });
@@ -68,6 +70,7 @@ test("OpenAlex collection carries the API key when one is configured", async () 
     config.publicDataSources = originalSources;
     config.openAlexApiKey = originalKey;
     config.crossrefMailto = originalMailto;
+    config.openAlexEnabled = originalEnabled;
   }
 });
 
@@ -76,10 +79,12 @@ test("OpenAlex collection falls back to mailto when no API key is configured", a
   const originalSources = config.publicDataSources;
   const originalKey = config.openAlexApiKey;
   const originalMailto = config.crossrefMailto;
+  const originalEnabled = config.openAlexEnabled;
   const calls = [];
   config.publicDataSources = ["openalex"];
   config.openAlexApiKey = "";
   config.crossrefMailto = "someone@example.com";
+  config.openAlexEnabled = true;
   globalThis.fetch = mockOpenAlexSources(calls);
   try {
     await fetchJournalArticles(CHINESE_JOURNAL, { maxRecords: 5 });
@@ -91,14 +96,17 @@ test("OpenAlex collection falls back to mailto when no API key is configured", a
     config.publicDataSources = originalSources;
     config.openAlexApiKey = originalKey;
     config.crossrefMailto = originalMailto;
+    config.openAlexEnabled = originalEnabled;
   }
 });
 
 test("Chinese journals use Wanfang first and do not call Crossref/OpenAlex on success", async () => {
   const originalFetch = globalThis.fetch;
   const originalSources = config.publicDataSources;
+  const originalEnabled = config.openAlexEnabled;
   const calls = [];
   config.publicDataSources = ["crossref", "openalex"];
+  config.openAlexEnabled = true;
   globalThis.fetch = async (url) => {
     calls.push(String(url));
     return new Response(RSS, { status: 200, headers: { "content-type": "application/rss+xml" } });
@@ -112,12 +120,14 @@ test("Chinese journals use Wanfang first and do not call Crossref/OpenAlex on su
   } finally {
     globalThis.fetch = originalFetch;
     config.publicDataSources = originalSources;
+    config.openAlexEnabled = originalEnabled;
   }
 });
 
 test("Crossref pages by offset, because cursor combined with sort is rejected", async () => {
   const originalFetch = globalThis.fetch;
   const originalSources = config.publicDataSources;
+  const originalEnabled = config.openAlexEnabled;
   const calls = [];
   config.publicDataSources = ["crossref"];
   const item = (n, title) => ({
@@ -155,14 +165,17 @@ test("Crossref pages by offset, because cursor combined with sort is rejected", 
   } finally {
     globalThis.fetch = originalFetch;
     config.publicDataSources = originalSources;
+    config.openAlexEnabled = originalEnabled;
   }
 });
 
 test("OpenAlex is used only as a Chinese-record fallback after Wanfang fails", async () => {
   const originalFetch = globalThis.fetch;
   const originalSources = config.publicDataSources;
+  const originalEnabled = config.openAlexEnabled;
   const calls = [];
   config.publicDataSources = ["openalex"];
+  config.openAlexEnabled = true;
   globalThis.fetch = async (url) => {
     const text = String(url);
     calls.push(text);
@@ -213,14 +226,17 @@ test("OpenAlex is used only as a Chinese-record fallback after Wanfang fails", a
   } finally {
     globalThis.fetch = originalFetch;
     config.publicDataSources = originalSources;
+    config.openAlexEnabled = originalEnabled;
   }
 });
 
 test("OpenAlex English records remain available when a Chinese journal has no Chinese titles", async () => {
   const originalFetch = globalThis.fetch;
   const originalSources = config.publicDataSources;
+  const originalEnabled = config.openAlexEnabled;
   const calls = [];
   config.publicDataSources = ["openalex"];
+  config.openAlexEnabled = true;
   globalThis.fetch = async (url) => {
     const text = String(url);
     calls.push(text);
@@ -270,5 +286,6 @@ test("OpenAlex English records remain available when a Chinese journal has no Ch
   } finally {
     globalThis.fetch = originalFetch;
     config.publicDataSources = originalSources;
+    config.openAlexEnabled = originalEnabled;
   }
 });

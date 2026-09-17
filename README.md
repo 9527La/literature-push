@@ -141,7 +141,7 @@
 - 电工技术学报
 - 高电压技术
 
-中文期刊从万方公开期刊信息获取；如果万方暂时不可用，系统才使用 OpenAlex 中经过 ISSN 严格校验的结果作为兜底，并优先采用中文题名记录；当 OpenAlex 仅提供英文题名时，也会保留对应期刊的英文记录，避免整个期刊列表为空。期刊列表可以由管理员后续扩展。能源类综合期刊会优先展示与电力、电气和能源研究相关的内容。
+中文期刊从万方公开期刊信息获取；如果万方暂时不可用，系统才使用 OpenAlex 中经过 ISSN 严格校验的结果作为兜底，并优先采用中文题名记录；当 OpenAlex 仅提供英文题名时，也会保留对应期刊的英文记录，避免整个期刊列表为空（OpenAlex 兜底默认关闭，需按上文启用）。期刊列表可以由管理员后续扩展。能源类综合期刊会优先展示与电力、电气和能源研究相关的内容。
 
 ## 摘要、关键词和翻译
 
@@ -156,9 +156,30 @@
 
 这三个入口（以及“一键翻译标题 / 摘要”）都是一次点击跑到排空，页面上会显示进度条、已处理 / 成功 / 剩余数量、处理速率和预计剩余时间；刷新页面后进度条会接着显示。需要中断时点“停止”，当前正在处理的那一篇结束后即停，已经补全的结果都会保留。同一时间只允许一个补全任务在跑，重复点击会提示已有任务在运行。
 
-摘要补全按照固定顺序尝试出版社接口、Scopus、OpenAlex、Crossref 和 Semantic Scholar API。上述来源仍未返回摘要时，系统会把 **Semantic Scholar 网页爬虫**作为最后兜底：使用文献完整标题搜索，只接受标题完全一致的论文，展开完整摘要后再写入数据库。网页请求采用单通道排队和至少 12 秒间隔，避免批量任务触发网站限流；如果页面结构变化、出现验证码或没有完全一致的标题，任务会安全失败，不会把相近论文或错误页面写成摘要。
+补全按固定顺序尝试出版社接口、Scopus、Crossref 和 Semantic Scholar API（OpenAlex 默认关闭，见下）。如果这些接口和直接抓取出版社页面都没有结果，系统才会启用**统一的浏览器兜底流程**（`server/web-fallback.js`）：
 
-网页兜底默认启用，可通过 `SEMANTIC_SCHOLAR_WEB_FALLBACK_ENABLED` 关闭。服务器会自动查找 Microsoft Edge 或 Google Chrome，也可以通过 `SEMANTIC_SCHOLAR_BROWSER_EXECUTABLE` 指定浏览器路径；请求间隔和单篇超时分别由 `SEMANTIC_SCHOLAR_WEB_REQUEST_INTERVAL_MS`、`SEMANTIC_SCHOLAR_WEB_TIMEOUT_MS` 控制。
+1. 按 `WEB_FALLBACK_SITES` 的顺序取候选站点（默认先走 DOI 解析后的出版社落地页，再走 Semantic Scholar 检索页）；
+2. 全局单通道排队，两次请求之间至少间隔 `WEB_FALLBACK_REQUEST_INTERVAL_MS`（默认 12 秒），不会并发打同一个站点；
+3. 用真实的 Edge/Chrome 无头浏览器渲染页面，这是纯 HTTP 抓不到的 Cloudflare / JS 挑战页的唯一解法；
+4. 统一解析 JSON-LD、出版社专用字段和 `citation_*` / `og:*` 通用 meta；
+5. **标题归一化后完全一致或 DOI 一致才认**，否则整条丢弃——避免把同刊的另一篇文章写成摘要；
+6. 只补缺失字段，已经拿到的内容不会被覆盖。
+
+任一站点失败、页面结构变化或校验不通过都会安全失败并记录到任务诊断里，不会写入相近论文或错误页面。兜底默认启用，可用 `WEB_FALLBACK_ENABLED=false` 关闭；浏览器路径用 `WEB_FALLBACK_BROWSER_EXECUTABLE` 指定（留空则自动查找 Edge 或 Chrome），单篇超时为 `WEB_FALLBACK_TIMEOUT_MS`。
+
+**IEEE 关键词只能靠这套兜底拿到。** 已实测 Crossref、Semantic Scholar、OpenAlex、OpenAIRE、Europe PMC、Unpaywall 与 DOI 内容协商：这些免费接口对 IEEE 文献都只返回摘要（有的连摘要都没有），**没有一家提供作者关键词**；而 IEEE Xplore 的页面用纯 HTTP 直连只返回空的 202 响应，只有真实浏览器能拿到内容。因此 IEEE 的关键词走的是上面那六步流程。
+
+IEEE Xplore 页面里的关键词分三类，系统按下面的顺序取舍（见 `server/html-metadata.js`）：
+
+| 页面上的类型 | 说明 | 处理 |
+| --- | --- | --- |
+| Author Keywords | 作者自己填写 | **优先采用** |
+| IEEE Keywords | IEEE 受控词表，偶有跑偏 | 只在没有作者关键词时兜底 |
+| Index Terms | 机器从正文抽取，一次 30 个 | **一律丢弃** |
+
+不分类型地全取，会让一篇轨道交通论文的关键词里混进 `Electronic mail; TV; Radio access networks` 这类受控词。
+
+> OpenAlex 自 2026 年 2 月起要求所有请求带密钥并按日额度计费，本项目没有可用密钥时每次调用都会返回“额度不足”，采集与补全都在白跑，因此**默认关闭**（`OPENALEX_ENABLED`，默认 `false`）。拿到密钥后设置 `OPENALEX_ENABLED=true`、`OPENALEX_API_KEY=<密钥>`，并在 `PUBLIC_DATA_SOURCES` 中加回 `openalex` 即可恢复。
 
 补全完成后，摘要和关键词会回到文献列表、详情窗口和关键词统计中。若来源页面不可访问或没有公开字段，系统会保留原有内容，并在任务结果中显示失败数量，管理员可以稍后重试。
 

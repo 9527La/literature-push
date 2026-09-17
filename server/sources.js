@@ -74,31 +74,6 @@ function isTrustedChineseFallbackLandingPage(value) {
   }
 }
 
-// Extract keywords from title/abstract for articles without keywords
-function extractKeywordsFromText(title, abstract) {
-  const text = [title, abstract].filter(Boolean).join(" ").toLowerCase();
-  if (!text) return "";
-  
-  const powerKeywords = [
-    "power grid", "power system", "electric", "electrical", "microgrid", "micro-grid",
-    "distributed generation", "renewable energy", "solar", "photovoltaic", "wind",
-    "energy storage", "battery", "electric vehicle", "EV", "smart grid",
-    "demand response", "power electronics", "inverter", "converter",
-    "voltage regulation", "frequency control", "grid", "transmission", "distribution",
-    "protection", "power flow", "energy management", "DER", "VPP",
-    "machine learning", "deep learning", "optimization", "resilience",
-    "hydrogen", "fuel cell", "electricity market"
-  ];
-  
-  const found = [];
-  for (const kw of powerKeywords) {
-    if (text.includes(kw.toLowerCase())) {
-      found.push(kw);
-    }
-  }
-  return found.slice(0, 10).join("; ");
-}
-
 function normalizeCrossrefItem(item, journal) {
   const title = decodeBasicEntities(item.title?.[0] || "");
   const doi = normalizeDoi(item.DOI);
@@ -152,33 +127,12 @@ function normalizeOpenAlexItem(item, journal) {
     keywords = kwList.join("; ");
   }
   
-  // 2. Fallback to concepts (objects with display_name and score)
-  if (!keywords && Array.isArray(item.concepts) && item.concepts.length > 0) {
-    const conceptList = [];
-    for (const c of item.concepts) {
-      if (!c || typeof c !== "object") continue;
-      const score = typeof c.score === "number" ? c.score : 0;
-      const name = c.display_name || c.name || "";
-      if (score > 0.3 && name && typeof name === "string") {
-        conceptList.push(name);
-      }
-    }
-    keywords = conceptList.join("; ");
-  }
-  
-  // 3. Add primary_topic as keyword if available
-  if (item.primary_topic && typeof item.primary_topic === "object") {
-    const topicName = item.primary_topic.display_name || "";
-    if (topicName && typeof topicName === "string" && !keywords.toLowerCase().includes(topicName.toLowerCase())) {
-      keywords = keywords ? `${topicName}; ${keywords}` : topicName;
-    }
-  }
-  
-  // 4. Fallback: extract keywords from title/abstract if still empty
-  if (!keywords) {
-    const abstract = decodeBasicEntities(reconstructOpenAlexAbstract(item.abstract_inverted_index));
-    keywords = extractKeywordsFromText(title, abstract);
-  }
+  // ⚠️ 以下三类兜底全部移除——它们都不是作者关键词，历史上把 2000 多条关键词
+  // 污染成了机器标签（清理脚本：scripts/purge-openalex-concepts.mjs）：
+  //   1. concepts：OpenAlex 自动打的学科标签，形如 "Control theory (sociology)"；
+  //   2. primary_topic：OpenAlex 主题名，形如 "Phase Change Materials Research"；
+  //   3. extractKeywordsFromText：按固定词表从标题/摘要里硬抽的伪关键词。
+  // OpenAlex 没有 keywords 就留空，交给 Elsevier / 万方 / 统一爬虫兜底去补。
 
   return {
     external_id: articleKey(doi, item.id || title),

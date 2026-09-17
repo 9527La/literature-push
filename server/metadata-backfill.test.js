@@ -56,6 +56,47 @@ test("a single stage can be drained on its own", async () => {
   assert.deepEqual(result.remaining, { abstracts: 2, keywords: 0 });
 });
 
+test("摘要阶段跑空后仍然会执行关键词阶段", async () => {
+  // 真实场景：摘要缺口往往只有几十条（一轮就抓完），关键词缺口却有上千条。
+  // 摘要阶段第二轮自然返回 0，如果把它当成「整个作业没有可处理的条目」，
+  // 关键词阶段就会被整段跳过——2026-09-17 远端实测 2497 条关键词一条没补。
+  const calls = [];
+  let abstractsLeft = 33;
+  let abstractCalls = 0;
+  let keywordCalls = 0;
+
+  const result = await enrichAllMissingMetadata({
+    getGaps: () => ({ abstracts: abstractsLeft, keywords: 3 }),
+    enrichAbstracts: async () => {
+      abstractCalls += 1;
+      calls.push("abstracts");
+      if (abstractCalls > 1) return { processed: 0, enriched: 0, errors: [] };
+      abstractsLeft = 5;
+      return {
+        processed: 33,
+        enriched: 28,
+        enrichedAbstracts: 28,
+        failedAbstracts: 5,
+        attemptedIds: Array.from({ length: 33 }, (_, index) => index + 1),
+        errors: []
+      };
+    },
+    enrichKeywords: async ({ excludeIds = [] } = {}) => {
+      keywordCalls += 1;
+      calls.push("keywords");
+      // 队列里只有 3 条，抓完就返回 0，模拟真实队列排空。
+      if (keywordCalls > 3) return { processed: 0, enriched: 0, errors: [] };
+      return { processed: 1, enriched: 1, enrichedKeywords: 1, attemptedIds: [100 + keywordCalls], errors: [] };
+    },
+    maxRounds: 20,
+    noProgressLimit: 2
+  });
+
+  assert.ok(keywordCalls >= 3, `关键词阶段必须被执行，实际只调用了 ${keywordCalls} 次`);
+  assert.notEqual(result.stoppedReason, "queue-empty");
+  assert.equal(result.enrichedKeywords, 3);
+});
+
 test("a stop request ends the run between batches and is reported", async () => {
   let calls = 0;
   let stop = false;

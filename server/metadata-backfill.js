@@ -116,14 +116,16 @@ export async function enrichAllMissingMetadata({
       if (typeof onProgress === "function") {
         await onProgress({ stage, round, result, gaps: { ...gaps }, summary: { ...summary } });
       }
-      if (result?.processed === 0) {
-        stoppedReason = stoppedReason || "queue-empty";
-        return;
-      }
-      if (stalled >= stalledLimit) {
-        stoppedReason = stoppedReason || "stalled";
-        return;
-      }
+      // 下面两种情况都只是「这一阶段推不动了」，不是整个作业该停。
+      //
+      // 以前这里会把 stoppedReason 设成 queue-empty / stalled，于是后面的阶段被整段
+      // 跳过。实测一次「摘要和关键词」：摘要缺口只有 33 条、一轮就抓完，第二轮
+      // 自然返回 0，作业立刻以「没有可处理的条目」收工 —— 关键词阶段根本没跑，
+      // 2497 条关键词一条都没补。摘要缺口往往远小于关键词缺口，这个坑几乎必踩。
+      //
+      // 全局刹车交给 maxDurationMs / shouldStop；阶段自己跑空就交给下一个阶段。
+      if (result?.processed === 0) return;
+      if (stalled >= stalledLimit) return;
     }
     stoppedReason = stoppedReason || "round-limit";
   }

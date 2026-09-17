@@ -25,9 +25,22 @@ export const config = {
   ieeeApiKey: process.env.IEEE_API_KEY || "",
   elsevierApiKey: process.env.ELSEVIER_API_KEY || "",
   // OpenAlex 自 2026-02 起要求所有生产请求带 API key，并改为按日额度计费。
-  // 没有 key 时会落到一个极小的匿名共享额度上，额度一空整个接口立刻返回
-  // HTTP 429「Insufficient budget」，表现为关键词/摘要补全全线失败。
+  // 本项目没有可用 key，每一次调用都落在匿名共享池上，额度一空就是
+  // HTTP 429「Insufficient budget」——采集与补全都是白跑，还把整条链路拖慢。
+  // 因此默认整体关闭（采集 + 补全都不再调用）。拿到可用 key 后设
+  // OPENALEX_ENABLED=true 并填 OPENALEX_API_KEY 即可恢复。
+  openAlexEnabled: String(process.env.OPENALEX_ENABLED || "false").toLowerCase() === "true",
   openAlexApiKey: process.env.OPENALEX_API_KEY || "",
+  // 统一浏览器兜底：所有 API 与纯 HTTP 抓取都拿不到元数据时的最后一步。
+  // 站点顺序可配；节流与超时沿用 Semantic Scholar 网页兜底的经验值。
+  webFallbackEnabled: String(process.env.WEB_FALLBACK_ENABLED || "true").toLowerCase() === "true",
+  webFallbackSites: String(process.env.WEB_FALLBACK_SITES || "landingPage,semanticScholar")
+    .split(",")
+    .map((site) => site.trim())
+    .filter(Boolean),
+  webFallbackRequestIntervalMs: Number(process.env.WEB_FALLBACK_REQUEST_INTERVAL_MS || 12000),
+  webFallbackTimeoutMs: Number(process.env.WEB_FALLBACK_TIMEOUT_MS || 30000),
+  webFallbackBrowserExecutable: process.env.WEB_FALLBACK_BROWSER_EXECUTABLE || process.env.SEMANTIC_SCHOLAR_BROWSER_EXECUTABLE || "",
   publicDataSources: (process.env.PUBLIC_DATA_SOURCES || "crossref,openalex")
     .split(",")
     .map((source) => source.trim().toLowerCase())

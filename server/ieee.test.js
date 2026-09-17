@@ -435,34 +435,30 @@ test("crawler continues to a second DOI source when the first source is partial"
   const calls = [];
   config.crawlerEnabled = true;
   config.elsevierApiKey = "";
+  // 按 URL 分发而不是按调用序号：OpenAlex 关闭后源的顺序会变，
+  // 用序号会让这条用例和「当前启用了哪些源」绑死。
   globalThis.fetch = async (url) => {
-    calls.push(String(url));
-    if (calls.length === 1) {
+    const value = String(url);
+    calls.push(value);
+    if (value.includes("api.crossref.org")) {
+      return {
+        ok: true,
+        // 第一个源只给关键词，摘要故意留空。
+        json: async () => ({ message: { title: ["Crossref title"], DOI: "10.1109/example", subject: ["Power systems"] } })
+      };
+    }
+    if (value.includes("api.semanticscholar.org")) {
       return {
         ok: true,
         json: async () => ({
-          title: "Partial source title",
-          doi: "10.1109/example",
-          keywords: [{ display_name: "Power systems" }],
-          abstract_inverted_index: null
+          title: "Semantic title",
+          abstract: "Abstract supplied by Semantic Scholar",
+          externalIds: { DOI: "10.1109/example" },
+          authors: []
         })
       };
     }
-    if (calls.length === 2) {
-      return {
-        ok: true,
-        json: async () => ({ message: { title: ["Crossref title"], DOI: "10.1109/example" } })
-      };
-    }
-    return {
-      ok: true,
-      json: async () => ({
-        title: "Semantic title",
-        abstract: "Abstract supplied by Semantic Scholar",
-        externalIds: { DOI: "10.1109/example" },
-        authors: []
-      })
-    };
+    return new Response("", { status: 200 });
   };
 
   try {
@@ -476,7 +472,9 @@ test("crawler continues to a second DOI source when the first source is partial"
     });
     assert.equal(details.keywords, "Power systems");
     assert.equal(details.abstract, "Abstract supplied by Semantic Scholar");
-    assert.equal(calls.length, 3);
+    assert.equal(calls.length, 2);
+    assert.ok(calls.some((call) => call.includes("api.crossref.org")));
+    assert.ok(calls.some((call) => call.includes("api.semanticscholar.org")));
   } finally {
     globalThis.fetch = previousFetch;
     config.crawlerEnabled = previousCrawlerEnabled;

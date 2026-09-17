@@ -2,11 +2,15 @@ import { DEFAULT_JOURNAL_BY_NAME } from "./journals.js";
 import { decodeEntities, isNonResearchTitle } from "./utils.js";
 
 // Platform describes the technical adapter, not necessarily the journal owner.
+// `html` 之前的所有条目都是 API；`html` 表示「改用纯 HTTP 抓落地页」。
+// 两者都失败后由 server/web-fallback.js 的统一浏览器兜底接管（含 Semantic
+// Scholar 检索页），所以这里不再单独挂 semanticScholarWeb —— 避免同一篇文章
+// 起两次浏览器、还按两套节流各跑一遍。
 export const PLATFORM_PROFILES = Object.freeze({
-  ieee: { collection: ["ieee", "crossref", "openalex"], details: ["ieee", "scopus", "openalex", "crossref", "semanticScholar", "semanticScholarWeb", "html"], mode: "merge" },
-  elsevier: { collection: ["crossref", "openalex"], details: ["elsevier", "scopus", "openalex", "crossref", "semanticScholar", "semanticScholarWeb", "html"], mode: "merge" },
-  wanfang: { collection: ["wanfang", "openalex"], details: ["wanfang", "openalexTitle", "openalex", "crossref", "semanticScholar", "semanticScholarWeb", "html"], mode: "fallback" },
-  generic: { collection: ["crossref", "openalex"], details: ["scopus", "openalex", "crossref", "semanticScholar", "semanticScholarWeb", "html"], mode: "merge" }
+  ieee: { collection: ["ieee", "crossref", "openalex"], details: ["ieee", "scopus", "openalex", "crossref", "semanticScholar", "html"], mode: "merge" },
+  elsevier: { collection: ["crossref", "openalex"], details: ["elsevier", "scopus", "openalex", "crossref", "semanticScholar", "html"], mode: "merge" },
+  wanfang: { collection: ["wanfang", "openalex"], details: ["wanfang", "openalexTitle", "openalex", "crossref", "semanticScholar", "html"], mode: "fallback" },
+  generic: { collection: ["crossref", "openalex"], details: ["scopus", "openalex", "crossref", "semanticScholar", "html"], mode: "merge" }
 });
 
 export function resolveJournal(journal = {}) {
@@ -50,6 +54,8 @@ export async function collectJournal(journal, options, { config, adapters, dedup
   for (const source of profile.collection) {
     if (source !== "wanfang" && !config.publicDataSources.includes(source)) continue;
     if (source === "ieee" && !config.ieeeApiKey) continue;
+    // OpenAlex 无 key 时每次调用都是 429，默认整体关闭（见 config.openAlexEnabled）。
+    if (source === "openalex" && config.openAlexEnabled === false) continue;
     try {
       const articles = await adapters[source](journal, options);
       diagnostics.push({ source, status: articles.length ? "success" : "empty", count: articles.length });
