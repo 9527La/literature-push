@@ -48,10 +48,14 @@ const steps = [];
 try {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
 
-  const password = page.locator('input[type="password"]');
-  if (await password.count()) {
-    await password.first().fill(PASSPORT);
-    await page.getByRole("button", { name: /进入网页/ }).click();
+  // fill 自带等待：SPA 首帧还没挂载时 count() 会返回 0，导致直接跳过登录。
+  await page.fill('input[type="password"]', PASSPORT);
+  await page.click(".login-form button.primary");
+  await page.waitForSelector(".app-shell", { timeout: 30000 });
+  // 版本更新弹窗的遮罩会吞掉后续点击。
+  if (await page.locator(".modal-backdrop").count()) {
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(400);
   }
 
   await page.waitForSelector("article.article", { timeout: 60000 });
@@ -59,10 +63,13 @@ try {
     () => document.querySelectorAll("article.article").length >= 50,
     { timeout: 60000 }
   );
-  steps.push(`首屏加载 ${await page.locator("article.article").count()} 篇`);
+  // 列表在后台补全期间会不断增高（摘要/关键词/译文陆续回填），"底部"一直在移动，
+  // 滚动触发不稳定。这里点按钮触发同一段 loadMore，路径与滚动哨兵完全一致。
+  await page.addStyleTag({ content: "html { scroll-behavior: auto !important; }" });
+  steps.push(`首屏加载 ${await page.locator("article.article").count()} 篇，${JSON.stringify(await buttonState())}`);
 
-  // 1. 滚到底，等翻页请求起飞。
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  // 1. 触发翻页，等请求起飞。
+  await page.click(LOAD_MORE_SELECTOR);
   await page.waitForFunction(
     (selector) => /加载中/.test(document.querySelector(selector)?.textContent || ""),
     LOAD_MORE_SELECTOR,
@@ -85,9 +92,9 @@ try {
     steps.push("结果：复现卡死 —— 按钮永久停在「加载中…」");
   } else {
     steps.push("结果：按钮已恢复，可以继续加载");
-    // 4. 再验证一次正常翻页仍然可用。
+    // 4. 再验证一次正常翻页仍然可用（这次不制造抢占）。
     const before = await page.locator("article.article").count();
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.click(LOAD_MORE_SELECTOR);
     await page.waitForFunction(
       (count) => document.querySelectorAll("article.article").length > count,
       before,

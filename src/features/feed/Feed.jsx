@@ -256,12 +256,16 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
 
   const hasMoreList = visibleCount < sortedArticles.length || hasMoreArticles;
   // 滚动哨兵和「加载下一批」按钮都会走到这里。实现放在 ref 里，observer 的
-  // effect 才能不依赖「每次父组件渲染都会换新引用」的回调：那个 effect 每重建
-  // 一次 IntersectionObserver 就会立刻回调一次，于是变成不停地自动重试加载。
-  // 并发也用 ref 拦，state 要等下一次渲染才生效，拦不住同一帧的两次触发。
+  // effect 才不会依赖「每次父组件渲染都会换新引用」的回调。并发也用 ref 拦：
+  // state 要等下一次渲染才生效，拦不住同一帧里按钮和哨兵的两次触发。
   const loadMoreImplRef = useRef(null);
   const loadMoreBusyRef = useRef(false);
   const loadStateRef = useRef({ loading: false });
+  const sentinelVisibleRef = useRef(false);
+  // 观察器在重建和状态变化时都会回调一次：哨兵只要一直待在视口里，就会被反复
+  // 触发。有进展时这正是「滚到底就继续加载」该有的样子；一旦某一批没有任何
+  // 进展（请求被丢弃或失败），就必须停下来，否则会变成不停打接口。
+  const autoLoadStalledRef = useRef(false);
   loadStateRef.current.loading = loadingMoreArticles;
   loadMoreImplRef.current = async () => {
     if (loadMoreBusyRef.current || loadStateRef.current.loading) return false;
@@ -284,11 +288,24 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     const node = sentinelRef.current;
     if (!node || !hasMoreList) return undefined;
     const observer = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting) void loadMore();
+      const entry = entries[0];
+      const wasVisible = sentinelVisibleRef.current;
+      sentinelVisibleRef.current = entry.isIntersecting;
+      if (!entry.isIntersecting) {
+        // 哨兵离开了视口：用户还在往下看，放开重试。
+        autoLoadStalledRef.current = false;
+        return;
+      }
+      if (loadStateRef.current.loading) return;
+      if (autoLoadStalledRef.current && wasVisible) return;
+      autoLoadStalledRef.current = false;
+      void loadMore().then((progressed) => {
+        if (!progressed) autoLoadStalledRef.current = true;
+      });
     }, { rootMargin: "240px" });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [hasMoreList, loadMore]);
+  }, [hasMoreList, loadingMoreArticles, loadMore]);
 
   const openByIndex = useCallback((index) => {
     const article = visibleArticles[index];
