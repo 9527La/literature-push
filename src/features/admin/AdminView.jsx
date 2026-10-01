@@ -299,6 +299,7 @@ function AdminView({ onDataChanged }) {
   const coverageRows = [
     { key: "abstracts", label: "原文摘要", value: coverage.abstracts },
     { key: "keywords", label: "原文关键词", value: coverage.keywords },
+    { key: "directions", label: "AI 方向分类", value: coverage.directions },
     { key: "translatedTitles", label: "中文标题", value: coverage.translatedTitles },
     { key: "translatedAbstracts", label: "中文摘要", value: coverage.translatedAbstracts }
   ];
@@ -520,7 +521,7 @@ function AdminView({ onDataChanged }) {
               );
             })}
           </div>
-          <div className="coverage-pending" role="status"><span>当前待补全</span><strong>摘要 {pending.abstracts || 0} 篇 · 关键词 {pending.keywords || 0} 篇</strong></div>
+          <div className="coverage-pending" role="status"><span>当前待补全</span><strong>摘要 {pending.abstracts || 0} 篇 · 关键词 {pending.keywords || 0} 篇 · 方向 {pending.directions || 0} 篇</strong></div>
         </section>
 
         <section className="admin-panel-card direction-panel" aria-label="AI 研究方向分类状态">
@@ -552,7 +553,7 @@ function AdminView({ onDataChanged }) {
                     );
                   })}
               </div>
-              <p className="direction-panel-note">分类由 WorkBuddy 定时任务自动执行（流程见 RUNBOOK-AI-DIRECTION.md），本面板只读。</p>
+              <p className="direction-panel-note">分类由 WorkBuddy 定时任务自动执行（流程见 RUNBOOK-AI-JOBS.md 第 4 节），本面板只读。</p>
             </>
           ) : (
             <p className="coverage-empty">方向统计暂不可用。</p>

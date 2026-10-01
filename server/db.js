@@ -2082,10 +2082,13 @@ export function getAdminOverview() {
   const translatableAbstractCount = scalar(`SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND ${EXCLUDE_OTHER_PLAIN} AND length(trim(coalesce(abstract, ''))) > 0 AND contains_chinese_text(abstract) = 0`);
   // 分子与分母必须同口径（非中文标题才算可译）：否则中文刊在 translations 里
   // 留下的行会混进分子，出现「中文标题 100.2%」这种超过 100% 的怪数字。
+  // is_non_research_title 同理：垃圾标题的历史翻译行只该留在分母外的两边之外，
+  // 漏掉它会让分子超过分母（2026-10-01 实测「中文标题 100.1%」）。
   const translatedTitleCount = scalar(`
     SELECT COUNT(*) AS count FROM articles a
     JOIN translations t ON t.article_id = a.id AND t.target_language = 'zh'
-    WHERE length(trim(coalesce(a.title, ''))) > 0
+    WHERE is_non_research_title(a.title) = 0
+      AND length(trim(coalesce(a.title, ''))) > 0
       AND contains_chinese_text(a.title) = 0
       AND ${EXCLUDE_OTHER_CLAUSE}
       AND length(trim(coalesce(t.title, ''))) > 0
@@ -2093,7 +2096,8 @@ export function getAdminOverview() {
   const translatedAbstractCount = scalar(`
     SELECT COUNT(*) AS count FROM articles a
     JOIN translations t ON t.article_id = a.id AND t.target_language = 'zh'
-    WHERE length(trim(coalesce(a.abstract, ''))) > 0
+    WHERE is_non_research_title(a.title) = 0
+      AND length(trim(coalesce(a.abstract, ''))) > 0
       AND contains_chinese_text(a.abstract) = 0
       AND ${EXCLUDE_OTHER_CLAUSE}
       AND length(trim(coalesce(t.abstract, ''))) > 0
@@ -2105,12 +2109,19 @@ export function getAdminOverview() {
     translatedAbstracts: countArticlesMissingTranslation("abstract", "zh")
   };
 
+  // AI 方向分类覆盖（2026-10-01 加入内容完整度）：与管理面板其他行同口径
+  // （非垃圾标题 + 排除 other）。other 本身是 AI 的判定结果，但已移出用户
+  // 可见面，不计入分母；manual 改判与 AI 标注都算「已分类」。
+  const classifiedDirectionCount = scalar(`SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND ${EXCLUDE_OTHER_PLAIN} AND research_direction IS NOT NULL AND length(trim(coalesce(research_direction, ''))) > 0`);
+  pending.directions = articleCount - classifiedDirectionCount;
+
   // Keep the dashboard summary cheap to render while still giving the
   // administrator an actionable list for every incomplete metric.  The
   // conditions are allow-listed here because they are interpolated into SQL.
   const coverageConditions = {
     abstracts: "length(trim(coalesce(a.abstract, ''))) = 0",
     keywords: "length(trim(coalesce(a.keywords, ''))) = 0",
+    directions: "(a.research_direction IS NULL OR length(trim(coalesce(a.research_direction, ''))) = 0)",
     translatedTitles: "length(trim(coalesce(a.title, ''))) > 0 AND contains_chinese_text(a.title) = 0 AND length(trim(coalesce(zh.title, ''))) = 0",
     translatedAbstracts: "length(trim(coalesce(a.abstract, ''))) > 0 AND contains_chinese_text(a.abstract) = 0 AND length(trim(coalesce(zh.abstract, ''))) = 0"
   };
@@ -2201,6 +2212,7 @@ export function getAdminOverview() {
     coverage: {
       abstracts: articleCount ? Math.round(abstractCount * 1000 / articleCount) / 10 : 0,
       keywords: articleCount ? Math.round(keywordCount * 1000 / articleCount) / 10 : 0,
+      directions: articleCount ? Math.round(classifiedDirectionCount * 1000 / articleCount) / 10 : 0,
       translatedTitles: translatableTitleCount ? Math.round(translatedTitleCount * 1000 / translatableTitleCount) / 10 : 100,
       translatedAbstracts: translatableAbstractCount ? Math.round(translatedAbstractCount * 1000 / translatableAbstractCount) / 10 : 100
     },

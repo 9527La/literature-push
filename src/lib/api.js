@@ -67,7 +67,7 @@ export const api = {
   async delete(path) {
     return parseResponse(await fetch(path, { method: "DELETE", headers: requestHeaders() }));
   },
-  /** 研究方向统计（RUNBOOK-AI-DIRECTION.md 管线的数据出口）。 */
+  /** 研究方向统计（RUNBOOK-AI-JOBS.md 第 4 节 classify 管线的数据出口）。 */
   async getDirectionStats({ window, matrix } = {}) {
     const params = new URLSearchParams();
     if (window) params.set("window", String(window));
