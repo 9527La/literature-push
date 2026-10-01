@@ -32,6 +32,11 @@ export function validateJournal(journal) {
   return value;
 }
 
+/** 期刊名归一化：解 HTML 实体、压空白。用于「这条记录到底是不是目标期刊」的判定。 */
+function canonicalJournalName(value) {
+  return decodeEntities(value || "").replace(/\s+/g, " ").trim();
+}
+
 export function articlePlatform(article) {
   const journal = DEFAULT_JOURNAL_BY_NAME.get(decodeEntities(article.journal || ""));
   const doi = String(article.doi || "").replace(/^https?:\/\/(dx\.)?doi\.org\//i, "").toLowerCase();
@@ -65,7 +70,19 @@ export async function collectJournal(journal, options, { config, adapters, dedup
       diagnostics.push({ source, status: "error", message: error.message });
     }
   }
-  const articles = dedupe(batches).filter((article) => !isNonResearchTitle(article.title));
+  const targetJournal = canonicalJournalName(journal.name);
+  // 采集源偶尔会因为 ISSN 串号 / 混合检索返回**别的期刊**的论文：按 ISSN
+  // 1751-4223 去 Crossref 查「Energy」，拿回来的其实是 ICE《Proceedings of the
+  // Institution of Civil Engineers - Energy》的文章。凡是带着期刊名、但归一化后
+  // 不等于目标期刊的记录一律丢弃，绝不让它进库（否则管理中心会出现目录外的期刊）。
+  // 源头没给期刊名的记录保留，由上层补全。
+  //
+  // 最后把期刊名统一成目录里的规范写法：顺带修掉 "&amp;" 这类实体污染，避免同一本
+  // 期刊在统计里被拆成两行。
+  const articles = dedupe(batches)
+    .filter((article) => !isNonResearchTitle(article.title))
+    .filter((article) => !article.journal || canonicalJournalName(article.journal) === targetJournal)
+    .map((article) => ({ ...article, journal: journal.name }));
   if (typeof options.onDiagnostics === "function") options.onDiagnostics({ journal: journal.name, platform: journal.platform, sources: diagnostics });
   if (!articles.length && (profile.mode === "fallback" || diagnostics.some((item) => item.status === "error") || !diagnostics.length)) {
     const error = new Error(diagnostics.map((item) => item.message || `${item.source} returned no verified records for ${journal.name}`).join("; ") || `No enabled sources for ${journal.name}`);

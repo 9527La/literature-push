@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import cron from "node-cron";
+import fs from "node:fs";
 import { config, DEFAULT_JOURNALS } from "./config.js";
 import {
   getSettings,
@@ -18,6 +19,9 @@ import {
   getKeywordCooccurrence,
   listArticles,
   listArticlePage,
+  listAiReports,
+  getLatestReadyReport,
+  getAiReportDetail,
   setArticleRead,
   toggleArticleFavorite,
   setArticleReadForUser,
@@ -66,7 +70,9 @@ import {
   updateDiscussionProfile,
   createRefreshRun,
   finishRefreshRun,
-  updateRefreshRunSummary
+  updateRefreshRunSummary,
+  getDirectionStats,
+  setArticleDirectionManually
 } from "./db.js";
 import {
   createPassportToken,
@@ -85,6 +91,35 @@ import { calculatePushDays } from "./utils.js";
 import { createArticlePreparationService } from "./prepare.js";
 import { ensureTranslation, ensureTranslations } from "./translation-cache.js";
 import { getMaintenanceState, requestMaintenanceStop, startMaintenance } from "./maintenance.js";
+import { resolveDataDirectory } from "./paths.js";
+import { listDailyNews, getDailyNews, DailyNewsError } from "./daily-news.js";
+
+/**
+ * Process-level safety net.
+ *
+ * Before this existed an uncaught error took the service down and left nothing
+ * behind: the managed task's stderr redirect (data/service-runtime.err.log) has
+ * never produced a single byte, so "why is the site gone?" could only be
+ * answered by guessing. Writing the stack here, straight from node, is the one
+ * path known to land on disk.
+ *
+ * The handlers deliberately do not exit. This is a long-lived site service, so
+ * staying reachable beats exiting cleanly; a genuinely wedged process is still
+ * caught by the watchdog, which probes every two minutes and restarts it.
+ */
+const runtimeErrorLog = path.join(resolveDataDirectory(), "runtime-errors.log");
+function logRuntimeError(kind, detail) {
+  const stack = detail?.stack || detail?.message || String(detail);
+  console.error(`[fatal] ${kind}: ${stack}`);
+  try {
+    fs.appendFileSync(runtimeErrorLog, `${new Date().toISOString()} ${kind}: ${stack}\n`, "utf8");
+  } catch {
+    // Never let the logger itself become the failure.
+  }
+}
+
+process.on("uncaughtException", (error) => logRuntimeError("uncaughtException", error));
+process.on("unhandledRejection", (reason) => logRuntimeError("unhandledRejection", reason));
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -156,6 +191,91 @@ app.get("/api/articles/:id", (req, res) => {
     return;
   }
   res.json(article);
+});
+
+// ── AI 研究方向（RUNBOOK-AI-DIRECTION.md / DESIGN-FRONTEND-DIRECTION.md）─────
+app.get("/api/directions", (req, res) => {
+  const windowDays = Math.min(Math.max(Math.floor(Number(req.query.window)) || 30, 1), 365);
+  res.json(getDirectionStats({ windowDays, withMatrix: req.query.matrix === "1" }));
+});
+
+// ── AI 研究速览：周报/月报（PLAN-AI-REPORTS.md，服务端纯读）──────────────────
+// 报告由 WorkBuddy 智能体离线生成、apply-report.mjs 写库；这里零 LLM、零联网。
+app.get("/api/reports/latest", (req, res) => {
+  const kind = req.query.kind === "monthly" ? "monthly" : "weekly";
+  res.json({ report: getLatestReadyReport(kind) });
+});
+
+app.get("/api/reports", (req, res) => {
+  const kind = req.query.kind === "monthly" ? "monthly" : "weekly";
+  const limit = Math.min(Math.max(Math.floor(Number(req.query.limit)) || 60, 1), 200);
+  // direction：缺省 = 总览与专报全部返回（前端自行分组）；"overview"/空串 = 仅总览；
+  // 方向 key = 仅该方向专报（非法 key 自然返回空列表）。
+  let direction;
+  if (req.query.direction !== undefined) {
+    direction = req.query.direction === "" || req.query.direction === "overview" ? null : String(req.query.direction);
+  }
+  // 研究速览 v2：默认轻量行（不含 content_md/paperBriefs，前端按需 detail 懒加载）；
+  // include=full 保留 v1 完整行为（探针/兼容）。
+  const meta = req.query.include !== "full";
+  res.json({ kind, reports: listAiReports({ kind, limit, direction, meta }) });
+});
+
+// 单份报告详情（研究速览 v2 懒加载）：
+//   ?id=<rowId>                                    → { report }
+//   ?kind=weekly&period_start=YYYY-MM-DD           → { report }（该期总览）
+//   ?kind=weekly&period_start=…&direction=storage  → { report }（该期方向专报）
+//   ?kind=…&period_start=…&directions=k1,k2,…      → { reports: [...] }（多方向专报批量，总览分组页用）
+app.get("/api/reports/detail", (req, res) => {
+  const { id, period_start: periodStart, direction, directions } = req.query;
+  if (directions !== undefined) {
+    const kind = req.query.kind === "monthly" ? "monthly" : "weekly";
+    if (!periodStart) {
+      res.status(400).json({ error: "period_start is required when using directions" });
+      return;
+    }
+    const keys = String(directions).split(",").map((key) => key.trim()).filter(Boolean).slice(0, 20);
+    res.json({ kind, reports: listAiReports({ kind, limit: 40, directions: keys, periodStart }) });
+    return;
+  }
+  const report = getAiReportDetail({
+    id: id !== undefined ? id : undefined,
+    kind: req.query.kind === "monthly" ? "monthly" : "weekly",
+    periodStart,
+    direction: direction === undefined ? undefined : String(direction)
+  });
+  res.json({ report });
+});
+
+// ── 每日资讯（PLAN-DAILY-NEWS.md，文件式存储 data/daily-news/YYYY-MM-DD.md）──
+// 内容由 WorkBuddy 定时任务生成并经 sc-remote 上传；这里纯读目录，零 LLM、零联网。
+app.get("/api/daily-news", (req, res) => {
+  res.json(listDailyNews(resolveDataDirectory()));
+});
+
+app.get("/api/daily-news/detail", (req, res) => {
+  try {
+    res.json(getDailyNews(resolveDataDirectory(), req.query.date));
+  } catch (error) {
+    if (error instanceof DailyNewsError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+});
+
+app.post("/api/admin/articles/:id/direction", requireSiteAdmin, (req, res) => {
+  try {
+    const article = setArticleDirectionManually(Number(req.params.id), req.body?.direction, req.body?.secondary);
+    if (!article) {
+      res.status(404).json({ error: "Article not found" });
+      return;
+    }
+    res.json({ ok: true, article });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 
 app.post("/api/articles/:id/read", requireAccount, (req, res) => {

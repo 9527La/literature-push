@@ -9,15 +9,26 @@
 //
 // 用法：
 //   node scripts/diagnose-stuck-loading.mjs [url]
-//   BASE=http://127.0.0.1:5173/#feed PASSPORT=shenchao \
+//   BASE=http://127.0.0.1:5173/#feed PASSPORT=<ADMIN_PASSPORT> \
 //     node scripts/diagnose-stuck-loading.mjs
 //
 // 退出码：0 = 正常（按钮已恢复）；1 = 复现了卡死。
 
+import fs from "node:fs";
 import { chromium } from "playwright-core";
 
+function readEnvPassport() {
+  try {
+    const env = fs.readFileSync(".env", "utf8");
+    const m = env.match(/^ADMIN_PASSPORT\s*=\s*(.*)$/m);
+    if (m && m[1].trim()) return m[1].trim().replace(/^["']|["']$/g, "");
+  } catch { /* .env is required; see README deployment section */ }
+  console.error("通行证缺失：请在仓库根目录 .env 配置 ADMIN_PASSPORT（代码中不允许硬编码通行证）");
+  process.exit(2);
+}
+
 const BASE = process.argv[2] || process.env.BASE || "http://127.0.0.1:5173/#feed";
-const PASSPORT = process.env.PASSPORT || "shenchao";
+const PASSPORT = process.env.PASSPORT || readEnvPassport();
 const BROWSER = process.env.VERIFY_BROWSER || "msedge";
 const APPEND_DELAY_MS = Number(process.env.APPEND_DELAY_MS || 4000);
 const LOAD_MORE_SELECTOR = ".load-more button";

@@ -12,3 +12,16 @@ artifacts/
 # Ignored so they are neither committed nor carried into the remote deploy.
 frontend/
 .cloudstudio
+
+# AI 作业工作目录与本地验证产物（RUNBOOK-AI-JOBS.md）
+_ai-jobs-work/
+_direction-work/
+_reports-preview/
+_ui-check/
+_tmp/
+_t1.txt
+Tolist.txt
+
+# 一次性诊断/探针脚本（下划线前缀）
+scripts/_*
+scripts/diag-20260923b.mjs

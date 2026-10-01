@@ -1,27 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownUp, Check, ChevronDown, Download, Eye, EyeOff, Filter, Keyboard, RefreshCw, Search, Star, X } from "lucide-react";
+import { ArrowDownUp, Check, ChevronDown, Compass, Download, Eye, EyeOff, Filter, Keyboard, RefreshCw, Search, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { ARTICLE_PAGE_SIZE, DEFAULT_FILTERS } from "../../lib/constants.js";
 import { downloadTextFile, toBibtex, toRis } from "../../lib/export.js";
 import { isChineseJournalArticle, isChineseSourceText } from "../../lib/format.js";
 import { groupJournals, journalAbbr } from "../../lib/journal.js";
+import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 import ArticleCard from "../../components/ArticleCard.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
 import useListShortcuts from "../../hooks/useListShortcuts.js";
 import ArticleDialog from "./ArticleDialog.jsx";
 
-function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, onLoadMore, hasMoreArticles, loadingMoreArticles, queryKey = "", notify, onRefresh = null, refreshing = false, onDataChanged = null }) {
+function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, canModerate = false, onLoadMore, hasMoreArticles, loadingMoreArticles, queryKey = "", notify, onRefresh = null, refreshing = false, onDataChanged = null }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [filterOpen, setFilterOpen] = useState(true);
   const [collapsedFilterGroups, setCollapsedFilterGroups] = useState({
     search: false,
     journal: false,
+    direction: false,
     date: false,
     flags: false,
     keyword: false,
     sort: false
   });
   const [topKeywords, setTopKeywords] = useState([]);
+  const [directionCounts, setDirectionCounts] = useState(null);
   const [visibleCount, setVisibleCount] = useState(50);
   const [cursorIndex, setCursorIndex] = useState(-1);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -41,6 +44,10 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   useEffect(() => {
     api.get("/api/keyword-stats").then((data) => {
       setTopKeywords(data.keywords || []);
+    }).catch(() => {});
+    // 方向计数只用于筛选面板展示，失败时面板退化为无计数 chips。
+    api.get("/api/directions").then((data) => {
+      setDirectionCounts(data.directions || []);
     }).catch(() => {});
   }, []);
 
@@ -408,7 +415,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
 
   const journalGroups = useMemo(() => groupJournals(journals), [journals]);
 
-  const activeFilterCount = filters.journal.length + filters.keyword.length
+  const activeFilterCount = filters.journal.length + filters.direction.length + filters.keyword.length
     + (filters.q ? 1 : 0) + (filters.from ? 1 : 0) + (filters.to ? 1 : 0)
     + (filters.unread ? 1 : 0) + (filters.favorite ? 1 : 0);
 
@@ -474,6 +481,49 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+        <div className={`filter-group ${collapsedFilterGroups.direction ? "is-collapsed" : ""}`}>
+          <div className="direction-group-head-extra">
+            {filterGroupHeader("direction", "研究方向", <Compass size={14} aria-hidden="true" />)}
+            {filters.direction.length > 0 && (
+              <button
+                className="direction-clear"
+                type="button"
+                title="清除研究方向筛选"
+                onClick={() => setFilters({ ...filters, direction: [] })}
+              >
+                清除
+              </button>
+            )}
+          </div>
+          <div className="filter-group-content" id="feed-filter-group-direction" hidden={collapsedFilterGroups.direction}>
+            <div className="keyword-filter-list direction-filter-list">
+              {DIRECTIONS.map((direction) => {
+                const count = directionCounts?.find((item) => item.key === direction.key)?.total;
+                const active = filters.direction.includes(direction.key);
+                return (
+                  <button
+                    key={direction.key}
+                    className={`direction-filter-chip ${active ? "active" : ""}`}
+                    style={active ? { "--dir-key": directionVar(direction.key) } : undefined}
+                    onClick={() => {
+                      const next = filters.direction.includes(direction.key)
+                        ? filters.direction.filter((k) => k !== direction.key)
+                        : [...filters.direction, direction.key];
+                      setFilters({ ...filters, direction: next });
+                    }}
+                    title={direction.key === "other"
+                      ? "其他/交叉：默认不进入正式列表与推送，选择此项可查看"
+                      : directionLabel(direction.key)}
+                  >
+                    <span className="direction-dot" style={{ "--dir-key": directionVar(direction.key) }} aria-hidden="true" />
+                    <span className="kw-name">{directionLabel(direction.key)}</span>
+                    {typeof count === "number" && <span className="kw-count">{count}</span>}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
         <div className={`filter-group ${collapsedFilterGroups.date ? "is-collapsed" : ""}`}>
@@ -738,6 +788,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           toggleFavorite={toggleFavorite}
           onArticleUpdated={handleArticleUpdated}
           hideTranslatedAbstract={isChineseJournalArticle(selectedArticle, journals)}
+          canModerate={canModerate}
         />
       )}
     </div>

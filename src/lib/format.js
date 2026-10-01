@@ -4,6 +4,19 @@ export function formatDate(value) {
   return String(value).slice(0, 10);
 }
 
+/**
+ * 文献日期（展示口径）。
+ *
+ * 后端按全站统一规则算好 `display_date`：优先 first_public_at（论文第一次正式
+ * 公开的日期，Online First / Available online / 网络首发按首发日计，正式出版按
+ * 出版日计，无外部时间时兜底为系统收录日），未回填的旧数据回落旧口径。前端一律
+ * 用这个字段，不再直接读 `published_at` —— 否则在线首发论文会显示成几个月后的
+ * 「未来日期」。老响应里没有该字段时回落到 published_at，保证不显示空白。
+ */
+export function articleDate(article) {
+  return article?.display_date || article?.published_at || "";
+}
+
 export function formatDateTime(value) {
   if (!value) return "未知时间";
   const raw = String(value);

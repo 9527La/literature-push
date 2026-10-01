@@ -22,6 +22,7 @@ import {
   Mail,
   MessageCircle,
   MessageSquare,
+  Newspaper,
   Pencil,
   RefreshCw,
   Save,
@@ -30,6 +31,7 @@ import {
   Send,
   Settings,
   ShieldCheck,
+  Sparkles,
   Star,
   Languages,
   LogOut,
@@ -58,9 +60,9 @@ import { api } from "./lib/api.js";
 import { ARTICLE_PAGE_SIZE, ARTICLE_RELEVANCE_PAGE_SIZE, DEFAULT_FILTERS, DISPLAY_PREFERENCES_VERSION } from "./lib/constants.js";
 import { renderMarkdown } from "./lib/markdown.jsx";
 import { normalizeDisplayPreferences } from "./lib/preferences.js";
-import { clearAccountToken, disableAccountAutoLogin, getUserToken, readAccountLoginSettings, readLocalPersonalization, saveAccountLoginSettings, setAccountToken } from "./lib/storage.js";
+import { clearAccountToken, disableAccountAutoLogin, getPassportToken, getUserToken, readAccountLoginSettings, readLocalPersonalization, saveAccountLoginSettings, setAccountToken } from "./lib/storage.js";
 
-const VIEWS = ["feed", "stats", "favorites", "settings", "feedback", "account", "admin", "help"];
+const VIEWS = ["feed", "reports", "news", "stats", "favorites", "settings", "feedback", "account", "admin", "help"];
 
 // The hash is the single source of truth for "which view am I on", so browser
 // back/forward works and a filtered list can be shared as a link.
@@ -73,6 +75,7 @@ function parseHash(hash) {
 function filtersFromParams(params) {
   const next = { ...DEFAULT_FILTERS };
   if (params.has("journal")) next.journal = params.get("journal").split(",").filter(Boolean);
+  if (params.has("direction")) next.direction = params.get("direction").split(",").filter(Boolean);
   if (params.has("keyword")) next.keyword = params.get("keyword").split(",").filter(Boolean);
   if (params.has("q")) next.q = params.get("q");
   if (params.has("unread")) next.unread = params.get("unread") === "true";
@@ -87,6 +90,8 @@ function filtersFromParams(params) {
 // (word cloud / co-occurrence maths) and the long help document.
 const AdminView = lazy(() => import("./features/admin/AdminView.jsx"));
 const StatsView = lazy(() => import("./features/stats/StatsView.jsx"));
+const ReportsView = lazy(() => import("./features/reports/ReportsView.jsx"));
+const DailyNewsView = lazy(() => import("./features/news/DailyNewsView.jsx"));
 const HelpView = lazy(() => import("./features/help/HelpView.jsx"));
 
 
@@ -303,22 +308,22 @@ function App() {
         current = { authenticated: false, can_register: true, username: "", role: "guest", is_admin: false, passport_authenticated: false, passport_role: "" };
       }
       const loginSettings = readAccountLoginSettings();
-      const hasStoredToken = Boolean(getUserToken());
       const canAutoLogin = Boolean(
         loginSettings.autoLogin
         && loginSettings.username
         && loginSettings.password
         && loginSettings.rememberPassword
       );
-      if (current.authenticated || (!canAutoLogin && hasStoredToken)) return current;
-      if (!canAutoLogin) return current;
+      // /api/auth/* 全部在通行证之后，没通行证时这次登录必然被 401 打回。
+      // 那不是「密码不对」，所以先在这里拦掉：既不浪费一次请求，也不会让
+      // 用户重新输入通行证后这一次自动登录被跳过。
+      if (current.authenticated || !canAutoLogin || !getPassportToken()) return current;
 
       // A failed stored credential should not be retried on every filter or
       // view change during this page session. A successful manual login clears
       // this marker below, allowing the user to recover immediately.
       const attemptKey = `${loginSettings.username}\u0000${loginSettings.password}`;
       if (autoLoginAttemptRef.current === attemptKey) return current;
-      autoLoginAttemptRef.current = attemptKey;
 
       try {
         const result = await api.post("/api/auth/login", {
@@ -328,10 +333,16 @@ function App() {
         setAccountToken(result.token, true);
         autoLoginAttemptRef.current = "";
         return result.account || await api.get("/api/auth/session");
-      } catch {
-        // A stale password should not prevent the site itself from opening.
-        // Clear only the session token; keep the saved username/password visible
-        // in the account form so the user can correct it manually.
+      } catch (error) {
+        // 只有「用户名或密码确实不对」才值得记下这次失败并放弃重试；通行证
+        // 过期、限流、网络抖动都必须留给下一次重试机会——否则重新通过通行证
+        // 之后这一次自动登录就永远不会再发生（这就是「自动登录无效」的根因）。
+        const message = String(error?.message || "");
+        const credentialsRejected = error?.status === 401 && !message.includes("通行证");
+        if (!credentialsRejected) return current;
+        // 密码已失效，顺手清掉对应的会话令牌；已保存的用户名/密码仍留在账户
+        // 表单里，用户可以直接改正后手动登录。
+        autoLoginAttemptRef.current = attemptKey;
         clearAccountToken();
         return current;
       }
@@ -788,6 +799,43 @@ function App() {
     if (enabled) savePersonalizationLocal();
   }
 
+  // 顶部导航横向溢出的可发现性（2026-10-01）：窄窗口下 tabs 被裁剪且滚动条
+  // 隐藏，观感是「栏目被遮盖」。边缘渐隐由 .nav-wrap.can-left/can-right 渲染，
+  // 滚轮纵向增量转横向滚动（wheel 必须非 passive 才能 preventDefault 阻止页面滚动）。
+  const navRef = useRef(null);
+  const [navEdges, setNavEdges] = useState({ left: false, right: false });
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return undefined;
+    const update = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      setNavEdges({ left: el.scrollLeft > 4, right: el.scrollLeft < max - 4 });
+    };
+    update();
+    const onWheel = (event) => {
+      if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+      const max = el.scrollWidth - el.clientWidth;
+      if (max <= 0) return;
+      const next = Math.max(0, Math.min(max, el.scrollLeft + event.deltaY));
+      if (next !== el.scrollLeft) {
+        el.scrollLeft = next;
+        event.preventDefault();
+      }
+    };
+    el.addEventListener("scroll", update, { passive: true });
+    el.addEventListener("wheel", onWheel, { passive: false });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    window.addEventListener("resize", update);
+    return () => {
+      el.removeEventListener("scroll", update);
+      el.removeEventListener("wheel", onWheel);
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+    // nav 在通行证门通过后才挂载；管理员登录会增删 tab（管理中心）影响 scrollWidth。
+  }, [gateAuthenticated, account.is_admin]);
+
   if (initialLoading && !gateAuthenticated) {
     return <div className="login-shell"><div className="login-loading" aria-label="正在检查登录状态" /></div>;
   }
@@ -806,10 +854,17 @@ function App() {
             <BrandMark size={26} />
             <span>电力文献</span>
           </div>
-          <nav className="nav" aria-label="主导航">
+          <div className={`nav-wrap${navEdges.left ? " can-left" : ""}${navEdges.right ? " can-right" : ""}`}>
+          <nav className="nav" aria-label="主导航" ref={navRef}>
             <button className={activeView === "feed" ? "active" : ""} onClick={() => setActiveView("feed")}>
               <Bell size={16} /> 最新文献
               {status?.unreadCount > 0 && <span className="nav-badge" aria-label={`${status.unreadCount} 篇未读`}>{status.unreadCount}</span>}
+            </button>
+            <button className={activeView === "reports" ? "active" : ""} onClick={() => setActiveView("reports")}>
+              <Sparkles size={16} /> 研究速览
+            </button>
+            <button className={activeView === "news" ? "active" : ""} onClick={() => setActiveView("news")}>
+              <Newspaper size={16} /> 每日资讯
             </button>
             <button className={activeView === "stats" ? "active" : ""} onClick={() => setActiveView("stats")}>
               <BarChart3 size={16} /> 关键词统计
@@ -834,6 +889,7 @@ function App() {
               <HelpCircle size={16} /> 使用说明
             </button>
           </nav>
+          </div>
         </div>
         <div className="topbar-right">
           {account.is_admin && <button className="primary" onClick={refresh} disabled={loading}>
@@ -843,22 +899,7 @@ function App() {
           <button className="secondary topbar-exit" type="button" onClick={leaveWebsite}>退出网页</button>
         </div>
         </div>
-        {/* Progress counters get their own row: hiding them on 1280–1339px
-            laptops removed the only global signal that anything was new. */}
-        <div className="topbar-row-stats">
-          <div className="topbar-stats" aria-label="文献统计">
-            <span className="stat-chip">总文献 <strong>{status?.articleCount ?? 0}</strong></span>
-            <span className="stat-chip stat-badge stat-badge-unread">未读 <strong>{status?.unreadCount ?? 0}</strong></span>
-            <span className="stat-chip">已读 <strong>{status?.readCount ?? 0}</strong></span>
-            <span className="stat-chip stat-badge stat-badge-fav">收藏 <strong>{status?.favoriteCount ?? 0}</strong></span>
-            <span className="stat-chip stat-badge stat-badge-new" title="按文献的实际出版日期统计；提前出版（Online First）的按实际发布日期计入">
-              最近一周出版 <strong>{status?.newArticleCount7d ?? 0}</strong>
-            </span>
-            <span className="stat-chip stat-badge stat-badge-new stat-badge-new-month" title="按文献的实际出版日期统计；提前出版（Online First）的按实际发布日期计入">
-              最近一月出版 <strong>{status?.newArticleCount30d ?? 0}</strong>
-            </span>
-          </div>
-        </div>
+        {/* 顶栏统计胶囊已移入管理中心（2026-09-28 用户要求）：数据源仍为 /api/status。 */}
       </header>
 
       <Toast toasts={toasts} onDismiss={dismissToast} />
@@ -881,6 +922,7 @@ function App() {
             onDisplayPreferencesChange={setDisplayPreferences}
             onArticleUpdated={updateArticleInList}
             canPersonalize={account.authenticated}
+            canModerate={account.is_admin}
             onLoadMore={loadMoreArticles}
             hasMoreArticles={articlesHasMore}
             loadingMoreArticles={loadingMoreArticles}
@@ -925,6 +967,16 @@ function App() {
           <FeedbackView account={account} />
         ) : activeView === "admin" && account.is_admin ? (
           <AdminView onDataChanged={loadAll} />
+        ) : activeView === "reports" ? (
+          <ReportsView
+            canPersonalize={account.authenticated}
+            markRead={markRead}
+            toggleFavorite={toggleFavorite}
+            onArticleUpdated={updateArticleInList}
+            canModerate={account.is_admin}
+          />
+        ) : activeView === "news" ? (
+          <DailyNewsView />
         ) : (
           <StatsView journals={settings.journals} markRead={markRead} toggleFavorite={toggleFavorite} />
         )}

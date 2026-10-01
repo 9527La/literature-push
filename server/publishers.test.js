@@ -43,6 +43,28 @@ test('shared transport retries transient status but not forbidden',async()=>{
  await assert.rejects(requestJson('https://test.invalid'),/403/);assert.equal(calls,1);
  } finally {globalThis.fetch=original;}
 });
+test('collection drops records that belong to a different journal',async()=>{
+ // 采集源偶尔串号：拿 1751-4223 去 Crossref 查 Elsevier《Energy》，回来的其实是 ICE 的
+ // 《Proceedings of the Institution of Civil Engineers - Energy》。这类记录绝不允许进库，
+ // 否则管理中心的「期刊分布」会冒出期刊目录里没有的刊名。
+ const result=await collectJournal({name:'Energy'}, {}, {
+  config:{publicDataSources:['crossref']},dedupe:x=>x,
+  adapters:{crossref:async()=>[
+   {title:'On-target paper',journal:'Energy',doi:'10.1016/a'},
+   {title:'ICE Energy paper',journal:'Proceedings of the Institution of Civil Engineers - Energy',doi:'10.1680/b'},
+   {title:'No journal name',doi:'10.1016/c'}
+  ]}});
+ assert.deepEqual(result.map(row=>row.doi),['10.1016/a','10.1016/c']);
+ assert.ok(result.every(row=>row.journal==='Energy'));
+});
+test('collection normalizes entity-polluted names so one journal stays one row',async()=>{
+ const name='International Journal of Electrical Power & Energy Systems';
+ const result=await collectJournal({name}, {}, {
+  config:{publicDataSources:['crossref']},dedupe:x=>x,
+  adapters:{crossref:async()=>[{title:'Entity polluted',journal:'International Journal of Electrical Power &amp; Energy Systems',doi:'10.1016/d'}]}});
+ assert.equal(result.length,1);
+ assert.equal(result[0].journal,name);
+});
 test('failed first batches do not starve later missing articles',async()=>{
  let calls=0;let missing=101;
  const result=await enrichAllMissingMetadata({getGaps:()=>({abstracts:missing,keywords:0}),

@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, FolderPlus, Languages, Pencil, Save, Star, Trash2, X } from "lucide-react";
 import { api } from "../../lib/api.js";
-import { formatDate, isChineseJournalArticle } from "../../lib/format.js";
+import { articleDate, formatDate, isChineseJournalArticle } from "../../lib/format.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
 
 function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpdated, onDataChanged }) {
-  const [data, setData] = useState({ groups: [], favorites: [] });
+  const [data, setData] = useState({ groups: [], favorites: [], total: 0 });
   const [selectedGroup, setSelectedGroup] = useState("all");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -187,7 +187,7 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
     <section className="profile-layout favorites-view" aria-labelledby="favorites-title">
       <div className="page-intro account-heading">
         <div><span className="eyebrow">个人账户 · 自动同步</span><h1 id="favorites-title">收藏文献</h1><p>把重要文献集中保存，按研究方向分组，并为每篇文献记录自己的备注。</p></div>
-        <div className="favorites-total"><Star size={17} fill="currentColor" /> <strong>{data.favorites.length}</strong> 篇收藏</div>
+        <div className="favorites-total"><Star size={17} fill="currentColor" /> <strong>{data.total}</strong> 篇收藏</div>
       </div>
       {message && <div className="admin-notice favorites-notice" role="status">{message}</div>}
       <div className="favorites-layout">
@@ -237,7 +237,7 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
                 const note = noteDrafts[article.id] ?? article.note ?? "";
                 return (
                   <article className="favorite-card" key={article.id}>
-                    <header><div className="article-meta"><span>{article.journal || "未知期刊"}</span><span>{formatDate(article.published_at)}</span>{article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : <span className="article-status-badge unread-badge">未读</span>}</div><button className="icon-button favorite-remove-button" type="button" title="取消收藏" aria-label={`取消收藏：${article.title}`} disabled={savingArticleId === article.id} onClick={() => removeFavorite(article)}><Star size={18} fill="currentColor" /></button></header>
+                    <header><div className="article-meta"><span>{article.journal || "未知期刊"}</span><span>{formatDate(articleDate(article))}</span>{article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : <span className="article-status-badge unread-badge">未读</span>}</div><button className="icon-button favorite-remove-button" type="button" title="取消收藏" aria-label={`取消收藏：${article.title}`} disabled={savingArticleId === article.id} onClick={() => removeFavorite(article)}><Star size={18} fill="currentColor" /></button></header>
                     <button className="favorite-card-title" type="button" onClick={() => setSelectedArticle(article)}>{article.title || "未命名文献"}</button>
                     {article.translated_title && article.translated_title !== article.title && <p className="translated-title"><Languages size={14} /> {article.translated_title}</p>}
                     {article.authors && <p className="authors">{article.authors}</p>}

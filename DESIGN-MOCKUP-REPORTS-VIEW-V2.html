@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>研究速览 v2 · mockup 预览稿（结构化速评 + 周分类浏览）</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --line: #e4e7ec; --ink: #1a1a2e;
+    --ink-2: #5c6270; --ink-3: #8b90a0; --accent: #3157d5;
+    --dir-distributed_gen: #8A6238; --dir-storage: #3D6E66; --dir-market: #5F6773;
+    --dir-transmission: #34547A; --dir-distribution: #3F5D93; --dir-microgrid: #4E7D3B;
+    --dir-forecasting: #7D5BA6; --dir-stability: #9C4A4A; --dir-protection: #8C3E5F;
+    --dir-power_quality: #A8842C; --dir-hv: #2E7D8F; --dir-power_electronics: #B5486F;
+    --dir-transport: #B3662E; --dir-ies: #7E7A26; --dir-other: #767B82;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; font-size: 14px; line-height: 1.65; padding: 28px 32px 60px; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  .note { background: #eef2fd; border: 1px solid #c9d6f5; color: #2b4bb0; border-radius: 8px; padding: 10px 14px; font-size: 12.5px; margin-bottom: 18px; }
+  .note b { font-weight: 600; }
+  .nav-strip { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 10px 10px 0 0; padding: 6px 10px 0; border-bottom: none; flex-wrap: wrap; }
+  .nav-strip span { padding: 7px 14px; border-radius: 8px 8px 0 0; color: var(--ink-2); font-size: 13.5px; }
+  .nav-strip span.on { background: #eef2fd; color: var(--accent); font-weight: 600; border-bottom: 2px solid var(--accent); }
+  .page { background: var(--card); border: 1px solid var(--line); border-radius: 0 10px 10px 10px; padding: 26px 30px; }
+  .page-intro { margin-bottom: 18px; }
+  .eyebrow { font-size: 12px; letter-spacing: 1px; color: var(--accent); font-weight: 600; }
+  h1 { font-size: 21px; margin: 2px 0 4px; }
+  .hint { color: var(--ink-3); font-size: 13px; }
+  .tabs { display: flex; gap: 8px; margin: 18px 0 16px; }
+  .tab { border: 1px solid var(--line); background: #fafbfc; color: var(--ink-2); border-radius: 999px; padding: 6px 18px; font-size: 13.5px; cursor: pointer; }
+  .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+  /* ── 期数行 + 方向 chips ── */
+  .toolbar { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 16px; background: #fafbfc; }
+  .toolbar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .period-select { display: inline-flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 5px 12px; font-size: 13px; color: var(--ink-2); }
+  .period-select b { color: var(--ink); font-weight: 600; }
+  .expand-all { margin-left: auto; border: none; background: none; color: var(--accent); font-size: 12.5px; cursor: pointer; padding: 4px 8px; }
+  .dir-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .dir-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--card); color: var(--ink-2); border-radius: 999px; padding: 4px 12px; font-size: 12.5px; cursor: pointer; }
+  .dir-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+  .dir-chip .n { color: var(--ink-3); font-size: 11.5px; }
+  .dir-chip.on { border-color: var(--c); color: var(--ink); font-weight: 600; background: color-mix(in srgb, var(--c) 7%, white); }
+  .dir-chip.overview.on { border-color: var(--accent); background: #eef2fd; color: var(--accent); }
+
+  .meta { display: flex; gap: 18px; flex-wrap: wrap; color: var(--ink-2); font-size: 13px; background: #f8f9fb; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; }
+  .meta b { color: var(--ink); font-weight: 600; }
+  .up { color: #b04a3a; } .down { color: #2e7d4f; }
+  h2.sect { font-size: 15px; margin: 24px 0 10px; padding-left: 10px; border-left: 3px solid var(--accent); }
+  .sect-hint { font-size: 12px; color: var(--ink-3); font-weight: 400; margin-left: 8px; }
+
+  /* ── 方向分布条 ── */
+  .bars { display: grid; gap: 6px; margin-bottom: 6px; }
+  .bar-row { display: grid; grid-template-columns: 128px 1fr 84px; align-items: center; gap: 10px; font-size: 12.5px; }
+  .bar-name { color: var(--ink-2); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { height: 14px; background: #f0f1f4; border-radius: 7px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 7px; background: var(--c); }
+  .bar-val { color: var(--ink-3); }
+
+  /* ── 三字段速评卡 BriefCard ── */
+  .brief-card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; cursor: pointer; transition: border-color .15s, box-shadow .15s; background: var(--card); }
+  .brief-card:hover { border-color: #b9c6ea; box-shadow: 0 2px 8px rgba(49,87,213,.08); }
+  .brief-head { display: flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--c) 8%, white); border-bottom: 1px solid var(--line); padding: 6px 14px; }
+  .brief-mark { min-width: 38px; text-align: center; background: var(--c); color: #fff; border-radius: 6px; font-size: 11px; padding: 2px 6px; font-weight: 600; }
+  .brief-journal { font-size: 12.5px; color: var(--ink-2); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brief-date { font-size: 12px; color: var(--ink-3); }
+  .brief-body { padding: 10px 14px 12px; }
+  .brief-title { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .brief-title-en { font-size: 11.5px; color: var(--ink-3); margin-bottom: 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .brief-fields { display: grid; gap: 4px; }
+  .brief-field { display: grid; grid-template-columns: 62px 1fr; gap: 8px; font-size: 12.5px; line-height: 1.5; }
+  .brief-field .k { color: var(--c); font-weight: 600; font-size: 12px; white-space: nowrap; }
+  .brief-field .k::after { content: "·"; margin-left: 4px; color: var(--ink-3); font-weight: 400; }
+  .brief-field .v { color: var(--ink-2); }
+  .brief-card.plain { --c: var(--ink-3); cursor: default; }
+
+  /* ── 方向分组手风琴 ── */
+  .groups { display: grid; gap: 10px; }
+  .group { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--card); }
+  .group-head { display: flex; align-items: center; gap: 9px; width: 100%; border: none; background: #fafbfc; padding: 10px 16px; cursor: pointer; font-size: 13.5px; text-align: left; }
+  .group-head:hover { background: #f4f6fb; }
+  .group-head .caret { margin-left: auto; color: var(--ink-3); font-size: 12px; transition: transform .15s; }
+  .group.open .group-head .caret { transform: rotate(90deg); }
+  .group-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
+  .group-name { font-weight: 600; }
+  .group-count { font-size: 12px; color: var(--ink-2); }
+  .group-topic { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 46%; }
+  .group-body { display: none; padding: 12px 16px 14px; border-top: 1px solid var(--line); }
+  .group.open .group-body { display: block; }
+  .group-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 10px; }
+  .group-more { display: block; margin: 12px auto 0; border: 1px dashed color-mix(in srgb, var(--c) 45%, var(--line)); background: color-mix(in srgb, var(--c) 4%, white); color: var(--ink-2); border-radius: 8px; padding: 6px 22px; font-size: 12.5px; cursor: pointer; }
+  .group-more:hover { color: var(--ink); background: color-mix(in srgb, var(--c) 8%, white); }
+
+  /* ── 主题聚类 / 速评列表 ── */
+  .cluster { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+  .cluster-head { display: flex; align-items: baseline; gap: 10px; padding: 10px 16px; background: #fafbfc; border-bottom: 1px solid var(--line); }
+  .cluster-name { font-weight: 600; font-size: 13.5px; }
+  .cluster-meta { margin-left: auto; font-size: 12px; color: var(--ink-3); }
+  .review-list { display: grid; gap: 8px; padding: 12px 16px; }
+  .review-list .brief-card { border-radius: 8px; }
+  .review-more { text-align: center; font-size: 12.5px; color: var(--ink-3); padding: 4px 0 2px; }
+
+  /* ── 热点主题 chips ── */
+  .topics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .topic { border: 1px solid var(--line); background: #fafbfc; border-radius: 999px; padding: 3px 12px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+  .topic:hover { color: var(--accent); border-color: #b9c6ea; }
+
+  /* ── 旧格式降级 ── */
+  .legacy-card { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 14px; font-size: 12.5px; color: var(--ink-2); background: #fafbfc; display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: baseline; }
+  .legacy-card .id { color: var(--ink-3); font-size: 11.5px; }
+  .legacy-badge { display: inline-block; font-size: 10.5px; color: var(--ink-3); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin-left: 8px; vertical-align: 1px; font-weight: 400; }
+
+  /* ── 侧栏 ── */
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 22px; align-items: start; }
+  .aside-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .aside-card h4 { font-size: 13px; color: var(--ink-2); margin-bottom: 10px; font-weight: 600; }
+  .period { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; border-radius: 8px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+  .period:hover { background: #f4f6fb; }
+  .period.on { background: #eef2fd; color: var(--accent); font-weight: 600; }
+  .period .n { color: var(--ink-3); font-weight: 400; }
+  .aside-tip { font-size: 12px; color: var(--ink-3); border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 10px; }
+  .klist { display: grid; gap: 8px; }
+  .krow { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; }
+  .krow .kd { width: 8px; height: 8px; border-radius: 50%; }
+  .krow .kv { color: var(--ink-3); font-size: 11.5px; }
+
+  .pane { display: none; } .pane.on { display: block; }
+  .vpane { display: none; } .vpane.on { display: block; }
+  .mock-switch { display: flex; gap: 8px; margin: 0 0 14px; }
+  .mock-switch button { border: 1px solid #c9d6f5; background: #eef2fd; color: #2b4bb0; border-radius: 999px; padding: 4px 14px; font-size: 12px; cursor: pointer; }
+  .mock-switch button.on { background: #2b4bb0; color: #fff; border-color: #2b4bb0; }
+
+  /* ── 文献详情弹窗示意 ── */
+  .dialog-mask { display: none; position: fixed; inset: 0; background: rgba(26,26,46,.35); z-index: 50; align-items: center; justify-content: center; }
+  .dialog-mask.on { display: flex; }
+  .dialog { width: 640px; max-width: 92vw; background: var(--card); border-radius: 12px; border: 1px solid var(--line); box-shadow: 0 18px 50px rgba(26,26,46,.2); padding: 22px 26px; position: relative; }
+  .dialog h3 { font-size: 16px; margin-bottom: 2px; padding-right: 30px; }
+  .dialog .en { font-size: 12px; color: var(--ink-3); margin-bottom: 10px; }
+  .dialog .rows { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); margin-bottom: 12px; }
+  .dialog .close { position: absolute; top: 14px; right: 14px; border: 1px solid var(--line); background: none; border-radius: 8px; width: 26px; height: 26px; cursor: pointer; color: var(--ink-2); }
+  .dialog .brief-fields { border-top: 1px dashed var(--line); padding-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note">
+    <b>研究速览 v2 mockup（示意交互稿，数据取自 2026-09-22 ~ 09-28 真实周报）</b> ·
+    已按拍板实施：① 速评<b>全量三字段</b>（研究对象/研究方法/核心结论）；② paperBriefs 存 <b>stats_json</b>；
+    ③ 方向分组<b>默认全展开</b>（右上角可一键折叠/展开）；④ 旧期数<b>自动降级</b> v1 一行式（见第三视图）。
+    下方「视图切换」可预览 <b>总览分组态 / 方向专报态 / 旧格式降级态</b>；三字段速评卡点击可打开文献详情弹窗（试试点精选第一张）。
+  </div>
+
+  <div class="nav-strip">
+    <span>最新文献</span><span class="on">研究速览</span><span>关键词统计</span><span>收藏文献</span><span>文献推送</span><span>公共讨论</span><span>我的账户</span>
+  </div>
+  <div class="page">
+    <div class="page-intro">
+      <span class="eyebrow">AI 生成 · 每周日晚更新</span>
+      <h1>研究速览</h1>
+      <p class="hint">智能体基于当期入库文献自动生成 · 数字取自数据库统计 · 速评卡片/期刊名/主题词均可点击交互</p>
+    </div>
+
+    <div class="tabs">
+      <button class="tab on" onclick="alert('月度趋势形态与周报同构（分组+精选三字段），本稿聚焦周报')">一周速览</button>
+      <button class="tab" onclick="alert('月度趋势形态与周报同构（分组+精选三字段），本稿聚焦周报')">月度趋势</button>
+    </div>
+
+    <!-- 视图切换（仅 mockup 演示用，实站由方向 chips 驱动） -->
+    <div class="mock-switch">
+      <button class="on" data-v="overview" onclick="switchView(this)">① 总览 · 方向分组浏览</button>
+      <button data-v="direction" onclick="switchView(this)">② 方向专报 · 储能系统（点 chips 后）</button>
+      <button data-v="legacy" onclick="switchView(this)">③ 旧格式降级（历史期数）</button>
+    </div>
+
+    <!-- ══════════ 视图一：总览分组态 ══════════ -->
+    <div class="vpane on" id="v-overview">
+      <div class="toolbar">
+        <div class="toolbar-row">
+          <span class="period-select">📅 本期 <b>2026-09-22 ~ 2026-09-28</b>（13 份报告）▾</span>
+          <button class="expand-all" onclick="toggleAllGroups()">一键折叠/展开全部分组</button>
+        </div>
+        <div class="dir-chips">
+          <span class="dir-chip overview on" onclick="switchViewByChip(this,'overview')"><b>总览</b></span>
+          <span class="dir-chip" style="--c: var(--dir-power_electronics)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>电力电子装备<span class="n">59</span></span>
+          <span class="dir-chip" style="--c: var(--dir-transport)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>电动汽车与电气化<span class="n">30</span></span>
+          <span class="dir-chip" style="--c: var(--dir-storage)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>储能系统<span class="n">29</span></span>
+          <span class="dir-chip" style="--c: var(--dir-hv)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>高电压与绝缘<span class="n">26</span></span>
+          <span class="dir-chip" style="--c: var(--dir-transmission)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>输电网运行与规划<span class="n">20</span></span>
+          <span class="dir-chip" style="--c: var(--dir-protection)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>继电保护与故障诊断<span class="n">17</span></span>
+          <span class="dir-chip" style="--c: var(--dir-distribution)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>配电网运行与规划<span class="n">12</span></span>
+          <span class="dir-chip" style="--c: var(--dir-ies)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>综合能源系统<span class="n">6</span></span>
+          <span class="dir-chip" style="--c: var(--dir-power_quality)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>电能质量<span class="n">5</span></span>
+          <span class="dir-chip" style="--c: var(--dir-stability)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>电力系统稳定性<span class="n">5</span></span>
+          <span class="dir-chip" style="--c: var(--dir-distributed_gen)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>分布式电源与并网<span class="n">4</span></span>
+          <span class="dir-chip" style="--c: var(--dir-forecasting)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>预测与数据驱动<span class="n">3</span></span>
+          <span class="dir-chip" style="--c: var(--dir-market)" onclick="switchViewByChip(this,'direction')"><span class="dot"></span>电力市场与机制<span class="n">1</span></span>
+        </div>
+      </div>
+
+      <div class="meta">
+        <span>全方向总览</span>
+        <span>本期 <b>2026-09-22 ~ 2026-09-28</b></span>
+        <span>收录 <b>217</b> 篇（上期 31 篇，环比受分类覆盖进度影响仅供参考）</span>
+        <span>生成时间 2026-09-28</span>
+      </div>
+
+      <h2 class="sect">方向分布</h2>
+      <div class="bars">
+        <div class="bar-row"><span class="bar-name">电力电子装备</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-power_electronics); width: 100%"></div></div><span class="bar-val">59</span></div>
+        <div class="bar-row"><span class="bar-name">电动汽车与电气化</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-transport); width: 51%"></div></div><span class="bar-val">30</span></div>
+        <div class="bar-row"><span class="bar-name">储能系统</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-storage); width: 49%"></div></div><span class="bar-val">29</span></div>
+        <div class="bar-row"><span class="bar-name">高电压与绝缘</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-hv); width: 44%"></div></div><span class="bar-val">26</span></div>
+        <div class="bar-row"><span class="bar-name">输电网运行与规划</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-transmission); width: 34%"></div></div><span class="bar-val">20</span></div>
+        <div class="bar-row"><span class="bar-name">继电保护与故障诊断</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-protection); width: 29%"></div></div><span class="bar-val">17</span></div>
+        <div class="bar-row"><span class="bar-name">配电网运行与规划</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-distribution); width: 20%"></div></div><span class="bar-val">12</span></div>
+        <div class="bar-row"><span class="bar-name">其余 6 个方向</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-other); width: 17%"></div></div><span class="bar-val">24</span></div>
+      </div>
+
+      <h2 class="sect">本周值得注意<span class="sect-hint">精选 4 篇 · 三字段结构化速评</span></h2>
+      <div class="group-cards" style="grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));">
+        <div class="brief-card" style="--c: var(--dir-storage)" onclick="openDialog()">
+          <div class="brief-head"><span class="brief-mark">AE</span><span class="brief-journal">Applied Energy</span><span class="brief-date">3 天前</span></div>
+          <div class="brief-body">
+            <div class="brief-title">直接空气捕集、绿氨与长时储能的复合部署风险分析</div>
+            <div class="brief-title-en">Compound deployment risk analysis in direct air capture, green ammonia and long-duration energy storage</div>
+            <div class="brief-fields">
+              <div class="brief-field"><span class="k">研究对象</span><span class="v">LDES / 绿氨 / DAC 三类长时储能技术的商业化部署</span></div>
+              <div class="brief-field"><span class="k">研究方法</span><span class="v">需求-成本-政策-融资四类障碍耦合的风险量化框架</span></div>
+              <div class="brief-field"><span class="k">核心结论</span><span class="v">技术前景取决于「最薄弱障碍」而非平均强度，可用于路线筛选</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="brief-card" style="--c: var(--dir-distribution)">
+          <div class="brief-head"><span class="brief-mark">TIE</span><span class="brief-journal">IEEE Trans. Ind. Electron.</span><span class="brief-date">4 天前</span></div>
+          <div class="brief-body">
+            <div class="brief-title">基于混合频率调制的四端口柔性互联装置</div>
+            <div class="brief-title-en">A Mixed-Frequency Modulation Based Four-Port Soft Open Point</div>
+            <div class="brief-fields">
+              <div class="brief-field"><span class="k">研究对象</span><span class="v">10 kV / 3 MW 四端口配电网柔性互联装置（SOP）</span></div>
+              <div class="brief-field"><span class="k">研究方法</span><span class="v">混合频率调制 + 示范工程级样机实验验证</span></div>
+              <div class="brief-field"><span class="k">核心结论</span><span class="v">四端口功率解耦控制可行，样机效率与波形质量达标</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <h2 class="sect">方向分组浏览<span class="sect-hint">每周每种研究方向分类归组 · 点击组头展开/收起 · 「查看全部」列出该方向本期全部文献</span></h2>
+      <div class="groups">
+
+        <!-- 储能 -->
+        <div class="group open" style="--c: var(--dir-storage)">
+          <button class="group-head" onclick="this.parentNode.classList.toggle('open')">
+            <span class="group-dot"></span>
+            <span class="group-name">储能系统</span>
+            <span class="group-count">29 篇 <span class="up">↑23</span></span>
+            <span class="group-topic">电池健康管理方法学密集迭代，热安全与长时储能并行</span>
+            <span class="caret">▶</span>
+          </button>
+          <div class="group-body">
+            <div class="group-cards">
+              <div class="brief-card" style="--c: var(--dir-storage)" onclick="openDialog()">
+                <div class="brief-head"><span class="brief-mark">TEC</span><span class="brief-journal">IEEE Trans. Energy Convers.</span><span class="brief-date">2 天前</span></div>
+                <div class="brief-body">
+                  <div class="brief-title">固态电池热失控双传感融合早期预警</div>
+                  <div class="brief-fields">
+                    <div class="brief-field"><span class="k">研究对象</span><span class="v">固态电池热失控的早期预警</span></div>
+                    <div class="brief-field"><span class="k">研究方法</span><span class="v">气体-温度双传感融合，量化响应时间</span></div>
+                    <div class="brief-field"><span class="k">核心结论</span><span class="v">双融合预警显著早于单传感，安全设计参考</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="brief-card" style="--c: var(--dir-storage)" onclick="openDialog()">
+                <div class="brief-head"><span class="brief-mark">TEVC</span><span class="brief-journal">IEEE Trans. Veh. Technol.</span><span class="brief-date">2 天前</span></div>
+                <div class="brief-body">
+                  <div class="brief-title">图持续学习 SOH 估计：新电芯型号增量场景</div>
+                  <div class="brief-fields">
+                    <div class="brief-field"><span class="k">研究对象</span><span class="v">新电芯型号不断涌现场景的 SOH 估计</span></div>
+                    <div class="brief-field"><span class="k">研究方法</span><span class="v">图持续学习（增量更新，免全量重训）</span></div>
+                    <div class="brief-field"><span class="k">核心结论</span><span class="v">长尾新型号上保持精度，训练成本大幅下降</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="brief-card" style="--c: var(--dir-storage)" onclick="openDialog()">
+                <div class="brief-head"><span class="brief-mark">TPEL</span><span class="brief-journal">IEEE Trans. Power Electron.</span><span class="brief-date">3 天前</span></div>
+                <div class="brief-body">
+                  <div class="brief-title">BATTER-MoE：稀疏混合专家锂电池 RUL 预测</div>
+                  <div class="brief-fields">
+                    <div class="brief-field"><span class="k">研究对象</span><span class="v">锂电池剩余使用寿命（RUL）预测</span></div>
+                    <div class="brief-field"><span class="k">研究方法</span><span class="v">稀疏混合专家网络（MoE），按工况路由专家</span></div>
+                    <div class="brief-field"><span class="k">核心结论</span><span class="v">精度与推理效率兼顾，优于稠密单模型基线</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button class="group-more" onclick="alert('打开「储能系统 · 本期全部 29 篇」列表弹窗（复用现有 ArticleListDialog，按首次公开倒序）')">查看储能系统全部 29 篇 ›</button>
+          </div>
+        </div>
+
+        <!-- 电力电子 -->
+        <div class="group open" style="--c: var(--dir-power_electronics)">
+          <button class="group-head" onclick="this.parentNode.classList.toggle('open')">
+            <span class="group-dot"></span>
+            <span class="group-name">电力电子装备</span>
+            <span class="group-count">59 篇 <span class="up">↑59</span></span>
+            <span class="group-topic">TTE 整期集中出版 · 电机驱动控制与器件热管理为主</span>
+            <span class="caret">▶</span>
+          </button>
+          <div class="group-body">
+            <div class="group-cards">
+              <div class="brief-card" style="--c: var(--dir-power_electronics)" onclick="openDialog()">
+                <div class="brief-head"><span class="brief-mark">TTE</span><span class="brief-journal">IEEE Trans. Transp. Electrification</span><span class="brief-date">4 天前</span></div>
+                <div class="brief-body">
+                  <div class="brief-title">PMSM 无模型预测控制</div>
+                  <div class="brief-fields">
+                    <div class="brief-field"><span class="k">研究对象</span><span class="v">永磁同步电机的高性能电流控制</span></div>
+                    <div class="brief-field"><span class="k">研究方法</span><span class="v">无模型预测控制，免精确参数整定</span></div>
+                    <div class="brief-field"><span class="k">核心结论</span><span class="v">参数失配下仍保持动态品质，鲁棒性提升</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="brief-card" style="--c: var(--dir-power_electronics)" onclick="openDialog()">
+                <div class="brief-head"><span class="brief-mark">TPEL</span><span class="brief-journal">IEEE Trans. Power Electron.</span><span class="brief-date">5 天前</span></div>
+                <div class="brief-body">
+                  <div class="brief-title">SiC 模块结温在线估算</div>
+                  <div class="brief-fields">
+                    <div class="brief-field"><span class="k">研究对象</span><span class="v">SiC 功率模块的结温监测</span></div>
+                    <div class="brief-field"><span class="k">研究方法</span><span class="v">热敏感电参数（TSEP）反推 + 降阶热网络</span></div>
+                    <div class="brief-field"><span class="k">核心结论</span><span class="v">估算误差满足寿命预测需求，成本低于光学法</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button class="group-more" onclick="alert('打开「电力电子装备 · 本期全部 59 篇」列表弹窗')">查看电力电子装备全部 59 篇 ›</button>
+          </div>
+        </div>
+
+        <!-- 输电网 -->
+        <div class="group open" style="--c: var(--dir-transmission)">
+          <button class="group-head" onclick="this.parentNode.classList.toggle('open')">
+            <span class="group-dot"></span>
+            <span class="group-name">输电网运行与规划</span>
+            <span class="group-count">20 篇 <span class="up">↑20</span></span>
+            <span class="group-topic">MMC-HVDC 绝对主线：构网控制与换相失败预测</span>
+            <span class="caret">▶</span>
+          </button>
+          <div class="group-body">
+            <div class="group-cards">
+              <div class="brief-card" style="--c: var(--dir-transmission)" onclick="openDialog()">
+                <div class="brief-head"><span class="brief-mark">TPWRS</span><span class="brief-journal">IEEE Trans. Power Syst.</span><span class="brief-date">3 天前</span></div>
+                <div class="brief-body">
+                  <div class="brief-title">混合构网型 MMC-HVDC 控制</div>
+                  <div class="brief-fields">
+                    <div class="brief-field"><span class="k">研究对象</span><span class="v">向弱电网送电的 MMC-HVDC 系统</span></div>
+                    <div class="brief-field"><span class="k">研究方法</span><span class="v">混合构网型控制 + 电磁暂态仿真验证</span></div>
+                    <div class="brief-field"><span class="k">核心结论</span><span class="v">弱电网下暂态支撑优于纯跟网型方案</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button class="group-more" onclick="alert('打开「输电网运行与规划 · 本期全部 20 篇」列表弹窗')">查看输电网运行与规划全部 20 篇 ›</button>
+          </div>
+        </div>
+
+        <!-- 折叠组示例（默认展开，此处折叠仅为示意两种状态） -->
+        <div class="group" style="--c: var(--dir-transport)">
+          <button class="group-head" onclick="this.parentNode.classList.toggle('open')">
+            <span class="group-dot"></span>
+            <span class="group-name">电动汽车与电气化</span>
+            <span class="group-count">30 篇 <span class="up">↑19</span></span>
+            <span class="group-topic">充电基础设施主线：SST 快充、多端口 V2X 拓扑</span>
+            <span class="caret">▶</span>
+          </button>
+          <div class="group-body">
+            <div class="group-cards"></div>
+            <button class="group-more">查看电动汽车与电气化全部 30 篇 ›</button>
+          </div>
+        </div>
+        <div class="group" style="--c: var(--dir-hv)">
+          <button class="group-head" onclick="this.parentNode.classList.toggle('open')">
+            <span class="group-dot"></span>
+            <span class="group-name">高电压与绝缘</span>
+            <span class="group-count">26 篇 <span class="up">↑26</span></span>
+            <span class="group-topic">GIS 局放智能诊断：多任务学习 + YOLO 缺陷检测</span>
+            <span class="caret">▶</span>
+          </button>
+          <div class="group-body"><div class="group-cards"></div><button class="group-more">查看高电压与绝缘全部 26 篇 ›</button></div>
+        </div>
+        <div class="group" style="--c: var(--dir-protection)">
+          <button class="group-head" onclick="this.parentNode.classList.toggle('open')">
+            <span class="group-dot"></span>
+            <span class="group-name">继电保护与故障诊断</span>
+            <span class="group-count">17 篇 <span class="up">↑17</span></span>
+            <span class="group-topic">构网型逆变器接入下的保护适应性</span>
+            <span class="caret">▶</span>
+          </button>
+          <div class="group-body"><div class="group-cards"></div><button class="group-more">查看继电保护与故障诊断全部 17 篇 ›</button></div>
+        </div>
+        <div class="group" style="--c: var(--dir-distribution)">
+          <button class="group-head" onclick="this.parentNode.classList.toggle('open')">
+            <span class="group-dot"></span>
+            <span class="group-name">配电网运行与规划</span>
+            <span class="group-count">12 篇 <span class="up">↑11</span></span>
+            <span class="group-topic">SOP 柔性互联示范工程 + 低碳协同调度</span>
+            <span class="caret">▶</span>
+          </button>
+          <div class="group-body"><div class="group-cards"></div><button class="group-more">查看配电网运行与规划全部 12 篇 ›</button></div>
+        </div>
+        <div class="group" style="--c: var(--dir-ies)">
+          <button class="group-head" onclick="this.parentNode.classList.toggle('open')">
+            <span class="group-dot"></span>
+            <span class="group-name">综合能源系统</span>
+            <span class="group-count">6 篇 <span class="up">↑2</span></span>
+            <span class="group-topic">氢能全链条经济性：LCOH 优化与 LCA</span>
+            <span class="caret">▶</span>
+          </button>
+          <div class="group-body"><div class="group-cards"></div><button class="group-more">查看综合能源系统全部 6 篇 ›</button></div>
+        </div>
+      </div>
+
+      <h2 class="sect">热点主题<span class="sect-hint">点击搜索相关文献</span></h2>
+      <div class="topics">
+        <span class="topic">车网互动与 V2X 充电拓扑</span><span class="topic">电池健康状态机器学习</span><span class="topic">GIS 局放智能诊断</span>
+        <span class="topic">构网型控制与保护适配</span><span class="topic">配电网柔性互联 SOP</span><span class="topic">LLM 电力预测</span>
+      </div>
+    </div>
+
+    <!-- ══════════ 视图二：方向专报态（储能） ══════════ -->
+    <div class="vpane" id="v-direction">
+      <div class="toolbar">
+        <div class="toolbar-row">
+          <span class="period-select">📅 本期 <b>2026-09-22 ~ 2026-09-28</b>（13 份报告）▾</span>
+        </div>
+        <div class="dir-chips">
+          <span class="dir-chip overview" onclick="switchViewByChip(this,'overview')"><b>总览</b></span>
+          <span class="dir-chip" style="--c: var(--dir-power_electronics)"><span class="dot"></span>电力电子装备<span class="n">59</span></span>
+          <span class="dir-chip" style="--c: var(--dir-transport)"><span class="dot"></span>电动汽车与电气化<span class="n">30</span></span>
+          <span class="dir-chip on" style="--c: var(--dir-storage)"><span class="dot"></span>储能系统<span class="n">29</span></span>
+          <span class="dir-chip" style="--c: var(--dir-hv)"><span class="dot"></span>高电压与绝缘<span class="n">26</span></span>
+          <span class="dir-chip" style="--c: var(--dir-transmission)"><span class="dot"></span>输电网运行与规划<span class="n">20</span></span>
+          <span class="dir-chip" style="--c: var(--dir-protection)"><span class="dot"></span>继电保护与故障诊断<span class="n">17</span></span>
+          <span class="dir-chip" style="--c: var(--dir-distribution)"><span class="dot"></span>配电网运行与规划<span class="n">12</span></span>
+        </div>
+      </div>
+
+      <div class="meta">
+        <span style="color: var(--dir-storage); font-weight: 600;">储能系统专报</span>
+        <span>本期 <b>2026-09-22 ~ 2026-09-28</b></span>
+        <span>收录 <b>29</b> 篇（上期 6 篇 <span class="up">+23</span>）</span>
+        <span>生成时间 2026-09-28</span>
+      </div>
+
+      <div class="layout">
+        <main>
+          <h2 class="sect">主题脉络</h2>
+          <p style="color: var(--ink-2); font-size: 13.5px; margin-bottom: 6px;">
+            电池健康管理（SOH/SOC/RUL/热参数）占据半壁且方法学密集迭代：BatteryGPT 生成式预训练、BATTER-MoE 稀疏混合专家、图持续学习、免预训练小样本 TimeLiteNet——「跨化学体系/跨工况泛化」成为共同目标。热安全（固态电池气-热双传感预警、液冷随机预测控制）与电网侧长时储能部署风险并行。
+          </p>
+
+          <h2 class="sect">主题聚类速评</h2>
+          <div class="cluster">
+            <div class="cluster-head"><span class="cluster-name">电池健康管理泛化（10 篇）</span><span class="cluster-meta">查看全部 ›</span></div>
+            <div class="review-list">
+              <div class="brief-card" style="--c: var(--dir-storage)" onclick="openDialog()">
+                <div class="brief-head"><span class="brief-mark">TIE</span><span class="brief-journal">IEEE Trans. Ind. Electron.</span><span class="brief-date">2 天前</span></div>
+                <div class="brief-body">
+                  <div class="brief-title">BatteryGPT：生成式预训练电池健康管理</div>
+                  <div class="brief-fields">
+                    <div class="brief-field"><span class="k">研究对象</span><span class="v">跨化学体系的电池 SOH + RUL 联合估计</span></div>
+                    <div class="brief-field"><span class="k">研究方法</span><span class="v">生成式预训练 + 多任务微调</span></div>
+                    <div class="brief-field"><span class="k">核心结论</span><span class="v">跨体系泛化优于单体系专用模型</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="brief-card" style="--c: var(--dir-storage)" onclick="openDialog()">
+                <div class="brief-head"><span class="brief-mark">TEVC</span><span class="brief-journal">IEEE Trans. Veh. Technol.</span><span class="brief-date">2 天前</span></div>
+                <div class="brief-body">
+                  <div class="brief-title">TimeLiteNet：免预训练小样本 SOH 预测</div>
+                  <div class="brief-fields">
+                    <div class="brief-field"><span class="k">研究对象</span><span class="v">小样本场景下的 SOH 预测</span></div>
+                    <div class="brief-field"><span class="k">研究方法</span><span class="v">轻量时序网络，免大规模预训练</span></div>
+                    <div class="brief-field"><span class="k">核心结论</span><span class="v">数十条老化轨迹即达可用精度，部署门槛低</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="review-more">其余 8 篇 · 点击「查看全部」展开</div>
+            </div>
+          </div>
+          <div class="cluster">
+            <div class="cluster-head"><span class="cluster-name">热安全与热管理（5 篇）</span><span class="cluster-meta">查看全部 ›</span></div>
+            <div class="review-list">
+              <div class="brief-card" style="--c: var(--dir-storage)" onclick="openDialog()">
+                <div class="brief-head"><span class="brief-mark">TEC</span><span class="brief-journal">IEEE Trans. Energy Convers.</span><span class="brief-date">2 天前</span></div>
+                <div class="brief-body">
+                  <div class="brief-title">液冷电池热管理实时随机预测控制</div>
+                  <div class="brief-fields">
+                    <div class="brief-field"><span class="k">研究对象</span><span class="v">液冷电池包的热管理控制</span></div>
+                    <div class="brief-field"><span class="k">研究方法</span><span class="v">实时随机模型预测控制（STMPC）</span></div>
+                    <div class="brief-field"><span class="k">核心结论</span><span class="v">不确定流量下温控精度与能耗双优</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="review-more">其余 4 篇 · 点击「查看全部」展开</div>
+            </div>
+          </div>
+          <div class="cluster">
+            <div class="cluster-head"><span class="cluster-name">长时储能与电网侧（4 篇）</span><span class="cluster-meta">查看全部 ›</span></div>
+            <div class="review-list">
+              <div class="brief-card" style="--c: var(--dir-storage)" onclick="openDialog()">
+                <div class="brief-head"><span class="brief-mark">AE</span><span class="brief-journal">Applied Energy</span><span class="brief-date">3 天前</span></div>
+                <div class="brief-body">
+                  <div class="brief-title">抽蓄电站备用容量分层运行优化</div>
+                  <div class="brief-fields">
+                    <div class="brief-field"><span class="k">研究对象</span><span class="v">水风光互补下的抽蓄备用分层</span></div>
+                    <div class="brief-field"><span class="k">研究方法</span><span class="v">分层运行优化模型</span></div>
+                    <div class="brief-field"><span class="k">核心结论</span><span class="v">备用分层提升互补系统利用率</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="review-more">其余 3 篇 · 点击「查看全部」展开</div>
+            </div>
+          </div>
+
+          <h2 class="sect">全量速评<span class="sect-hint">本期 29 篇逐篇三字段 · 与「查看全部」列表同源</span></h2>
+          <div class="review-list" style="padding: 0;">
+            <div class="legacy-card"><span class="id">#69012</span><span>此处为其余 24 篇的三字段速评卡（mockup 略，实站逐篇渲染；每卡 = 期刊身份条 + 标题 + 三字段）</span></div>
+          </div>
+
+          <h2 class="sect">高频关键词</h2>
+          <div class="topics">
+            <span class="topic">电池健康管理泛化</span><span class="topic">热失控双传感预警</span><span class="topic">长时储能风险量化</span>
+            <span class="topic">液冷热管理控制</span><span class="topic">钠离子与超级电容材料</span>
+          </div>
+
+          <h2 class="sect">值得精读</h2>
+          <div class="group-cards" style="grid-template-columns: repeat(auto-fill, minmax(460px, 1fr));">
+            <div class="brief-card" style="--c: var(--dir-storage)" onclick="openDialog()">
+              <div class="brief-head"><span class="brief-mark">AE</span><span class="brief-journal">Applied Energy</span><span class="brief-date">3 天前</span></div>
+              <div class="brief-body">
+                <div class="brief-title">复合部署风险指数（LDES/绿氨/DAC）</div>
+                <div class="brief-fields">
+                  <div class="brief-field"><span class="k">研究对象</span><span class="v">LDES / 绿氨 / DAC 三类技术的商业化部署</span></div>
+                  <div class="brief-field"><span class="k">研究方法</span><span class="v">四类障碍耦合的风险量化框架</span></div>
+                  <div class="brief-field"><span class="k">核心结论</span><span class="v">「最薄弱障碍」决定技术前景，可直接复用</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+
+        <aside>
+          <div class="aside-card">
+            <h4>历史期数</h4>
+            <div class="period on"><span>09-22 ~ 09-28</span><span class="n">13 份</span></div>
+            <div class="period"><span>09-15 ~ 09-21</span><span class="n">13 份</span></div>
+            <div class="period"><span>09-08 ~ 09-14</span><span class="n">12 份</span></div>
+            <div class="period"><span>09-01 ~ 09-07</span><span class="n">12 份</span></div>
+            <div class="period"><span>08-25 ~ 08-31</span><span class="n">10 份</span></div>
+            <div class="aside-tip">期数/方向切换时懒加载单份报告（/api/reports/detail），不再一次拉全量。</div>
+          </div>
+          <div class="aside-card">
+            <h4>本期速览导航</h4>
+            <div class="klist">
+              <div class="krow"><span class="kd" style="background: var(--dir-storage)"></span><span>电池健康管理泛化</span><span class="kv">10 篇</span></div>
+              <div class="krow"><span class="kd" style="background: var(--dir-storage)"></span><span>热安全与热管理</span><span class="kv">5 篇</span></div>
+              <div class="krow"><span class="kd" style="background: var(--dir-storage)"></span><span>传感与状态估计</span><span class="kv">4 篇</span></div>
+              <div class="krow"><span class="kd" style="background: var(--dir-storage)"></span><span>长时储能与电网侧</span><span class="kv">4 篇</span></div>
+              <div class="krow"><span class="kd" style="background: var(--dir-storage)"></span><span>材料与电极</span><span class="kv">3 篇</span></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- ══════════ 视图三：旧格式降级 ══════════ -->
+    <div class="vpane" id="v-legacy">
+      <div class="meta">
+        <span>全方向总览</span>
+        <span>本期 <b>2026-09-15 ~ 2026-09-21</b>（历史期数）</span>
+        <span>收录 <b>41</b> 篇</span>
+        <span>生成时间 2026-09-21</span>
+      </div>
+      <div class="note" style="margin-top: 4px;">此期为 v2 上线前生成的旧格式报告：无三字段速评 → 自动降级为 v1 一行式展示，卡片带「旧格式」角标，其余功能（点击、聚类、精选）不受影响。</div>
+
+      <h2 class="sect">方向分组浏览</h2>
+      <div class="groups">
+        <div class="group open" style="--c: var(--dir-storage)">
+          <button class="group-head" onclick="this.parentNode.classList.toggle('open')">
+            <span class="group-dot"></span>
+            <span class="group-name">储能系统</span>
+            <span class="group-count">6 篇 <span class="up">↑4</span></span>
+            <span class="group-topic">本期主题一句话（v1 各方向动态原文）</span>
+            <span class="caret">▶</span>
+          </button>
+          <div class="group-body">
+            <div class="review-list">
+              <div class="legacy-card"><span class="id">#58210</span><span>共享储能容量配置与多站融合：考虑需求侧政策的风险量化，值得跟进<span class="legacy-badge">旧格式</span></span></div>
+              <div class="legacy-card"><span class="id">#58197</span><span>长时储能复合部署全寿命周期经济性分析<span class="legacy-badge">旧格式</span></span></div>
+              <div class="legacy-card"><span class="id">#58166</span><span>磷酸铁锂电池组一致性评估：<b>速评一行式（v1 原样）</b><span class="legacy-badge">旧格式</span></span></div>
+            </div>
+            <button class="group-more">查看储能系统全部 6 篇 ›</button>
+          </div>
+        </div>
+        <div class="group" style="--c: var(--dir-distribution)">
+          <button class="group-head" onclick="this.parentNode.classList.toggle('open')">
+            <span class="group-dot"></span>
+            <span class="group-name">配电网运行与规划</span>
+            <span class="group-count">5 篇</span>
+            <span class="group-topic">台区柔性与 SOP 应用增多</span>
+            <span class="caret">▶</span>
+          </button>
+          <div class="group-body"><div class="group-cards"></div><button class="group-more">查看配电网运行与规划全部 5 篇 ›</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 文献详情弹窗示意（点击精选第一张卡） ── -->
+  <div class="dialog-mask" id="dlg" onclick="if(event.target===this)closeDialog()">
+    <div class="dialog">
+      <button class="close" onclick="closeDialog()">✕</button>
+      <h3>直接空气捕集、绿氨与长时储能的复合部署风险分析</h3>
+      <p class="en">Compound deployment risk analysis in direct air capture, green ammonia and long-duration energy storage</p>
+      <div class="rows">
+        <span>期刊：Applied Energy · 首次公开 2026-09-25</span>
+        <span>研究方向：<b style="color: var(--dir-storage);">储能系统</b></span>
+        <span>操作：标记已读 · 加入收藏 · 跳转原文（与信息流详情弹窗完全一致）</span>
+      </div>
+      <div class="brief-fields">
+        <div class="brief-field" style="--c: var(--dir-storage)"><span class="k">研究对象</span><span class="v">LDES / 绿氨 / DAC 三类长时储能技术的商业化部署</span></div>
+        <div class="brief-field" style="--c: var(--dir-storage)"><span class="k">研究方法</span><span class="v">需求-成本-政策-融资四类障碍耦合的风险量化框架</span></div>
+        <div class="brief-field" style="--c: var(--dir-storage)"><span class="k">核心结论</span><span class="v">技术前景取决于「最薄弱障碍」而非平均强度，可用于路线筛选</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function switchView(btn) {
+    document.querySelectorAll(".mock-switch button").forEach(b => b.classList.remove("on"));
+    btn.classList.add("on");
+    document.querySelectorAll(".vpane").forEach(p => p.classList.remove("on"));
+    document.getElementById("v-" + btn.dataset.v).classList.add("on");
+  }
+  function switchViewByChip(chip, view) {
+    document.querySelectorAll(".mock-switch button").forEach(b => b.classList.toggle("on", b.dataset.v === view));
+    document.querySelectorAll(".dir-chip").forEach(c => c.classList.remove("on"));
+    chip.classList.add("on");
+    document.querySelectorAll(".vpane").forEach(p => p.classList.remove("on"));
+    document.getElementById("v-" + view).classList.add("on");
+  }
+  function toggleAllGroups() {
+    const groups = document.querySelectorAll("#v-overview .group");
+    const anyClosed = [...groups].some(g => !g.classList.contains("open"));
+    groups.forEach(g => g.classList.toggle("open", anyClosed));
+  }
+  function openDialog() { document.getElementById("dlg").classList.add("on"); }
+  function closeDialog() { document.getElementById("dlg").classList.remove("on"); }
+</script>
+</body>
+</html>

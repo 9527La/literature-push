@@ -12,8 +12,9 @@ export const config = {
   port: Number(process.env.PORT || 4177),
   clientOrigin: process.env.CLIENT_ORIGIN || "http://127.0.0.1:5173",
   // The passport opens the site; it is deliberately separate from personal accounts.
-  adminPassport: process.env.ADMIN_PASSPORT || "shenchao",
-  userPassport: process.env.USER_PASSPORT || "lhmktz",
+  // 硬编码默认值已于 2026-10-01 移除（曾在公开 git 历史中泄露），必须从 .env 提供。
+  adminPassport: process.env.ADMIN_PASSPORT || "",
+  userPassport: process.env.USER_PASSPORT || "",
   passportTokenTtlHours: Number(process.env.PASSPORT_TOKEN_TTL_HOURS || 24),
   maxPersonalAccounts: Number(process.env.MAX_PERSONAL_ACCOUNTS || 40),
   maxActiveIps: Number(process.env.MAX_ACTIVE_IPS || 20),
@@ -22,7 +23,17 @@ export const config = {
   adminTokenTtlHours: Number(process.env.ADMIN_TOKEN_TTL_HOURS || 12),
   userTokenTtlDays: Number(process.env.USER_TOKEN_TTL_DAYS || 30),
   superAdminUsername: process.env.SUPER_ADMIN_USERNAME || "沈超2024",
-  ieeeApiKey: process.env.IEEE_API_KEY || "",
+  // IEEE Xplore API（Mashery 网关）按天计费，注册档约 200 次/天、单次最多 200 条。
+  // 网关不返回剩余额度，所以本地按 UTC 日记账：达到上限就当天停手，把请求让给
+  // Scopus / Crossref / 浏览器兜底，而不是继续被 429 拒。
+  // IEEE_ENABLED=false 可以只关掉 IEEE 而保留 key，不用改 .env 里的密钥。
+  ieeeEnabled: String(process.env.IEEE_ENABLED || "true").toLowerCase() === "true",
+  // trim：.env 用 cmd 的 echo 追加时容易带上行尾空格，带空格的 key 会被网关判为无效。
+  ieeeApiKey: String(process.env.IEEE_API_KEY || "").trim(),
+  // 默认 180：官方额度 200，留 20 次给人工排查。
+  ieeeDailyCallLimit: Number(process.env.IEEE_DAILY_CALL_LIMIT ?? 180),
+  // 并发闸门 + 最小请求间隔，避免同一时刻突发多个请求被网关限流。
+  ieeeRequestIntervalMs: Number(process.env.IEEE_REQUEST_INTERVAL_MS ?? 1500),
   elsevierApiKey: process.env.ELSEVIER_API_KEY || "",
   // OpenAlex 自 2026-02 起要求所有生产请求带 API key，并改为按日额度计费。
   // 本项目没有可用 key，每一次调用都落在匿名共享池上，额度一空就是
@@ -121,6 +132,10 @@ export const config = {
   pushIncludeKeywords: String(process.env.PUSH_INCLUDE_KEYWORDS || "true").toLowerCase() === "true",
   pushIncludeTranslation: String(process.env.PUSH_INCLUDE_TRANSLATION || "true").toLowerCase() === "true",
   pushJournalFilter: process.env.PUSH_JOURNAL_FILTER || "", // comma-separated journal names, empty = all subscribed
+  // AI 研究速览（PLAN-AI-REPORTS.md）：推送方向过滤（逗号分隔方向 key，空=全部）
+  // 与邮件置顶 AI 报告开关（默认开，冷启动无报告时自动省略段落）。
+  pushDirectionFilter: process.env.PUSH_DIRECTION_FILTER || "",
+  pushIncludeAiReport: String(process.env.PUSH_INCLUDE_AI_REPORT || "true").toLowerCase() === "true",
   
   smtp: {
     host: process.env.SMTP_HOST || "",
@@ -132,3 +147,13 @@ export const config = {
     to: process.env.MAIL_TO || ""
   }
 };
+
+// 通行证与超级管理员用户名不再提供硬编码默认值（曾在公开 git 历史中泄露，
+// 2026-10-01 清理）。部署时必须在仓库根目录 .env 里显式配置，缺一即拒绝启动，
+// 避免以空通行证静默上线的更坏情况。
+if (!config.adminPassport || !config.userPassport || !config.superAdminUsername) {
+  throw new Error(
+    "ADMIN_PASSPORT / USER_PASSPORT / SUPER_ADMIN_USERNAME missing in .env — " +
+    "hardcoded defaults were removed for security; set them in the repository-root .env."
+  );
+}

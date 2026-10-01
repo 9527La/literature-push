@@ -69,7 +69,11 @@ export const DEFAULT_JOURNALS = [
     platform: "elsevier",
     name: "Energy",
     group: "elsevier",
-    issns: ["0360-5442", "1751-4223", "1751-4231"],
+    // ⚠️ 1751-4223 / 1751-4231 是 ICE《Proceedings of the Institution of Civil
+    // Engineers - Energy》的 ISSN，不是 Elsevier《Energy》的。写错会让 Crossref
+    // 按 ISSN 检索时把土木工程那本刊的论文一起拉回来，管理中心于是冒出目录里
+    // 没有的期刊。Energy 的电子刊号是 1873-6785。
+    issns: ["0360-5442", "1873-6785"],
     filterKeywords: ELECTRICAL_FILTER_KEYWORDS
   },
   {

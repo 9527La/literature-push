@@ -1,11 +1,24 @@
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, Cloud, Filter, Globe, Network, Search, X } from "lucide-react";
+import { BarChart3, Cloud, Compass, Filter, Globe, Network, Search, X } from "lucide-react";
 import { api } from "../../lib/api.js";
-import { formatDate, isChineseJournalArticle } from "../../lib/format.js";
+import { articleDate, formatDate, isChineseJournalArticle } from "../../lib/format.js";
+import { directionVar } from "../../lib/directions.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
 import WordCloud from "./WordCloud.jsx";
 import CooccurrenceView from "./CooccurrenceView.jsx";
+
+const DIRECTION_WINDOWS = [
+  { key: "7", label: "近 7 日" },
+  { key: "30", label: "近 30 日" },
+  { key: "365", label: "全部" }
+];
+const MATRIX_GROUPS = [
+  { key: "ieee", label: "IEEE" },
+  { key: "elsevier", label: "爱思唯尔" },
+  { key: "cn", label: "中文刊" },
+  { key: "other", label: "其他" }
+];
 
 function StatsView({ journals, markRead, toggleFavorite }) {
   const [filters, setFilters] = useState({ journal: "", from: "", to: "" });
@@ -16,6 +29,8 @@ function StatsView({ journals, markRead, toggleFavorite }) {
   const [keywordSearch, setKeywordSearch] = useState("");
   const [viewMode, setViewMode] = useState("list");
   const [cooccurrenceData, setCooccurrenceData] = useState(null);
+  const [directionStats, setDirectionStats] = useState(null);
+  const [directionWindow, setDirectionWindow] = useState("30");
 
   async function fetchStats() {
     setLoading(true);
@@ -58,6 +73,18 @@ function StatsView({ journals, markRead, toggleFavorite }) {
   useEffect(() => {
     fetchStats();
   }, []);
+
+  useEffect(() => {
+    // 方向统计独立于关键词统计的筛选条件（全站口径），失败时整块隐藏。
+    api.getDirectionStats({ window: directionWindow, matrix: true })
+      .then(setDirectionStats)
+      .catch(() => setDirectionStats(null));
+  }, [directionWindow]);
+
+  const directionMax = useMemo(() => {
+    const useRecent = directionWindow !== "365";
+    return Math.max(1, ...(directionStats?.directions || []).map((d) => (useRecent ? d.lastN : d.total)));
+  }, [directionStats, directionWindow]);
 
   const maxCount = stats?.keywords?.[0]?.count || 1;
   
@@ -202,7 +229,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                       <button type="button" className="keyword-article-open" onClick={() => openArticle(article)}>
                         <div className="keyword-article-meta">
                           <span>{article.journal}</span>
-                          <span>{formatDate(article.published_at)}</span>
+                          <span>{formatDate(articleDate(article))}</span>
                         </div>
                         <div className="keyword-article-title">{article.title}</div>
                       </button>
@@ -222,6 +249,86 @@ function StatsView({ journals, markRead, toggleFavorite }) {
               </div>
             )}
           </div>
+
+          {directionStats && (
+            <section className="direction-stats-panel" aria-label="研究方向分布">
+              <div className="direction-stats-head">
+                <h3><Compass size={16} aria-hidden="true" /> 研究方向分布</h3>
+                <div className="direction-window-toggle" role="tablist" aria-label="统计窗口">
+                  {DIRECTION_WINDOWS.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`stats-view-btn ${directionWindow === item.key ? "active" : ""}`}
+                      onClick={() => setDirectionWindow(item.key)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="direction-coverage" role="status">
+                已分类 <strong>{directionStats.coverage.classified}</strong> / {directionStats.coverage.total} 篇
+                {directionStats.coverage.pendingReview > 0 && <>，待复核 <strong>{directionStats.coverage.pendingReview}</strong> 篇</>}
+              </p>
+              <div className="direction-bars">
+                {directionStats.directions
+                  .filter((d) => (directionWindow === "365" ? d.total : d.lastN) > 0)
+                  .sort((a, b) => (directionWindow === "365" ? b.total - a.total : b.lastN - a.lastN))
+                  .map((d) => {
+                    const count = directionWindow === "365" ? d.total : d.lastN;
+                    return (
+                      <div className="direction-bar-row" key={d.key}>
+                        <span className="direction-bar-label">{d.label}</span>
+                        <div className="direction-bar-track">
+                          <div
+                            className="direction-bar"
+                            style={{
+                              width: `${Math.max(2, (count / directionMax) * 100)}%`,
+                              background: directionVar(d.key)
+                            }}
+                          />
+                        </div>
+                        <span className="direction-bar-count">{count}</span>
+                      </div>
+                    );
+                  })}
+              </div>
+              {directionStats.matrix && (
+                <table className="direction-matrix">
+                  <thead>
+                    <tr>
+                      <th scope="col">方向</th>
+                      {MATRIX_GROUPS.map((group) => <th scope="col" key={group.key}>{group.label}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {directionStats.directions.map((d) => {
+                      const cells = MATRIX_GROUPS.map((group) => directionStats.matrix[d.key]?.[group.key] || 0);
+                      const rowMax = Math.max(1, ...cells);
+                      if (cells.every((n) => n === 0)) return null;
+                      return (
+                        <tr key={d.key}>
+                          <th scope="row">
+                            <span className="direction-dot" style={{ "--dir-key": directionVar(d.key) }} aria-hidden="true" />
+                            {d.label}
+                          </th>
+                          {cells.map((n, i) => (
+                            <td
+                              key={MATRIX_GROUPS[i].key}
+                              style={n > 0 ? { background: `color-mix(in srgb, ${directionVar(d.key)} ${Math.round(8 + (n / rowMax) * 52)}%, transparent)` } : undefined}
+                            >
+                              {n > 0 ? n : "–"}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          )}
         </>
       )}
 

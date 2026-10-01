@@ -17,6 +17,11 @@
  *   node scripts/verify-render.mjs https://<tunnel-host>            # 1440px
  *   node scripts/verify-render.mjs http://192.168.31.233:4177 1280
  *
+ * 本机所在网络会劫持/阻断公共 DNS，域名刚切换时这里可能解析不了，但全球已经生效。
+ * 用 VERIFY_RESOLVE=<host>:<ip> 把浏览器钉到已知的 Cloudflare 边缘 IP 上，
+ * 就能在缓存过期前照常验证：
+ *   VERIFY_RESOLVE=lhmktz.top:104.21.33.88 node scripts/verify-render.mjs https://lhmktz.top
+ *
  * Exit code 0 = all assertions passed. Requires playwright-core (a dependency)
  * and Microsoft Edge or Google Chrome installed on this machine.
  */
@@ -27,14 +32,17 @@ const base = (process.argv[2] || "http://192.168.31.233:4177").replace(/\/$/, ""
 const width = Number(process.argv[3] || 1440);
 /** The command bar must not grow a 「一键」 prefix or lose a button. */
 const EXPECTED_BUTTONS = ["刷新文献数据", "补全摘要", "补全关键词", "补全摘要和关键词", "翻译标题", "翻译摘要"];
+/** 补全作业运行中时按钮会变成进行时文案，这不算缺陷。 */
+const RUNNING_LABELS = { "摘要和关键词补全中…": "补全摘要和关键词" };
 
 function readPassport() {
   try {
     const env = fs.readFileSync(".env", "utf8");
     const match = env.match(/^ADMIN_PASSPORT\s*=\s*(.*)$/m);
     if (match && match[1].trim()) return match[1].trim().replace(/^["']|["']$/g, "");
-  } catch { /* .env is optional: fall back to the built-in default */ }
-  return "shenchao";
+  } catch { /* .env is required */ }
+    console.error("通行证缺失：请在仓库根目录 .env 配置 ADMIN_PASSPORT（代码中不允许硬编码通行证）");
+  process.exit(2);
 }
 
 const failures = [];
@@ -43,7 +51,20 @@ const check = (ok, message) => {
   if (!ok) failures.push(message);
 };
 
-const browser = await chromium.launch({ channel: process.env.VERIFY_BROWSER || "msedge", headless: true });
+/** 可选：把域名钉到指定 IP，绕开这台机器上被劫持/未刷新的 DNS。 */
+const resolvePin = (process.env.VERIFY_RESOLVE || "").trim();
+const launchArgs = [];
+if (resolvePin) {
+  const [pinHost, pinIp] = resolvePin.split(":");
+  if (pinHost && pinIp) launchArgs.push(`--host-resolver-rules=MAP ${pinHost} ${pinIp}`);
+  else console.log(`  warn  VERIFY_RESOLVE 应为 host:ip，已忽略：${resolvePin}`);
+}
+
+const browser = await chromium.launch({
+  channel: process.env.VERIFY_BROWSER || "msedge",
+  headless: true,
+  args: launchArgs
+});
 const page = await browser.newPage({ viewport: { width, height: 1000 } });
 page.on("pageerror", (error) => console.log("  [page error]", String(error.message).slice(0, 200)));
 
@@ -103,7 +124,9 @@ try {
   check(layout.rows === 1, `两条额度条在同一行（实际 ${layout.rows} 行）`);
   check(layout.overflows.every((value) => value <= 0), `额度条没有内容溢出（${layout.overflows.join(", ")}）`);
   check(layout.needed === null || layout.needed <= layout.available, `一行放得下：需要 ${layout.needed}px / 可用 ${layout.available}px`);
-  check(JSON.stringify(layout.buttons) === JSON.stringify(EXPECTED_BUTTONS), `命令栏按钮：${layout.buttons.join(" | ")}`);
+  const labels = layout.buttons.map((label) => RUNNING_LABELS[label] || label);
+  check(JSON.stringify(labels) === JSON.stringify(EXPECTED_BUTTONS), `命令栏按钮：${layout.buttons.join(" | ")}`);
+  if (labels.join("|") !== layout.buttons.join("|")) console.log("  note  命令栏有按钮处于「补全中」状态，已按静止文案比对");
   console.log(`  note  翻译额度：${layout.texts.join(" ／ ")}`);
   console.log(`  note  维护面板${layout.hasMaintenanceProgress ? "在" : "未显示（暂无任务记录）"}，小字说明 ${layout.hints} 处`);
 

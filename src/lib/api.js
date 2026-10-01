@@ -33,12 +33,26 @@ export const api = {
   async get(path, { signal } = {}) {
     return parseResponse(await fetch(path, { headers: requestHeaders(), signal }));
   },
-  async post(path, body) {
-    return parseResponse(await fetch(path, {
-      method: "POST",
-      headers: requestHeaders(Boolean(body)),
-      body: body ? JSON.stringify(body) : undefined
-    }));
+  /**
+   * `timeoutMs` 可选：不传则沿用浏览器默认（不超时）。
+   * 生成摘要后发信这类请求必须给一个上限，否则网关掐断时页面会一直停在「发送中」。
+   */
+  async post(path, body, { timeoutMs } = {}) {
+    const controller = timeoutMs ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      return await parseResponse(await fetch(path, {
+        method: "POST",
+        headers: requestHeaders(Boolean(body)),
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller?.signal
+      }));
+    } catch (error) {
+      if (controller?.signal.aborted) throw new Error(`请求超时（超过 ${Math.round(timeoutMs / 1000)} 秒），请稍后在收件箱确认是否已收到`);
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   },
   async put(path, body) {
     return parseResponse(await fetch(path, {
@@ -52,5 +66,17 @@ export const api = {
   },
   async delete(path) {
     return parseResponse(await fetch(path, { method: "DELETE", headers: requestHeaders() }));
+  },
+  /** 研究方向统计（RUNBOOK-AI-DIRECTION.md 管线的数据出口）。 */
+  async getDirectionStats({ window, matrix } = {}) {
+    const params = new URLSearchParams();
+    if (window) params.set("window", String(window));
+    if (matrix) params.set("matrix", "1");
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return api.get(`/api/directions${suffix}`);
+  },
+  /** 管理员改判研究方向（置 direction_source='manual'，AI 分类永不覆盖）。 */
+  async setArticleDirection(id, direction, secondary = []) {
+    return api.post(`/api/admin/articles/${id}/direction`, { direction, secondary });
   }
 };

@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { config } from "./config.js";
 import { normalizeArticle } from "./ieee.js";
 import { internals } from "./sources.js";
@@ -432,9 +435,14 @@ test("crawler continues to a second DOI source when the first source is partial"
   const previousFetch = globalThis.fetch;
   const previousCrawlerEnabled = config.crawlerEnabled;
   const previousElsevierKey = config.elsevierApiKey;
+  const previousIeeeKey = config.ieeeApiKey;
   const calls = [];
   config.crawlerEnabled = true;
   config.elsevierApiKey = "";
+  // IEEE 作者关键词会走官方 API，而部署机上 .env 配了 IEEE_API_KEY；
+  // 不显式清掉它，这条用例的调用次数就会随「本机有没有 key」而变
+  // （实测：本机 2 次通过，远端 3 次失败）。
+  config.ieeeApiKey = "";
   // 按 URL 分发而不是按调用序号：OpenAlex 关闭后源的顺序会变，
   // 用序号会让这条用例和「当前启用了哪些源」绑死。
   globalThis.fetch = async (url) => {
@@ -473,12 +481,16 @@ test("crawler continues to a second DOI source when the first source is partial"
     assert.equal(details.keywords, "Power systems");
     assert.equal(details.abstract, "Abstract supplied by Semantic Scholar");
     assert.equal(calls.length, 2);
-    assert.ok(calls.some((call) => call.includes("api.crossref.org")));
-    assert.ok(calls.some((call) => call.includes("api.semanticscholar.org")));
+    const crossrefIndex = calls.findIndex((call) => call.includes("api.crossref.org"));
+    const semanticIndex = calls.findIndex((call) => call.includes("api.semanticscholar.org"));
+    assert.ok(crossrefIndex >= 0, "先试第一个源 Crossref");
+    assert.ok(semanticIndex >= 0, "再退到第二个源 Semantic Scholar");
+    assert.ok(crossrefIndex < semanticIndex, "第二个源必须在第一个源之后才被调用");
   } finally {
     globalThis.fetch = previousFetch;
     config.crawlerEnabled = previousCrawlerEnabled;
     config.elsevierApiKey = previousElsevierKey;
+    config.ieeeApiKey = previousIeeeKey;
   }
 });
 
@@ -578,13 +590,15 @@ test("digest email renders a branded HTML brief instead of a raw text block", ()
   assert.match(message.html, /<hr /, "rules should become dividers");
 });
 
-import { fetchIeeeArticleDetails } from "./ieee.js";
+import { fetchIeeeArticleDetails, IeeeQuotaExceededError, ieeeQuotaSnapshot } from "./ieee.js";
 import { isNonResearchTitle, isUsableMetadataText, safeExternalError } from "./utils.js";
 
 test("IEEE detail lookup queries by DOI and returns exact metadata", async () => {
   const originalFetch = globalThis.fetch;
   const originalKey = config.ieeeApiKey;
+  const originalLimit = config.ieeeDailyCallLimit;
   config.ieeeApiKey = "test-key";
+  config.ieeeDailyCallLimit = 0;
   globalThis.fetch = async (url) => {
     assert.match(String(url), /doi=10\.1109%2Fexample/i);
     return Response.json({ articles: [{ doi: "10.1109/example", title: "Exact", abstract: "Full abstract", index_terms: { "IEEE Author Keywords": ["grid"] } }] });
@@ -593,7 +607,91 @@ test("IEEE detail lookup queries by DOI and returns exact metadata", async () =>
     const result = await fetchIeeeArticleDetails("https://doi.org/10.1109/example");
     assert.equal(result.abstract, "Full abstract");
     assert.equal(result.keywords, "grid");
-  } finally { globalThis.fetch = originalFetch; config.ieeeApiKey = originalKey; }
+  } finally { globalThis.fetch = originalFetch; config.ieeeApiKey = originalKey; config.ieeeDailyCallLimit = originalLimit; }
+});
+
+// 真实 API 的 index_terms 是 { ieee_terms: { terms: [...] }, author_terms: {...},
+// dynamic_index_terms: {...} }，旧的「值是数组」写法会解析出空关键词。
+test("IEEE API keywords prefer author terms and drop dynamic index terms", () => {
+  const article = normalizeArticle({
+    doi: "10.1109/demo",
+    title: "Demo",
+    index_terms: {
+      ieee_terms: { terms: ["Power systems", "Microgrids"] },
+      author_terms: { terms: ["frequency stability", "renewable energy"] },
+      dynamic_index_terms: { terms: ["AC Voltage", "Operating System"] }
+    }
+  }, "");
+  assert.equal(article.keywords, "frequency stability; renewable energy");
+});
+
+test("IEEE API keywords fall back to IEEE terms when authors gave none", () => {
+  const article = normalizeArticle({
+    doi: "10.1109/demo2",
+    title: "Demo 2",
+    index_terms: { ieee_terms: { terms: ["Power systems"] }, dynamic_index_terms: { terms: ["AC Voltage"] } }
+  }, "");
+  assert.equal(article.keywords, "Power systems");
+});
+
+test("IEEE retries a sporadic gateway 403 once and counts both attempts", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = config.ieeeApiKey;
+  const originalLimit = config.ieeeDailyCallLimit;
+  const originalDataDir = process.env.LITERATURE_DATA_DIR;
+  const originalInterval = config.ieeeRequestIntervalMs;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "literature-ieee-403-"));
+  process.env.LITERATURE_DATA_DIR = dataDir;
+  config.ieeeApiKey = "test-key";
+  config.ieeeDailyCallLimit = 5;
+  config.ieeeRequestIntervalMs = 0;
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts += 1;
+    if (attempts === 1) return new Response("forbidden", { status: 403 });
+    return Response.json({ articles: [{ doi: "10.1109/retry", title: "Retry", abstract: "Abstract" }] });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    config.ieeeApiKey = originalKey;
+    config.ieeeDailyCallLimit = originalLimit;
+    process.env.LITERATURE_DATA_DIR = originalDataDir;
+    config.ieeeRequestIntervalMs = originalInterval;
+  });
+  const result = await fetchIeeeArticleDetails("10.1109/retry");
+  assert.equal(result.title, "Retry");
+  assert.equal(attempts, 2);
+  assert.equal(ieeeQuotaSnapshot().used, 2, "重试的那一次也要计入当日额度");
+});
+
+test("IEEE daily quota blocks further calls instead of burning the API budget", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const originalKey = config.ieeeApiKey;
+  const originalLimit = config.ieeeDailyCallLimit;
+  const originalDataDir = process.env.LITERATURE_DATA_DIR;
+  const originalInterval = config.ieeeRequestIntervalMs;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "literature-ieee-quota-"));
+  process.env.LITERATURE_DATA_DIR = dataDir;
+  config.ieeeApiKey = "test-key";
+  config.ieeeDailyCallLimit = 1;
+  config.ieeeRequestIntervalMs = 0;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return Response.json({ articles: [{ doi: "10.1109/quota", title: "Quota", abstract: "Abstract" }] });
+  };
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    config.ieeeApiKey = originalKey;
+    config.ieeeDailyCallLimit = originalLimit;
+    process.env.LITERATURE_DATA_DIR = originalDataDir;
+    config.ieeeRequestIntervalMs = originalInterval;
+  });
+  await fetchIeeeArticleDetails("10.1109/quota");
+  assert.equal(calls, 1);
+  assert.equal(ieeeQuotaSnapshot().remaining, 0);
+  await assert.rejects(() => fetchIeeeArticleDetails("10.1109/quota"), IeeeQuotaExceededError);
+  assert.equal(calls, 1, "超额度后不应再发出请求");
 });
 
 test("non-research titles and gateway HTML are recognized", () => {

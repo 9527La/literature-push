@@ -13,7 +13,8 @@ function authorsOf(article) {
 
 function yearOf(article) {
   if (article.year) return String(article.year);
-  const date = String(article.published_at || "");
+  // 与界面同一口径：正式出版用出版年，提前访问用入库年（后端 display_date）。
+  const date = String(article.display_date || article.published_at || "");
   return /^\d{4}/.test(date) ? date.slice(0, 4) : "";
 }
 

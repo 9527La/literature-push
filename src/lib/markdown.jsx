@@ -14,11 +14,34 @@ export function renderInlineMarkdown(text) {
   return parts.length ? parts : text;
 }
 
+function isFenceLine(trimmed) {
+  return trimmed.startsWith("```");
+}
+
+function isHorizontalRule(trimmed) {
+  return /^\s*(\*\s*\*\s*\*|-{3,}|_{3,})\s*$/.test(trimmed);
+}
+
+function Fence({ raw }) {
+  // 每日资讯的围栏块内是来源 URL：整块是合法 URL 时渲染为可点击链接。
+  const content = raw.join("\n").trim();
+  const url = /^https?:\/\/\S+$/.test(content) ? content : null;
+  if (url) {
+    return (
+      <pre className="md-fence md-fence-link">
+        <a href={url} target="_blank" rel="noopener noreferrer">{content}</a>
+      </pre>
+    );
+  }
+  return <pre className="md-fence">{content}</pre>;
+}
+
 export function renderMarkdown(md) {
   if (!md) return null;
   const lines = md.split("\n");
   const blocks = [];
   let listItems = [], bKey = 0;
+  let fenceLines = null; // null = 不在围栏内；数组 = 围栏内已收集的行
   function flushList() {
     if (listItems.length) {
       blocks.push(<ul key={bKey++}>{listItems.map((item, i) => <li key={i}>{renderInlineMarkdown(item)}</li>)}</ul>);
@@ -28,6 +51,25 @@ export function renderMarkdown(md) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
+    if (fenceLines !== null) {
+      if (isFenceLine(trimmed)) {
+        blocks.push(<Fence key={bKey++} raw={fenceLines} />);
+        fenceLines = null;
+      } else {
+        fenceLines.push(line);
+      }
+      continue;
+    }
+    if (isFenceLine(trimmed)) {
+      flushList();
+      fenceLines = [];
+      continue;
+    }
+    if (isHorizontalRule(trimmed)) {
+      flushList();
+      blocks.push(<hr key={bKey++} className="md-sep" />);
+      continue;
+    }
     if (trimmed.startsWith("### ")) {
       flushList();
       blocks.push(<h5 key={bKey++}>{renderInlineMarkdown(trimmed.slice(4))}</h5>);
@@ -45,6 +87,10 @@ export function renderMarkdown(md) {
       flushList();
       blocks.push(<p key={bKey++}>{renderInlineMarkdown(trimmed)}</p>);
     }
+  }
+  if (fenceLines !== null) {
+    // 未闭合的围栏按原文兜底输出，避免吞掉后续内容。
+    blocks.push(<Fence key={bKey++} raw={fenceLines} />);
   }
   flushList();
   return blocks;

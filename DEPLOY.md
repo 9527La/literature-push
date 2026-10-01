@@ -14,7 +14,7 @@
 | 服务端口 | `4177` |
 | 本机访问 | `http://127.0.0.1:4177` |
 | 局域网访问 | `http://192.168.31.233:4177` |
-| 公网访问 | Cloudflare Quick Tunnel，**每次重启都会更换地址** |
+| 公网访问 | **固定域名 `https://lhmktz.top`**（Cloudflare Named Tunnel + Windows 服务 `Cloudflared`，开机自启） |
 
 前提与边界：
 
@@ -22,13 +22,15 @@
 - 同步会排除 `node_modules/`、`.env`、`data/`、`dist/`、`.git/`、`artifacts/`；远端各自保留自己的副本。
 - 远端 `PATH` 里没有 node/npm，一律使用仓库自带的 `.runtime\node\node.exe` 与 `.runtime\node\npm.cmd`。
 - 远端 `.env` 与 `data/` 是生产数据，同步和部署脚本都不会覆盖它们。
+- 隧道已是**开机自启的 Windows 服务**（`Cloudflared`）：**发版不再需要重启隧道，公网地址也不再变化**。
+  过渡期内 Quick Tunnel 作业可能仍在运行（公网入口不断档），待校园网 DNS 缓存过期后再取消。
 
 ## 2. 三个必须记住的坑
 
 | 坑 | 现象 | 处理 |
 | --- | --- | --- |
 | 后台任务忽略工作目录 | 远端命令实际在 `C:\Windows\System32\spool\drivers\x64\3` 下执行 | 命令第一条必须是 `Set-Location 'E:\SC\文献推送'`；`scripts\redeploy.ps1` 已内置 |
-| 后台任务阻塞同步 | `Cannot synchronize while a background job is running for this project` | 先 `sc_job_list` 找出本项目全部任务（服务 + 隧道），逐个 `sc_job_cancel`。**该门禁只在「确有文件要传」时触发**：零增量同步会提前返回（仅刷新基线），不被拦截，任务在跑也可安全执行 |
+| 后台任务阻塞同步 | `Cannot synchronize while a background job is running for this project` | 先 `sc_job_list` 找出本项目全部任务（服务，以及过渡期可能还在的 Quick Tunnel），逐个 `sc_job_cancel`。**该门禁只在「确有文件要传」时触发**：零增量同步会提前返回（仅刷新基线），不被拦截，任务在跑也可安全执行 |
 | 脚本编码 | PowerShell 5.1 把无 BOM 的 UTF-8 `.ps1` 当 ANSI 读，含中文时报语法错误（例如在 `}` 行失败） | 仓库内 `.ps1` 一律保存为 **UTF-8 with BOM** |
 
 附带注意：
@@ -49,7 +51,7 @@ git push origin main
 
 ### 步骤 1 — 取消本项目的全部后台任务
 
-`sc_job_list(limit=120)` → 找到本项目的 job id（服务与隧道都要）→ `sc_job_cancel(job_id)`。
+`sc_job_list(limit=120)` → 找到本项目的 job id（服务，以及过渡期可能还在的 Quick Tunnel）→ `sc_job_cancel(job_id)`。
 只取消本项目；只要还有 running 的任务，下一步同步就会被拒绝。
 
 ### 步骤 2 — 同步代码
@@ -87,25 +89,50 @@ sc_run: Set-Location 'E:\SC\文献推送'; powershell -NoProfile -ExecutionPolic
 
 ### 步骤 4 — 重启服务任务
 
-```
-sc_job_start(label="literature-service", python_env=false):
-  Set-Location 'E:\SC\文献推送'; & 'E:\SC\文献推送\.runtime\node\node.exe' --no-warnings=ExperimentalWarning '.\server\index.js'
-```
-
-用 `sc_job_status` 确认任务处于 `running`，再用步骤 6 的 `-VerifyOnly` 确认端口 4177 已在监听、接口可访问。
-
-注意：服务任务（`node`）的 `sc_job_logs` 常常 **stdout 与 stderr 同时为空**，这是托管子进程没有把控制台刷进任务日志所致，不代表启动失败。
-**不要**据此判断服务是否起来了，一律以 `-VerifyOnly` 的端口与接口检查为准。
-想确认端口持有者时用 `Get-Process node | Select-Object Id,StartTime`，其 `StartTime` 应与任务的 `StartedAt` 一致（同时也能证明上一次被取消的任务没有留下僵尸进程）。
-
-### 步骤 5 — 重启隧道任务
+服务由**计划任务 `\LiteraturePushService`** 长期托管（不像 `sc_job_start` 那样随会话消失）：
 
 ```
-sc_job_start(label="cloudflared-tunnel", python_env=false):
-  & 'E:\SC\文献推送\.runtime\cloudflared\cloudflared.exe' tunnel --url http://127.0.0.1:4177 --no-autoupdate
+schtasks /end   /tn LiteraturePushService     # 不会杀掉已经起来的 node
+taskkill /F /IM node.exe                      # 必须单独结束
+schtasks /run   /tn LiteraturePushService
 ```
 
-地址在 `sc_job_logs(stream="stderr")` 里，形如 `https://xxxx.trycloudflare.com`。地址每次重启都会变，必须重新取。
+⚠️ 不要再用 `sc_job_start` 托管常驻服务：那种后台任务结束后（`literature-service-20260917d` 就是以一个非零退出码收尾），
+站点会一路挂到有人手工重启为止。
+
+**自愈（2026-09-18 加）**：计划任务 `\LiteraturePushWatchdog` 每 2 分钟探一次 `http://127.0.0.1:4177/version.json`，
+不通就先 `schtasks /run /tn LiteraturePushService` 重试，20 秒后仍不通则直接用 `.runtime\node\node.exe` 拉起；
+实测从杀掉 node 到恢复服务约 **60 秒**。日志在 `data\watchdog.log`。
+
+这两个计划任务的定义由 `scripts\service-task.xml` + `scripts\install-service-tasks.ps1` 维护：
+
+```powershell
+& 'E:\SC\文献推送\scripts\install-service-tasks.ps1'   # 幂等，可重复执行
+```
+
+其中 `service-task.xml` 把 `DisallowStartIfOnBatteries`、`StopIfGoingOnBatteries`、`StopOnIdleEnd` 三项全部设为 `false`——
+原配置允许 Task Scheduler 在切换电池 / 空闲结束时**静默终止**服务，是 2026-09-18 早上站点打不开的根因。
+
+> ⚠️ 修改 XML 后要用 UTF-16 交给 `schtasks`（PS 的 `Get-Content` 默认按 ANSI 读，中文路径会变成乱码并报
+> “task XML is malformed”）。上面的安装脚本已用 `XmlWriter` + `[Text.Encoding]::Unicode` 处理。
+
+### 步骤 5 — 确认隧道（固定域名，不需要重启）
+
+隧道是随机器启动的 Windows 服务，跟代码部署解耦，正常情况下这一步只看一眼：
+
+```powershell
+Get-Service Cloudflared | Select-Object Status,StartType      # 期望 Running / Automatic
+(Invoke-WebRequest -Uri 'http://127.0.0.1:20242/ready' -UseBasicParsing).StatusCode   # 期望 200
+```
+
+- 公网地址固定为 `https://lhmktz.top`，**不会再变**，也不用再重新取。
+- 服务日志在**事件查看器 → Windows 日志 → 应用程序**（来源 `cloudflared`），不在 `sc_job_logs` 里。
+- 服务自用的 token 在 `C:\ProgramData\cloudflared\token`，备份副本在远端 `data\tunnel-token.txt`（不在同步范围、不进 git）。
+- 域名路由在 Cloudflare Zero Trust → 隧道 → **「路由」标签** → 「添加路由」→「已发布的应用程序」里维护，指向 `http://127.0.0.1:4177`。
+
+> 应急回滚：用 Quick Tunnel 起个临时地址
+> （`cloudflared.exe tunnel --url http://127.0.0.1:4177 --no-autoupdate`，地址在 `sc_job_logs(stream="stderr")` 里），
+> 代价是地址会随进程变化。
 
 ### 步骤 6 — 冒烟自检
 
@@ -117,7 +144,7 @@ sc_run: Set-Location 'E:\SC\文献推送'; powershell -NoProfile -ExecutionPolic
 
 ### 步骤 7 — 通知使用者
 
-把新的隧道地址、版本号（`/version.json` 里的 `version`）和本次更新说明发出去。
+把固定地址 `https://lhmktz.top`、版本号（`/version.json` 里的 `version`）和本次更新说明发出去。
 
 ## 4. 冒烟检查清单
 
@@ -136,8 +163,10 @@ sc_run: Set-Location 'E:\SC\文献推送'; powershell -NoProfile -ExecutionPolic
 第 8 项必须单独做——**脚本验不出前端白屏**：`-VerifyOnly` 只看端口与接口，一个启动即崩进错误边界的 bundle，上面每一项照样返回 200。用真实浏览器跑一遍：
 
 ```
-node scripts/verify-render.mjs https://<本次隧道地址>        # 默认 1440px 视口
+node scripts/verify-render.mjs https://lhmktz.top            # 默认 1440px 视口
 node scripts/verify-render.mjs http://192.168.31.233:4177 1280
+# 校园网 DNS 被劫持/缓存未过期、域名暂时解析不了时，把域名钉到 CF 边缘 IP：
+VERIFY_RESOLVE=lhmktz.top:104.21.33.88 node scripts/verify-render.mjs https://lhmktz.top
 ```
 
 它会用 `.env` 里的管理员通行证登录（不打印通行证），打开管理中心并断言：页面没有进入错误边界、两条翻译额度条存在且同排、没有内容溢出、命令栏按钮文案与预期一致。任一项失败即以 1 退出。依赖项目自带的 `playwright-core` 与本机的 Edge / Chrome（可用 `VERIFY_BROWSER=chrome` 切换）。
@@ -149,8 +178,8 @@ node scripts/verify-render.mjs http://192.168.31.233:4177 1280
 需要手工确认的两项：
 
 ```powershell
-# 公网地址可达（把 URL 换成本次隧道地址）
-(Invoke-WebRequest -Uri 'https://xxxx.trycloudflare.com/version.json' -UseBasicParsing -TimeoutSec 30).Content
+# 公网地址可达（固定域名）
+(Invoke-WebRequest -Uri 'https://lhmktz.top/version.json' -UseBasicParsing -TimeoutSec 30).Content
 # 局域网地址可达
 (Invoke-WebRequest -Uri 'http://192.168.31.233:4177/' -UseBasicParsing -TimeoutSec 30).StatusCode
 ```
@@ -167,8 +196,10 @@ node scripts/verify-render.mjs http://192.168.31.233:4177 1280
 | `.ps1` 报语法错误、`)` 或 `}` 不匹配 | 无 BOM 的 UTF-8 被当作 ANSI 解析 | 重新保存为 UTF-8 with BOM |
 | 首页 200 但静态资源 404 | 同步后没有重新 `npm run build` | 执行步骤 3 |
 | `/api/status` 返回 401 | 请求没带 `x-passport-token` | 先 `POST /api/gate/login` 拿 token |
-| 公网打不开 | 隧道任务没起，或地址已更换 | 执行步骤 5 并重新取地址 |
+| 公网打不开 | 隧道服务没跑，或 CF 隧道里的域名路由被删 | `Get-Service Cloudflared` 看服务状态；再看 Zero Trust 该隧道的「路由」里是否还有 `lhmktz.top` |
+| 域名解析不到、但 CF 面板显示已生效 | 本机/校园网 DNS 被劫持或缓存未过期（发往 `8.8.8.8` 的查询会被劫到 `slave-dns.hhu`） | 用 `check-host.net` 或 `curl --resolve` 验证；渲染检查加 `VERIFY_RESOLVE=<host>:<ip>` |
 | 端口 4177 无监听 | 服务启动失败 | 看 `data\service-runtime.err.log` 与任务日志 |
+| **公网与局域网都打不开，隧道却是 Running** | Node 服务进程没了而任务没有自愈 | `Get-Process node` 为空即此列；`schtasks /run /tn LiteraturePushService` 拉起，并确认 `\LiteraturePushWatchdog` 存在且为 Ready（见步骤 4） |
 
 ## 6. 回滚
 
@@ -194,4 +225,5 @@ node scripts/verify-render.mjs http://192.168.31.233:4177 1280
   自己数出来的（落在 `data/translation-usage.json`，按自然月分桶），管理中心的
   百度额度条据此显示，并标注为本地记账。改上限后要重启服务才生效。
 - 端口变化 → 远端 `.env` 的 `PORT`，同时用 `redeploy.ps1 -Port <端口>` 做自检。
-- 想要固定域名，需要 Cloudflare Zone + Named Tunnel；Quick Tunnel 地址本身不固定。
+- 固定域名已落地：Cloudflare Zone（`lhmktz.top`，NS 已切到 Cloudflare）+ Named Tunnel（Windows 服务 `Cloudflared`）。
+  隧道 token 存 `C:\ProgramData\cloudflared\token`，备份在远端 `data\tunnel-token.txt`；Quick Tunnel 仅作应急回滚。

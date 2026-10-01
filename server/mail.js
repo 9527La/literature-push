@@ -169,7 +169,7 @@ export async function sendNewArticlesEmail(articles, settings = {}) {
   ).join("\n\n");
   const bodyMarkdown = shown.map((article, index) => [
     `### ${index + 1}. ${article.title}`,
-    [article.journal, article.published_at].filter(Boolean).join(" · "),
+    [article.journal, article.display_date || article.published_at].filter(Boolean).join(" · "),
     article.url || ""
   ].filter(Boolean).join("\n")).join("\n\n---\n\n");
   await getTransporter().sendMail({

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>研究速览 · mockup 预览稿</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #ffffff; --line: #e4e7ec; --ink: #1a1a2e;
+    --ink-2: #5c6270; --ink-3: #8b90a0; --accent: #3157d5;
+    --dir-distributed_gen: #8A6238; --dir-storage: #3D6E66; --dir-market: #5F6773;
+    --dir-transmission: #34547A; --dir-distribution: #3F5D93; --dir-microgrid: #4E7D3B;
+    --dir-forecasting: #7D5BA6; --dir-stability: #9C4A4A; --dir-protection: #8C3E5F;
+    --dir-power_quality: #A8842C; --dir-hv: #2E7D8F; --dir-power_electronics: #B5486F;
+    --dir-transport: #B3662E; --dir-ies: #7E7A26; --dir-other: #767B82;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; font-size: 14px; line-height: 1.65; padding: 28px 32px 60px; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  .note { background: #eef2fd; border: 1px solid #c9d6f5; color: #2b4bb0; border-radius: 8px; padding: 10px 14px; font-size: 12.5px; margin-bottom: 18px; }
+  .nav-strip { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 10px 10px 0 0; padding: 6px 10px 0; border-bottom: none; flex-wrap: wrap; }
+  .nav-strip span { padding: 7px 14px; border-radius: 8px 8px 0 0; color: var(--ink-2); font-size: 13.5px; }
+  .nav-strip span.on { background: #eef2fd; color: var(--accent); font-weight: 600; border-bottom: 2px solid var(--accent); }
+  .page { background: var(--card); border: 1px solid var(--line); border-radius: 0 10px 10px 10px; padding: 26px 30px; }
+  .page-intro { margin-bottom: 18px; }
+  .eyebrow { font-size: 12px; letter-spacing: 1px; color: var(--accent); font-weight: 600; }
+  h1 { font-size: 21px; margin: 2px 0 4px; }
+  .hint { color: var(--ink-3); font-size: 13px; }
+  .tabs { display: flex; gap: 8px; margin: 18px 0 20px; }
+  .tab { border: 1px solid var(--line); background: #fafbfc; color: var(--ink-2); border-radius: 999px; padding: 6px 18px; font-size: 13.5px; cursor: pointer; }
+  .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 22px; align-items: start; }
+  @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+  .meta { display: flex; gap: 18px; flex-wrap: wrap; color: var(--ink-2); font-size: 13px; background: #f8f9fb; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; }
+  .meta b { color: var(--ink); font-weight: 600; }
+  .up { color: #b04a3a; } .down { color: #2e7d4f; }
+  h2.sect { font-size: 15px; margin: 22px 0 10px; padding-left: 10px; border-left: 3px solid var(--accent); }
+  .bars { display: grid; gap: 6px; margin-bottom: 6px; }
+  .bar-row { display: grid; grid-template-columns: 128px 1fr 84px; align-items: center; gap: 10px; font-size: 12.5px; }
+  .bar-name { color: var(--ink-2); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { height: 14px; background: #f0f1f4; border-radius: 7px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 7px; background: var(--c); }
+  .bar-val { color: var(--ink-3); }
+  .dir-block { margin: 14px 0 0; padding: 12px 16px; background: #fafbfc; border: 1px solid var(--line); border-radius: 8px; }
+  .dir-block h3 { font-size: 13.5px; display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+  .dir-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); flex: none; }
+  .dir-block p { color: var(--ink-2); font-size: 13px; }
+  .hl-card { border: 1px solid var(--line); border-radius: 10px; margin-top: 10px; overflow: hidden; cursor: pointer; transition: border-color .15s; }
+  .hl-card:hover { border-color: #b9c6ea; }
+  .hl-head { display: flex; align-items: center; gap: 8px; background: color-mix(in srgb, var(--c) 8%, white); border-bottom: 1px solid var(--line); padding: 7px 14px; }
+  .hl-mark { min-width: 38px; text-align: center; background: var(--c); color: #fff; border-radius: 6px; font-size: 11px; padding: 2px 6px; font-weight: 600; }
+  .hl-journal { font-size: 12.5px; color: var(--ink-2); flex: 1; }
+  .hl-date { font-size: 12px; color: var(--ink-3); }
+  .hl-body { padding: 10px 14px 12px; }
+  .hl-title { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+  .hl-why { font-size: 12.5px; color: var(--ink-2); }
+  .hl-why em { color: var(--accent); font-style: normal; }
+  .topics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+  .topic { border: 1px solid var(--line); background: #fafbfc; border-radius: 999px; padding: 3px 12px; font-size: 12.5px; color: var(--ink-2); }
+  .aside-card { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .aside-card h4 { font-size: 13px; color: var(--ink-2); margin-bottom: 10px; font-weight: 600; }
+  .period { display: flex; justify-content: space-between; align-items: center; padding: 7px 10px; border-radius: 8px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+  .period:hover { background: #f4f6fb; }
+  .period.on { background: #eef2fd; color: var(--accent); font-weight: 600; }
+  .period .n { color: var(--ink-3); font-weight: 400; }
+  .aside-tip { font-size: 12px; color: var(--ink-3); border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 10px; }
+  .pane { display: none; } .pane.on { display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note">mockup 预览稿（示意数据，非真实统计）· 布局：导航「研究速览」位于最新文献与关键词统计之间 · 双 tab 切换可预览周报 / 月报两种形态 · 精选文献卡片点击可打开与信息流一致的文献详情弹窗</div>
+
+  <div class="nav-strip">
+    <span>最新文献</span><span class="on">研究速览</span><span>关键词统计</span><span>收藏文献</span><span>文献推送</span><span>公共讨论</span><span>我的账户</span>
+  </div>
+  <div class="page">
+    <div class="page-intro">
+      <span class="eyebrow">AI 生成 · 每周日晚更新</span>
+      <h1>研究速览</h1>
+      <p class="hint">智能体基于当期入库文献自动生成；所有数字取自数据库统计，推荐理由仅依据论文摘要。</p>
+    </div>
+
+    <div class="tabs">
+      <button class="tab on" data-pane="weekly" onclick="switchPane(this)">一周速览</button>
+      <button class="tab" data-pane="monthly" onclick="switchPane(this)">月度趋势</button>
+    </div>
+
+    <div class="layout">
+      <main>
+        <!-- ═══ 周报 pane ═══ -->
+        <div class="pane on" id="pane-weekly">
+          <div class="meta">
+            <span>本期 <b>2026-09-22 ~ 2026-09-28</b></span>
+            <span>收录 <b>312</b> 篇（上期 326 篇 <span class="down">-14</span>）</span>
+            <span>精选 <b>3</b> 篇</span>
+          </div>
+
+          <h2 class="sect">方向分布</h2>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-name">储能系统</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-storage); width: 100%"></div></div><span class="bar-val">58（+9）</span></div>
+            <div class="bar-row"><span class="bar-name">配电网运行与规划</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-distribution); width: 76%"></div></div><span class="bar-val">44（-3）</span></div>
+            <div class="bar-row"><span class="bar-name">微电网与虚拟电厂</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-microgrid); width: 66%"></div></div><span class="bar-val">38（+6）</span></div>
+            <div class="bar-row"><span class="bar-name">电力电子装备</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-power_electronics); width: 60%"></div></div><span class="bar-val">35（+2）</span></div>
+            <div class="bar-row"><span class="bar-name">预测与数据驱动</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-forecasting); width: 52%"></div></div><span class="bar-val">30（-1）</span></div>
+            <div class="bar-row"><span class="bar-name">电动汽车与电气化</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-transport); width: 47%"></div></div><span class="bar-val">27（+4）</span></div>
+            <div class="bar-row"><span class="bar-name">电力市场与机制</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-market); width: 38%"></div></div><span class="bar-val">22（-6）</span></div>
+            <div class="bar-row"><span class="bar-name">其他 7 个方向</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-other); width: 30%"></div></div><span class="bar-val">58（+2）</span></div>
+          </div>
+
+          <h2 class="sect">各方向动态</h2>
+          <div class="dir-block" style="--c: var(--dir-storage)">
+            <h3><span class="dir-dot"></span>储能系统（58 篇，较上期 +9）</h3>
+            <p>共享储能容量配置与多站融合继续占主导；两篇分别讨论长时储能的复合部署风险与全寿命周期经济性，把需求侧政策纳入风险量化，值得跟进。</p>
+          </div>
+          <div class="dir-block" style="--c: var(--dir-distribution)">
+            <h3><span class="dir-dot"></span>配电网运行与规划（44 篇，较上期 -3）</h3>
+            <p>台区柔性与 soft open point 应用增多；电压/网损协同优化开始与分布式光伏消纳联合建模。</p>
+          </div>
+          <div class="dir-block" style="--c: var(--dir-microgrid)">
+            <h3><span class="dir-dot"></span>微电网与虚拟电厂（38 篇，较上期 +6）</h3>
+            <p>聚合商参与辅助服务的机制设计是本周热点，多主体博弈与出清结合的论文显著增加。</p>
+          </div>
+
+          <h2 class="sect">本周值得注意</h2>
+          <div class="hl-card" style="--c: var(--dir-storage)">
+            <div class="hl-head"><span class="hl-mark">AE</span><span class="hl-journal">Applied Energy</span><span class="hl-date">2026-09-27</span></div>
+            <div class="hl-body">
+              <div class="hl-title">Compound deployment risk analysis in direct air capture, green ammonia and long-duration energy storage</div>
+              <div class="hl-why">推荐理由：<em>提出复合部署风险指数</em>，把成本、政策、融资多障碍耦合量化，与课题的风险评估框架直接相关。</div>
+            </div>
+          </div>
+          <div class="hl-card" style="--c: var(--dir-microgrid)">
+            <div class="hl-head"><span class="hl-mark">TPWRS</span><span class="hl-journal">IEEE Transactions on Power Systems</span><span class="hl-date">2026-09-25</span></div>
+            <div class="hl-body">
+              <div class="hl-title">Aggregator-based ancillary service procurement with heterogeneous distributed energy resources</div>
+              <div class="hl-why">推荐理由：<em>异构资源聚合出清的可激励相容机制</em>，给出了参与约束的解析刻画。</div>
+            </div>
+          </div>
+          <div class="hl-card" style="--c: var(--dir-distribution)">
+            <div class="hl-head"><span class="hl-mark">电网技术</span><span class="hl-journal">电网技术</span><span class="hl-date">2026-09-24</span></div>
+            <div class="hl-body">
+              <div class="hl-title">考虑柔性互联装置的台区电压-网损协同优化方法</div>
+              <div class="hl-why">推荐理由：<em>中文文献，SOP 选址定容</em>与光伏承载力的联合建模，工程可直接参考。</div>
+            </div>
+          </div>
+
+          <h2 class="sect">热点主题</h2>
+          <div class="topics">
+            <span class="topic">共享储能</span><span class="topic">soft open point</span><span class="topic">聚合商出清</span><span class="topic">长时储能</span><span class="topic">车网互动</span>
+          </div>
+        </div>
+
+        <!-- ═══ 月报 pane ═══ -->
+        <div class="pane" id="pane-monthly">
+          <div class="meta">
+            <span>本期 <b>2026-08-01 ~ 2026-08-31</b></span>
+            <span>收录 <b>1238</b> 篇（上月 452 篇 <span class="up">+174%</span>）</span>
+            <span>环比口径：完整自然月对比</span>
+          </div>
+
+          <h2 class="sect">方向分布与环比</h2>
+          <div class="bars">
+            <div class="bar-row"><span class="bar-name">配电网运行与规划</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-distribution); width: 100%"></div></div><span class="bar-val">238（+61）</span></div>
+            <div class="bar-row"><span class="bar-name">储能系统</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-storage); width: 82%"></div></div><span class="bar-val">196（+38）</span></div>
+            <div class="bar-row"><span class="bar-name">电力电子装备</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-power_electronics); width: 70%"></div></div><span class="bar-val">168（+12）</span></div>
+            <div class="bar-row"><span class="bar-name">输电网运行与规划</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-transmission); width: 58%"></div></div><span class="bar-val">139（-9）</span></div>
+            <div class="bar-row"><span class="bar-name">微电网与虚拟电厂</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-microgrid); width: 50%"></div></div><span class="bar-val">120（+27）</span></div>
+            <div class="bar-row"><span class="bar-name">其他 9 个方向</span><div class="bar-track"><div class="bar-fill" style="--c: var(--dir-other); width: 160%"></div></div><span class="bar-val">377（+45）</span></div>
+          </div>
+
+          <h2 class="sect">各方向趋势解读</h2>
+          <div class="dir-block" style="--c: var(--dir-distribution)">
+            <h3><span class="dir-dot"></span>配电网运行与规划（238 篇，环比 +61）</h3>
+            <p>8 月增量集中在分布式光伏承载力与台区治理的交叉主题；重构类论文从单目标电压控制转向「承载力-网损-电压」三目标联合。与上月相比，SOP 与柔性互联的工程案例明显增多。</p>
+          </div>
+          <div class="dir-block" style="--c: var(--dir-storage)">
+            <h3><span class="dir-dot"></span>储能系统（196 篇，环比 +38）</h3>
+            <p>长时储能与共享储能双主线；安全类论文占比下降，全寿命周期经济性与容量配置的耦合建模上升为新的主流写法。</p>
+          </div>
+
+          <h2 class="sect">新兴主题</h2>
+          <div class="topics">
+            <span class="topic">compound deployment risk</span><span class="topic">台区柔性互联</span><span class="topic">聚合商激励相容</span><span class="topic">构网型控制</span>
+          </div>
+
+          <h2 class="sect">方法观察</h2>
+          <div class="dir-block" style="--c: var(--dir-forecasting)">
+            <h3><span class="dir-dot"></span>跨方向方法趋势</h3>
+            <p>数据驱动方法在配电网与市场方向的渗透率继续上升（区间优化/强化学习混合建模增多），但纯粹端到端黑盒预测的投稿比例回落，可解释性约束开始成为标配。</p>
+          </div>
+        </div>
+      </main>
+
+      <aside>
+        <div class="aside-card">
+          <h4>周报 · 历史期数</h4>
+          <div class="period on"><span>09-22 ~ 09-28</span><span class="n">312 篇</span></div>
+          <div class="period"><span>09-15 ~ 09-21</span><span class="n">326 篇</span></div>
+          <div class="period"><span>09-08 ~ 09-14</span><span class="n">401 篇</span></div>
+          <div class="period"><span>09-01 ~ 09-07</span><span class="n">262 篇</span></div>
+        </div>
+        <div class="aside-card">
+          <h4>月报 · 历史期数</h4>
+          <div class="period"><span>2026-08</span><span class="n">1238 篇</span></div>
+          <div class="period"><span>2026-07</span><span class="n">452 篇</span></div>
+        </div>
+        <div class="aside-card aside-tip">报告由 AI 智能体每周日 / 每月 1 日自动生成并入库；点击期数回看往期，点击精选文献打开详情。</div>
+      </aside>
+    </div>
+  </div>
+</div>
+<script>
+  function switchPane(btn) {
+    document.querySelectorAll(".tab").forEach(function (t) { t.classList.remove("on"); });
+    document.querySelectorAll(".pane").forEach(function (p) { p.classList.remove("on"); });
+    btn.classList.add("on");
+    document.getElementById("pane-" + btn.dataset.pane).classList.add("on");
+  }
+</script>
+</body>
+</html>

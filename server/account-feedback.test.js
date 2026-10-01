@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { runNodeScript } from "./run-node-script.js";
 import test from "node:test";
 
-test("keeps personal accounts, discussion identities, and session limits independent", () => {
+test("keeps personal accounts, discussion identities, and session limits independent", async () => {
   const workingDirectory = mkdtempSync(path.join(tmpdir(), "literature-push-test-"));
   const dbUrl = new URL("./db.js", import.meta.url).href;
   const script = `
@@ -95,10 +95,9 @@ test("keeps personal accounts, discussion identities, and session limits indepen
     if (overview.counts.users !== 40 || overview.counts.articles !== 1 || typeof overview.coverage.abstracts !== 'number') process.exit(17);
   `;
   try {
-    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", script], {
+    const result = await runNodeScript(script, {
       cwd: workingDirectory,
-      env: { ...process.env, LITERATURE_DATA_DIR: workingDirectory },
-      encoding: "utf8"
+      env: { ...process.env, LITERATURE_DATA_DIR: workingDirectory }
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
   } finally {

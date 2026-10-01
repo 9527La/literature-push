@@ -6,6 +6,9 @@ import path from "node:path";
 import { DEFAULT_JOURNAL_BY_NAME, DEFAULT_JOURNALS, config } from "./config.js";
 import { resolveDataDirectory } from "./paths.js";
 import { containsChineseText, escapeLike, decodeEntities, isNonResearchTitle, isUsableMetadataText } from "./utils.js";
+import { businessWindow } from "./date/normalize.js";
+import { mergeFirstPublic, resolveFirstPublicDate, resolveMergedFirstPublic } from "./date/resolve-first-public.js";
+import { DIRECTIONS, isDirectionKey } from "./directions.js";
 
 const DEFAULT_FAVORITE_GROUP_NAME = "默认收藏夹";
 const dataDir = resolveDataDirectory();
@@ -26,6 +29,34 @@ try { db.exec("ALTER TABLE translations ADD COLUMN keywords TEXT"); } catch (e) 
 }
 try { db.exec("ALTER TABLE articles ADD COLUMN first_seen_at TEXT"); } catch (e) {
   if (!e.message?.includes("duplicate column") && !e.message?.includes("no such table")) throw e;
+}
+
+// ── 文献主时间（first_public_at）字段迁移 ────────────────────────────────────
+// 事实字段与业务主字段分离（方案 §4）：online_first_at / published_at /
+// first_seen_at / fetched_at 是原始事实；first_public_at 及其来源 / 精度 /
+// 可信度是全站统一的「首次公开日期」。全部只增不改旧列，历史数据可回溯。
+for (const migration of [
+  "ALTER TABLE articles ADD COLUMN online_first_at TEXT",
+  "ALTER TABLE articles ADD COLUMN first_public_at TEXT",
+  "ALTER TABLE articles ADD COLUMN first_public_source TEXT",
+  "ALTER TABLE articles ADD COLUMN first_public_precision TEXT",
+  "ALTER TABLE articles ADD COLUMN first_public_confidence TEXT",
+  "ALTER TABLE articles ADD COLUMN date_verified_at TEXT",
+  "ALTER TABLE articles ADD COLUMN external_created_at TEXT",
+  // ── AI 研究方向（RUNBOOK-AI-DIRECTION.md）───────────────────────────────
+  // 写入方只有两条：apply-directions.mjs（source='ai'）与管理员改判（source='manual'）。
+  // 服务代码只读不写；manual 行永不覆盖。scripts/migrate-directions.mjs 是同一批
+  // 列的手动迁移入口（幂等），两处结果一致。
+  "ALTER TABLE articles ADD COLUMN research_direction TEXT",
+  "ALTER TABLE articles ADD COLUMN research_direction_secondary TEXT",
+  "ALTER TABLE articles ADD COLUMN direction_confidence REAL",
+  "ALTER TABLE articles ADD COLUMN direction_source TEXT",
+  "ALTER TABLE articles ADD COLUMN direction_reason TEXT",
+  "ALTER TABLE articles ADD COLUMN classified_at TEXT"
+]) {
+  try { db.exec(migration); } catch (e) {
+    if (!e.message?.includes("duplicate column") && !e.message?.includes("no such table")) throw e;
+  }
 }
 
 db.exec(`
@@ -51,12 +82,30 @@ db.exec(`
     first_seen_at TEXT NOT NULL,
     is_read INTEGER NOT NULL DEFAULT 0,
     is_favorite INTEGER NOT NULL DEFAULT 0,
-    keywords TEXT
+    keywords TEXT,
+    -- 文献主时间（first_public_at）：对新建库直接随建表语句给出；存量库由上方的
+    -- ALTER 语句补列。两条路径都必须在建 idx_articles_first_public_at 索引前就绪。
+    online_first_at TEXT,
+    first_public_at TEXT,
+    first_public_source TEXT,
+    first_public_precision TEXT,
+    first_public_confidence TEXT,
+    date_verified_at TEXT,
+    external_created_at TEXT,
+    -- AI 研究方向：与上方 ALTER 迁移保持同列同序（两条路径缺一不可）。
+    research_direction TEXT,
+    research_direction_secondary TEXT,
+    direction_confidence REAL,
+    direction_source TEXT,
+    direction_reason TEXT,
+    classified_at TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_articles_journal ON articles(journal);
   CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at);
   CREATE INDEX IF NOT EXISTS idx_articles_read ON articles(is_read);
+  CREATE INDEX IF NOT EXISTS idx_articles_first_public_at ON articles(first_public_at);
+  CREATE INDEX IF NOT EXISTS idx_articles_direction ON articles(research_direction);
 
   CREATE TABLE IF NOT EXISTS refresh_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,7 +278,50 @@ db.exec(`
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (user_id, key)
   );
+
+  CREATE TABLE IF NOT EXISTS ai_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly')),
+    period_start TEXT NOT NULL,
+    period_end TEXT NOT NULL,
+    direction TEXT,
+    status TEXT NOT NULL DEFAULT 'ready',
+    content_md TEXT NOT NULL,
+    stats_json TEXT,
+    generated_at TEXT,
+    generator TEXT NOT NULL DEFAULT 'workbuddy-agent',
+    UNIQUE(kind, period_start, direction)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_ai_reports_kind_period ON ai_reports(kind, period_start);
 `);
+
+// ── ai_reports 方向维度迁移（2026-09-28 晚）：旧表无 direction 列且 UNIQUE 是
+// 二元组——SQLite 不能改约束，重建表搬运数据。幂等：direction 列已存在则跳过。
+if (!db.prepare("PRAGMA table_info(ai_reports)").all().some((column) => column.name === "direction")) {
+  db.exec(`
+    BEGIN;
+    CREATE TABLE ai_reports_migrated (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly')),
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      direction TEXT,
+      status TEXT NOT NULL DEFAULT 'ready',
+      content_md TEXT NOT NULL,
+      stats_json TEXT,
+      generated_at TEXT,
+      generator TEXT NOT NULL DEFAULT 'workbuddy-agent',
+      UNIQUE(kind, period_start, direction)
+    );
+    INSERT INTO ai_reports_migrated (id, kind, period_start, period_end, direction, status, content_md, stats_json, generated_at, generator)
+      SELECT id, kind, period_start, period_end, NULL, status, content_md, stats_json, generated_at, generator FROM ai_reports;
+    DROP TABLE ai_reports;
+    ALTER TABLE ai_reports_migrated RENAME TO ai_reports;
+    CREATE INDEX IF NOT EXISTS idx_ai_reports_kind_period ON ai_reports(kind, period_start);
+    COMMIT;
+  `);
+}
 
 for (const migration of [
   "ALTER TABLE user_emails ADD COLUMN name TEXT NOT NULL DEFAULT ''",
@@ -287,11 +379,29 @@ db.exec(`
   WHERE ui.is_favorite = 1
 `);
 
-// Ensure personal accounts created before the default collection was added
-// receive the same usable starting state as newly registered accounts.
-for (const account of db.prepare("SELECT id FROM user_accounts").all()) {
-  ensureDefaultFavoriteGroup(`account:${account.id}`);
+// 一次性清理历史遗留的「自动默认收藏夹」。早期实现会在每次读取收藏时凭空建出
+// 一条名为「默认收藏夹」的分组记录，用户删掉后下一次读取又被建回来，于是每个人
+// 都多一个自己没建过、永远是 0 篇的分组。这里只删除**0 篇收藏**的分组，并把
+// 指向它的「默认分组」设置复位为未分组；收藏数据本身一概不动。
+if (!db.prepare("SELECT 1 FROM settings WHERE key = 'legacyDefaultFavoriteGroupCleaned'").get()) {
+  const removed = db.prepare(`
+    DELETE FROM favorite_groups
+    WHERE name = ?
+      AND NOT EXISTS (SELECT 1 FROM user_favorites uf WHERE uf.group_id = favorite_groups.id)
+  `).run(DEFAULT_FAVORITE_GROUP_NAME).changes;
+  db.prepare(`
+    UPDATE user_settings SET value = 'ungrouped', updated_at = datetime('now')
+    WHERE key = 'defaultFavoriteGroupId'
+      AND value <> 'ungrouped'
+      AND value NOT IN (SELECT CAST(id AS TEXT) FROM favorite_groups)
+  `).run();
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('legacyDefaultFavoriteGroupCleaned', ?)")
+    .run(new Date().toISOString());
+  if (removed) console.log(`[db] 已清理 ${removed} 个遗留的空白「默认收藏夹」分组`);
 }
+
+// 这里过去会给历史账户逐个补一个「默认收藏夹」，现已废弃：分组只由用户显式创建，
+// 而遗留的空白默认分组由上面 legacyDefaultFavoriteGroupCleaned 那次清理一次性移除。
 
 const insertSetting = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
 insertSetting.run("journals", JSON.stringify(DEFAULT_JOURNALS));
@@ -307,6 +417,62 @@ insertSetting.run("pushIncludeAbstract", String(config.pushIncludeAbstract));
 insertSetting.run("pushIncludeKeywords", String(config.pushIncludeKeywords));
 insertSetting.run("pushIncludeTranslation", String(config.pushIncludeTranslation));
 insertSetting.run("pushJournalFilter", config.pushJournalFilter);
+insertSetting.run("pushDirectionFilter", config.pushDirectionFilter);
+insertSetting.run("pushIncludeAiReport", String(config.pushIncludeAiReport));
+
+// ── 一次性修正：期刊目录 ISSN 串号带来的历史污染 ────────────────────────────
+// 两个已知问题：
+//   ① Elsevier《Energy》的 ISSN 里曾混进 ICE《Proceedings of the Institution of
+//      Civil Engineers - Energy》的 1751-4223 / 1751-4231，Crossref 按 ISSN 检索
+//      于是把土木工程那本刊的论文也拉了进来；
+//   ② 有的记录把期刊名存成了 HTML 实体写法（"...Power &amp; Energy Systems"），
+//      在统计里会和正规写法各占一行。
+// settings.journals 是用 INSERT OR IGNORE 写的，光改代码不会生效，所以这里还要
+// 订正已持久化的目录，并清掉归一化后仍不在目录内的论文（连带其交互/收藏/翻译）。
+if (!db.prepare("SELECT 1 FROM settings WHERE key = 'journalCatalogIssnsRepaired'").get()) {
+  const storedJournals = db.prepare("SELECT value FROM settings WHERE key = 'journals'").get()?.value;
+  if (storedJournals) {
+    try {
+      const list = JSON.parse(storedJournals);
+      const bogus = new Set(["1751-4223", "1751-4231"]);
+      let changed = false;
+      for (const journal of list) {
+        if (!journal || journal.name !== "Energy" || !Array.isArray(journal.issns)) continue;
+        const before = journal.issns.map((issn) => String(issn).trim());
+        const next = before.filter((issn) => issn && !bogus.has(issn));
+        if (!next.includes("1873-6785")) next.push("1873-6785");
+        if (next.join(",") !== before.join(",")) {
+          journal.issns = next;
+          changed = true;
+        }
+      }
+      if (changed) db.prepare("UPDATE settings SET value = ? WHERE key = 'journals'").run(JSON.stringify(list));
+    } catch { /* 目录不是合法 JSON 时交给 normalizeJournals 兜底 */ }
+  }
+
+  const catalogNames = new Set(DEFAULT_JOURNALS.map((journal) => journal.name));
+  const removals = [];
+  for (const row of db.prepare("SELECT id, journal FROM articles").all()) {
+    const canonical = canonicalJournalName(row.journal);
+    if (canonical !== row.journal) {
+      db.prepare("UPDATE articles SET journal = ? WHERE id = ?").run(canonical, row.id);
+    }
+    // 期刊名为空的记录保留（界面上按「未标记期刊」显示），只清明确落在目录外的。
+    if (canonical && !catalogNames.has(canonical)) removals.push({ id: row.id, journal: canonical });
+  }
+  if (removals.length) {
+    const placeholders = removals.map(() => "?").join(", ");
+    const ids = removals.map((row) => row.id);
+    db.prepare(`DELETE FROM user_interactions WHERE article_id IN (${placeholders})`).run(...ids);
+    db.prepare(`DELETE FROM user_favorites WHERE article_id IN (${placeholders})`).run(...ids);
+    db.prepare(`DELETE FROM translations WHERE article_id IN (${placeholders})`).run(...ids);
+    db.prepare(`DELETE FROM articles WHERE id IN (${placeholders})`).run(...ids);
+    const names = [...new Set(removals.map((row) => row.journal))].join(" | ");
+    console.warn(`[db] 已移除 ${removals.length} 篇非期刊目录文献：${names}`);
+  }
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('journalCatalogIssnsRepaired', ?)")
+    .run(new Date().toISOString());
+}
 
 export function getSettings() {
   const rows = db.prepare("SELECT key, value FROM settings").all();
@@ -326,7 +492,9 @@ export function getSettings() {
     pushIncludeAbstract: values.pushIncludeAbstract !== "false",
     pushIncludeKeywords: values.pushIncludeKeywords !== "false",
     pushIncludeTranslation: values.pushIncludeTranslation !== "false",
-    pushJournalFilter: values.pushJournalFilter || ""
+    pushJournalFilter: values.pushJournalFilter || "",
+    pushDirectionFilter: values.pushDirectionFilter || "",
+    pushIncludeAiReport: values.pushIncludeAiReport !== "false"
   };
 }
 
@@ -375,7 +543,9 @@ export function updateSettings(settings) {
     pushIncludeAbstract: settings.pushIncludeAbstract !== undefined ? Boolean(settings.pushIncludeAbstract) : current.pushIncludeAbstract,
     pushIncludeKeywords: settings.pushIncludeKeywords !== undefined ? Boolean(settings.pushIncludeKeywords) : current.pushIncludeKeywords,
     pushIncludeTranslation: settings.pushIncludeTranslation !== undefined ? Boolean(settings.pushIncludeTranslation) : current.pushIncludeTranslation,
-    pushJournalFilter: settings.pushJournalFilter !== undefined ? String(settings.pushJournalFilter) : current.pushJournalFilter
+    pushJournalFilter: settings.pushJournalFilter !== undefined ? String(settings.pushJournalFilter) : current.pushJournalFilter,
+    pushDirectionFilter: settings.pushDirectionFilter !== undefined ? sanitizeDirectionFilter(settings.pushDirectionFilter) : current.pushDirectionFilter,
+    pushIncludeAiReport: settings.pushIncludeAiReport !== undefined ? Boolean(settings.pushIncludeAiReport) : current.pushIncludeAiReport
   };
 
   const upsert = db.prepare(`
@@ -400,12 +570,41 @@ export function updateSettings(settings) {
     upsert.run({ key: "pushIncludeKeywords", value: String(next.pushIncludeKeywords) });
     upsert.run({ key: "pushIncludeTranslation", value: String(next.pushIncludeTranslation) });
     upsert.run({ key: "pushJournalFilter", value: next.pushJournalFilter });
+    upsert.run({ key: "pushDirectionFilter", value: next.pushDirectionFilter });
+    upsert.run({ key: "pushIncludeAiReport", value: String(next.pushIncludeAiReport) });
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
   return next;
+}
+
+// ── 文献日期口径（全站唯一真值） ──────────────────────────────────────────
+// 主口径 = first_public_at（论文第一次正式公开的日期，YYYY-MM-DD）：
+//   · A 级：IEEE Early Access / Elsevier Available online / 中文网络首发
+//     （online_first_at，由回填作业写入）；
+//   · B 级：已发生的正式出版日期；
+//   · D 级：没有任何外部时间时的兜底 = first_seen_at（北京业务日）。
+// 由 server/date/resolve-first-public.js 统一解析，insertArticles /
+// updateArticleDetails / scripts/backfill-first-public-date.mjs 都写入该字段。
+//
+// effectiveDateSql 保留为**兜底**表达式：first_public_at 尚未回填的行按旧规则
+// （正式出版且到期用出版日，否则用入库时间）取日期，保证迁移期内任何一行都有
+// 日期可用。display_date / 排序 / 筛选 / 近 N 日统计 / 推送窗口 / 关键词统计 /
+// 后台覆盖度 / 导出全部走 displayDateSql（= first_public_at 优先、旧口径兜底）。
+// 任何一处漏改，同一批数据在不同页面就会算出不同的「新论文」和不同的日期。
+function effectiveDateSql(alias = "a") {
+  return `datetime(CASE
+      WHEN datetime(${alias}.published_at) IS NULL THEN COALESCE(NULLIF(${alias}.first_seen_at, ''), ${alias}.fetched_at)
+      WHEN datetime(${alias}.published_at) > datetime('now') THEN COALESCE(NULLIF(${alias}.first_seen_at, ''), ${alias}.fetched_at)
+      ELSE ${alias}.published_at
+    END)`;
+}
+
+/** 全站展示与比较口径：first_public_at 优先，未回填的行走旧口径，恒为 YYYY-MM-DD。 */
+function displayDateSql(alias = "a") {
+  return `COALESCE(NULLIF(${alias}.first_public_at, ''), substr(${effectiveDateSql(alias)}, 1, 10))`;
 }
 
 export function listArticles(filters = {}, userId) {
@@ -415,6 +614,7 @@ export function listArticles(filters = {}, userId) {
     const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const articles = db.prepare(`
       SELECT a.*,
+        ${displayDateSql("a")} AS display_date,
         COALESCE(ui_read.is_read, 0) AS is_read,
         COALESCE(ui_fav.is_favorite, 0) AS is_favorite,
         zh.title AS translated_title,
@@ -424,7 +624,7 @@ export function listArticles(filters = {}, userId) {
       LEFT JOIN user_interactions ui_fav ON ui_fav.article_id = a.id AND ui_fav.user_id = @userId AND ui_fav.is_favorite = 1
       LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
       ${whereClause}
-      ORDER BY COALESCE(a.published_at, a.fetched_at) ${order}, a.id ${order}
+      ORDER BY ${displayDateSql("a")} ${order}, a.id ${order}
       LIMIT 500
     `).all({ ...params, userId });
     return articles;
@@ -433,19 +633,39 @@ export function listArticles(filters = {}, userId) {
   const whereFinal = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return db.prepare(`
     SELECT a.*,
+      ${displayDateSql("a")} AS display_date,
       zh.title AS translated_title,
       zh.abstract AS translated_abstract
     FROM articles a
     LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
     ${whereFinal}
-    ORDER BY COALESCE(a.published_at, a.fetched_at) ${order}, a.id ${order}
+    ORDER BY ${displayDateSql("a")} ${order}, a.id ${order}
     LIMIT 500
   `).all(params);
+}
+
+// 「其他」方向 = 分类器判定不属于 14 个正式电力系统方向的文献。默认不进入
+// 正式展示面（前台列表 / 推送 / 关键词统计），但数据保留在库中：管理端总览、
+// /api/directions 方向统计与详情直达仍可见；direction 筛选显式包含 other 时
+// 列表豁免此排除（见 buildArticleListQuery）。
+const EXCLUDE_OTHER_CLAUSE = "(a.research_direction IS NULL OR a.research_direction != 'other')";
+const EXCLUDE_OTHER_PLAIN = "(research_direction IS NULL OR research_direction != 'other')";
+
+// 推送方向过滤（PLAN-AI-REPORTS.md M1）：逗号拆分 → isDirectionKey 白名单 →
+// 去重后重新 join。非法 key 静默丢弃，与列表 direction 筛选的清洗语义一致；
+// 结果恒为 CSV（可为空串=全部方向），入库前统一走这里。
+function sanitizeDirectionFilter(value) {
+  const keys = String(value || "").split(",").map((t) => t.trim()).filter(isDirectionKey);
+  return [...new Set(keys)].join(",");
 }
 
 function buildArticleListQuery(filters = {}, userId) {
   const clauses = ["is_non_research_title(a.title) = 0"];
   const params = {};
+  // 未分类（NULL）照常展示：等分类任务收口后 NULL 只剩新增窗口期的文章。
+  if (!String(filters.direction || "").split(",").map((t) => t.trim()).includes("other")) {
+    clauses.push(EXCLUDE_OTHER_CLAUSE);
+  }
 
   if (filters.journal) {
     const terms = String(filters.journal).split(",").map((t) => t.trim()).filter(Boolean);
@@ -457,23 +677,50 @@ function buildArticleListQuery(filters = {}, userId) {
   }
   if (filters.q) {
     const escaped = escapeLike(filters.q);
-    clauses.push("(a.title LIKE @q OR a.abstract LIKE @q OR a.authors LIKE @q OR a.keywords LIKE @q)");
+    // ESCAPE '\\' 让 escapeLike 的 \%/\_ 生效：没有该子句时反斜杠是普通字符，
+    // 搜「PM_2.5」「100%」这类词会静默漏检（实测 LIKE '%a\%b%' 匹配 0 行）。
+    clauses.push("(a.title LIKE @q ESCAPE '\\' OR a.abstract LIKE @q ESCAPE '\\' OR a.authors LIKE @q ESCAPE '\\' OR a.keywords LIKE @q ESCAPE '\\')");
     params.q = `%${escaped}%`;
   }
+  // 日期筛选也走统一口径：提前访问的文献按「加入数据库的时间」参与区间判定，
+  // 不然筛「今年」会把一批卷期日写在未来的在线首发论文整批漏掉。
   if (filters.from) {
-    clauses.push("a.published_at >= @from");
+    clauses.push(`${displayDateSql("a")} >= @from`);
     params.from = filters.from;
   }
   if (filters.to) {
-    clauses.push("a.published_at <= @to");
+    clauses.push(`${displayDateSql("a")} <= @to`);
     params.to = filters.to;
   }
   if (filters.keyword) {
     const terms = String(filters.keyword).split(",").map((t) => t.trim()).filter(Boolean);
     if (terms.length) {
-      const orClauses = terms.map((_, i) => `a.keywords LIKE @kw${i}`);
+      // 与 q 分支同规：escapeLike + ESCAPE，关键词里的 %/_ 按字面匹配。
+      const orClauses = terms.map((_, i) => `a.keywords LIKE @kw${i} ESCAPE '\\'`);
       clauses.push(`(${orClauses.join(" OR ")})`);
-      terms.forEach((term, i) => { params[`kw${i}`] = `%${term}%`; });
+      terms.forEach((term, i) => { params[`kw${i}`] = `%${escapeLike(term)}%`; });
+    }
+  }
+  // 研究方向多选（OR），与 journal 参数同构；key 服务端白名单校验防注入。
+  if (filters.direction) {
+    const keys = String(filters.direction).split(",").map((t) => t.trim()).filter(isDirectionKey);
+    if (keys.length) {
+      const orClauses = keys.map((_, i) => `a.research_direction = @dir${i}`);
+      clauses.push(`(${orClauses.join(" OR ")})`);
+      keys.forEach((key, i) => { params[`dir${i}`] = key; });
+    }
+  }
+  // AI 速览精选/速评文献直取（PLAN-AI-REPORTS.md）：ids 白名单整数、上限 100
+  //（大方向专报单期速评可达 59 篇，需一次拉全）；有 ids 值但全部非法时按
+  // 「空结果」处理而不是退回全表。
+  if (filters.ids) {
+    const ids = String(filters.ids).split(",").map((t) => Number(t.trim()))
+      .filter((n) => Number.isInteger(n) && n > 0).slice(0, 100);
+    if (ids.length) {
+      clauses.push(`a.id IN (${ids.map((_, i) => `@aid${i}`).join(", ")})`);
+      ids.forEach((id, i) => { params[`aid${i}`] = id; });
+    } else {
+      clauses.push("0 = 1");
     }
   }
 
@@ -535,7 +782,13 @@ export function listArticlePage(filters = {}, userId) {
       substr(a.abstract, 1, 320) AS abstract,
       a.url,
       a.published_at,
+      ${displayDateSql("a")} AS display_date,
       a.keywords,
+      a.research_direction,
+      a.research_direction_secondary,
+      a.direction_confidence,
+      a.direction_source,
+      a.direction_reason,
       ${interactionFields},
       zh.title AS translated_title,
       substr(zh.abstract, 1, 320) AS translated_abstract,
@@ -544,7 +797,7 @@ export function listArticlePage(filters = {}, userId) {
     LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
     ${interactionJoins}
     ${where}
-    ORDER BY COALESCE(a.published_at, a.fetched_at) ${order}, a.id ${order}
+    ORDER BY ${displayDateSql("a")} ${order}, a.id ${order}
     LIMIT @pageLimitPlusOne OFFSET @pageOffset
   `).all({
     ...params,
@@ -559,34 +812,53 @@ export function listArticlePage(filters = {}, userId) {
   return { articles, hasMore, total, limit, offset };
 }
 
-export function listRecentArticlesForDigest(days, limit, journals = []) {
-  const since = new Date();
-  since.setDate(since.getDate() - Number(days || 7));
-  const sinceDate = since.toISOString().slice(0, 10);
+export function listRecentArticlesForDigest(days, limit, journals = [], directions = []) {
+  // 窗口 = 近 N 日（北京时间今天 + 向前 N-1 个自然日，恰好 N 天），判据 = 全站
+  // 统一的「文献主时间」first_public_at（见 displayDateSql）：
+  //   · 正式出版且期号日已到 → 用正式出版日期，只有当期真正出版的新论文才算新；
+  //   · 提前访问 / 在线首发（卷期日写在未来）→ 用首次公开日期（回填前兜底为入库
+  //     时间），同一批在线首发不会因为日期永远大于窗口起点而被每周重复推送；
+  //   · 历史补录（首次公开日期早于窗口）→ 排除，否则一次批量回填会把陈年论文全
+  //     当新的（方案 §20：历史补录天然不污染周报，不再需要额外上界补丁）。
+  // 「今天」按北京业务日取（businessWindow），不再用 UTC 的 toISOString 切日，
+  // 北京时间 0—8 点生成的周报不会把窗口整体错位一天。
+  const { startDate, endDate } = businessWindow(Number(days || 7));
+  const sinceDate = startDate;
+  const todayDate = endDate;
   const maxRows = Number(limit || 0);
   const limitClause = maxRows > 0 ? "LIMIT @limit" : "";
   const journalNames = journals.map((journal) => journal.name || journal).filter(Boolean);
   const journalClause = journalNames.length
     ? `AND journal IN (${journalNames.map((_, index) => `@journal${index}`).join(", ")})`
     : "";
+  // 推送方向过滤（PLAN-AI-REPORTS.md M3）：与 buildArticleListQuery 的 direction
+  // 筛选同语义——key 白名单校验；显式包含 other 时替换（而非叠加）other 排除，
+  // 即「选其他=只要其他」；空/非法 key = 不过滤，维持默认排除。
+  const directionKeys = (Array.isArray(directions) ? directions : [])
+    .map((key) => String(key || "").trim())
+    .filter(isDirectionKey);
+  const directionClause = directionKeys.length
+    ? `AND research_direction IN (${directionKeys.map((_, index) => `@dir${index}`).join(", ")})`
+    : "";
+  const excludeOtherClause = directionKeys.includes("other") ? "" : `AND ${EXCLUDE_OTHER_PLAIN}`;
 
-  const params = { sinceDate };
+  const params = { sinceDate, todayDate };
   journalNames.forEach((journal, index) => {
     params[`journal${index}`] = journal;
+  });
+  directionKeys.forEach((key, index) => {
+    params[`dir${index}`] = key;
   });
   if (maxRows > 0) {
     params.limit = maxRows;
   }
 
   return db.prepare(`
-    SELECT *
+    SELECT articles.*, ${displayDateSql("articles")} AS display_date
     FROM articles
     WHERE
-      (
-        (published_at IS NOT NULL AND published_at <> '' AND substr(published_at, 1, 10) >= @sinceDate)
-        OR
-        (first_seen_at IS NOT NULL AND first_seen_at <> '' AND substr(first_seen_at, 1, 10) >= @sinceDate)
-      )
+      ${displayDateSql("articles")} >= @sinceDate
+      AND ${displayDateSql("articles")} <= @todayDate
       AND lower(title) NOT LIKE '%information%'
       AND lower(title) NOT LIKE '%table of contents%'
       AND lower(title) NOT LIKE '%blank page%'
@@ -594,14 +866,17 @@ export function listRecentArticlesForDigest(days, limit, journals = []) {
       AND lower(title) NOT LIKE '%publication information%'
       AND lower(title) NOT LIKE '%front cover%'
       AND lower(title) NOT LIKE '%back cover%'
+      ${excludeOtherClause}
+      ${directionClause}
       ${journalClause}
-    ORDER BY COALESCE(NULLIF(first_seen_at, ''), fetched_at) DESC, id DESC
+    ORDER BY ${displayDateSql("articles")} DESC, id DESC
     ${limitClause}
   `).all(params);
 }
 
 export function getArticle(id) {
-  return db.prepare("SELECT * FROM articles WHERE id = ?").get(id);
+  // display_date 与列表页同源，详情弹窗才不会和卡片上的日期对不上。
+  return db.prepare(`SELECT articles.*, ${displayDateSql("articles")} AS display_date FROM articles WHERE id = ?`).get(id);
 }
 
 export function getArticleForUser(id, userId) {
@@ -645,6 +920,7 @@ export function updateArticleDetails(id, details) {
       url = COALESCE(NULLIF(@url, ''), url),
       published_at = COALESCE(NULLIF(@published_at, ''), published_at),
       keywords = COALESCE(NULLIF(@keywords, ''), keywords),
+      online_first_at = COALESCE(NULLIF(@online_first_at, ''), online_first_at),
       fetched_at = @fetched_at
     WHERE id = @id
   `).run({
@@ -660,8 +936,30 @@ export function updateArticleDetails(id, details) {
     url: details.url || "",
     published_at: details.published_at || "",
     keywords: details.keywords || "",
+    online_first_at: details.online_first_at || "",
     fetched_at: new Date().toISOString()
   });
+  // 事实字段（published_at / online_first_at）更新后重算主时间：允许升级
+  // （如入库时是 D 级兜底，补到出版日期后升为 B 级）；已确认的 A 级不被改写
+  // （mergeFirstPublic 负责，方案 §25）。
+  const row = db.prepare("SELECT * FROM articles WHERE id = ?").get(id);
+  if (row) {
+    const final = mergeFirstPublic(row, resolveFirstPublicDate(row));
+    if (final && (final.first_public_at !== row.first_public_at
+      || final.first_public_source !== row.first_public_source
+      || final.first_public_precision !== row.first_public_precision
+      || final.first_public_confidence !== row.first_public_confidence)) {
+      db.prepare(`
+        UPDATE articles
+        SET first_public_at = @first_public_at,
+            first_public_source = @first_public_source,
+            first_public_precision = @first_public_precision,
+            first_public_confidence = @first_public_confidence,
+            date_verified_at = @date_verified_at
+        WHERE id = @id
+      `).run({ ...final, date_verified_at: new Date().toISOString(), id });
+    }
+  }
   return getArticle(id);
 }
 
@@ -739,15 +1037,34 @@ export function saveTranslations(entries = []) {
   return values.map((entry) => getTranslation(entry.articleId, entry.targetLanguage));
 }
 
+/**
+ * 入库时把期刊名归一化：解 HTML 实体、压空白，能对上期刊目录的换成目录里的规范
+ * 写法。不然 "International Journal of Electrical Power &amp; Energy Systems" 会
+ * 和正规写法在统计里各占一行，管理中心就多出一本「不存在的期刊」。
+ */
+function canonicalJournalName(value) {
+  const decoded = decodeEntities(value || "").replace(/\s+/g, " ").trim();
+  return DEFAULT_JOURNAL_BY_NAME.get(decoded)?.name || decoded;
+}
+
 export function insertArticles(articles) {
   const exists = db.prepare("SELECT 1 FROM articles WHERE external_id = ?");
   const getId = db.prepare("SELECT id FROM articles WHERE external_id = ?");
+  const existingRowStatement = db.prepare(`
+    SELECT online_first_at, first_public_at, first_public_source, first_public_precision,
+           first_public_confidence, date_verified_at, first_seen_at, published_at
+    FROM articles WHERE external_id = ?
+  `);
   const statement = db.prepare(`
     INSERT INTO articles (
-      external_id, title, authors, journal, year, volume, issue, doi, abstract, url, published_at, fetched_at, first_seen_at, keywords
+      external_id, title, authors, journal, year, volume, issue, doi, abstract, url, published_at,
+      fetched_at, first_seen_at, keywords, online_first_at,
+      first_public_at, first_public_source, first_public_precision, first_public_confidence, date_verified_at
     )
     VALUES (
-      @external_id, @title, @authors, @journal, @year, @volume, @issue, @doi, @abstract, @url, @published_at, @fetched_at, @first_seen_at, @keywords
+      @external_id, @title, @authors, @journal, @year, @volume, @issue, @doi, @abstract, @url, @published_at,
+      @fetched_at, @first_seen_at, @keywords, @online_first_at,
+      @first_public_at, @first_public_source, @first_public_precision, @first_public_confidence, @date_verified_at
     )
     ON CONFLICT(external_id) DO UPDATE SET
       authors = COALESCE(NULLIF(articles.authors, ''), excluded.authors),
@@ -760,6 +1077,15 @@ export function insertArticles(articles) {
       url = COALESCE(NULLIF(articles.url, ''), excluded.url),
       published_at = COALESCE(NULLIF(articles.published_at, ''), excluded.published_at),
       keywords = COALESCE(NULLIF(articles.keywords, ''), excluded.keywords),
+      online_first_at = COALESCE(NULLIF(articles.online_first_at, ''), excluded.online_first_at),
+      -- first_public_* 写入的是「已与存量行合并后重新解析」的最终值（见下方
+      -- resolveMergedFirstPublic / mergeFirstPublic）：已确认的 A 级首次公开日期
+      -- 不会被后续抓取改写或降级（方案 §25）。first_seen_at 永不更新（§12）。
+      first_public_at = excluded.first_public_at,
+      first_public_source = excluded.first_public_source,
+      first_public_precision = excluded.first_public_precision,
+      first_public_confidence = excluded.first_public_confidence,
+      date_verified_at = excluded.date_verified_at,
       fetched_at = excluded.fetched_at
   `);
 
@@ -767,9 +1093,23 @@ export function insertArticles(articles) {
   try {
     let added = 0;
     const addedArticles = [];
-    for (const item of articles) {
+    for (const incoming of articles) {
+      const item = { ...incoming, journal: canonicalJournalName(incoming.journal) };
+      const firstSeenAt = item.first_seen_at || item.fetched_at || new Date().toISOString();
       const wasExisting = exists.get(item.external_id);
-      statement.run({ ...item, first_seen_at: item.first_seen_at || item.fetched_at || new Date().toISOString() });
+      // 主时间解析：与存量行合并事实字段（新值优先、旧值兜底），再按 A/B/C/D
+      // 优先级解析，最后按「不降级、不覆盖已确认值」的规则合并出最终写入值。
+      const existingRow = wasExisting ? existingRowStatement.get(item.external_id) : null;
+      const resolved = resolveMergedFirstPublic(existingRow, { ...item, first_seen_at: existingRow?.first_seen_at || firstSeenAt });
+      const final = mergeFirstPublic(existingRow, resolved);
+      item.first_seen_at = existingRow?.first_seen_at || firstSeenAt;
+      item.online_first_at = item.online_first_at || existingRow?.online_first_at || null;
+      item.first_public_at = final?.first_public_at ?? null;
+      item.first_public_source = final?.first_public_source ?? null;
+      item.first_public_precision = final?.first_public_precision ?? null;
+      item.first_public_confidence = final?.first_public_confidence ?? null;
+      item.date_verified_at = final && final !== existingRow ? new Date().toISOString() : existingRow?.date_verified_at ?? null;
+      statement.run(item);
       if (!wasExisting) {
         added += 1;
         const row = getId.get(item.external_id);
@@ -815,7 +1155,6 @@ export function setArticleReadForUser(userId, articleId) {
 export function toggleArticleFavoriteForUser(userId, articleId, options = {}) {
   const article = getArticle(articleId);
   if (!article) return null;
-  ensureDefaultFavoriteGroup(userId);
   const row = db.prepare("SELECT is_favorite FROM user_interactions WHERE user_id = ? AND article_id = ?").get(userId, articleId);
   const favorite = db.prepare("SELECT 1 AS favorite_exists FROM user_favorites WHERE user_id = ? AND article_id = ?").get(userId, articleId);
   const currentlyFavorite = Boolean(row?.is_favorite || favorite?.favorite_exists);
@@ -860,35 +1199,46 @@ export function getUserInteractionsMap(userId, articleIds) {
 }
 
 export function getUserStatus(userId) {
-  const articleCount = db.prepare("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0").get().count;
+  // 顶栏统计胶囊与列表页同口径：research_direction='other' 的文献默认移出正式
+  // 库（列表/推送/统计均排除），这里若仍计入，顶栏总数就会比列表页凭空多出一截。
+  // 例外：favoriteCount 不排 other——收藏夹列表（listUserFavorites 等）对用户主动
+  // 收藏的文章不做方向过滤，计数必须与列表同口径，否则数字自相矛盾。
+  const articleCount = db.prepare(`SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND ${EXCLUDE_OTHER_PLAIN}`).get().count;
   // These two counters describe the shared literature database rather than a
   // personal account. Keep them available in guest mode as well, so the
   // top-right summary does not silently turn into zero before login.
   //
-  // "Recent" is measured by *publication* date, not by crawl time: readers care
-  // when a paper came out, not when our crawler happened to see it. Publishers
-  // release online-first long before an issue date exists, so roughly a quarter
-  // of the records carry a published_at in the future; those fall back to the
-  // date the record actually arrived instead of counting as a future paper.
-  const effectivePublishedAt = `datetime(CASE
-      WHEN datetime(published_at) IS NULL THEN COALESCE(NULLIF(first_seen_at, ''), fetched_at)
-      WHEN datetime(published_at) > datetime('now') THEN COALESCE(NULLIF(first_seen_at, ''), fetched_at)
-      ELSE published_at
-    END)`;
-  const countPublishedWithin = (days) => db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM articles
-    WHERE is_non_research_title(title) = 0
-      AND ${effectivePublishedAt} >= datetime('now', '-${days} days')
-  `).get().count;
+  // "Recent" 走全站统一的「文献主时间」first_public_at（首次公开日期，见文件
+  // 头部口径说明）：读者关心的是论文什么时候第一次公开，不是爬虫什么时候看到它。
+  //
+  // ⚠️ 窗口按「北京时间自然日」计：近 N 日 = 今天 + 向前 N-1 个自然日，恰好
+  // N 天（方案 §16）。旧写法 date('now', '-N days') 有两个毛病：一是按 UTC 取
+  // 「今天」，北京时间 0—8 点的数据整段归到前一天；二是 -N days 实际包含
+  // N+1 个自然日，胶囊数字比标签名义上的「一周」多算一天。窗口两端由
+  // businessWindow() 统一给出，与列表页时间范围筛选共用同一对日期。
+  const countPublishedWithin = (days) => {
+    const window = businessWindow(days);
+    return db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM articles
+      WHERE is_non_research_title(title) = 0
+        AND ${EXCLUDE_OTHER_PLAIN}
+        AND ${displayDateSql("articles")} >= @startDate
+        AND ${displayDateSql("articles")} <= @endDate
+    `).get(window).count;
+  };
   const newArticleCount7d = countPublishedWithin(7);
   const newArticleCount30d = countPublishedWithin(30);
+  // 统计口径自描述（方案 §18）：调用方不用猜数字是按出版日还是入库日算的。
+  const dateBasis = "first_public_at";
+  const timezone = "Asia/Shanghai";
   if (!userId) {
-    return { articleCount, unreadCount: 0, favoriteCount: 0, readCount: 0, newArticleCount7d, newArticleCount30d };
+    return { articleCount, unreadCount: 0, favoriteCount: 0, readCount: 0, newArticleCount7d, newArticleCount30d, dateBasis, timezone };
   }
   const unreadCount = db.prepare(`
     SELECT COUNT(*) AS count FROM articles a
     WHERE is_non_research_title(a.title) = 0
+      AND ${EXCLUDE_OTHER_CLAUSE}
       AND NOT EXISTS (
       SELECT 1 FROM user_interactions ui
       WHERE ui.user_id = ? AND ui.article_id = a.id AND ui.is_read = 1
@@ -896,7 +1246,7 @@ export function getUserStatus(userId) {
   `).get(userId).count;
   const favoriteCount = db.prepare("SELECT COUNT(*) AS count FROM user_favorites uf JOIN articles a ON a.id = uf.article_id WHERE uf.user_id = ? AND is_non_research_title(a.title) = 0").get(userId).count;
   const readCount = db.prepare("SELECT COUNT(*) AS count FROM user_interactions WHERE user_id = ? AND is_read = 1").get(userId).count;
-  return { articleCount, unreadCount, favoriteCount, readCount, newArticleCount7d, newArticleCount30d };
+  return { articleCount, unreadCount, favoriteCount, readCount, newArticleCount7d, newArticleCount30d, dateBasis, timezone };
 }
 
 function normalizeFavoriteGroupName(name) {
@@ -919,51 +1269,39 @@ function normalizeFavoriteGroupId(groupId) {
   return value;
 }
 
-function ensureDefaultFavoriteGroup(userId) {
+/**
+ * 「默认收藏夹」只是「下次收藏时预选哪个分组」这一个设置项，不再是一个自动
+ * 建出来的分组。
+ *
+ * 早期实现会在每次读取收藏时 INSERT OR IGNORE 一条名为「默认收藏夹」的分组，
+ * 于是每个用户都凭空多出一个自己没建过、永远是 0 篇、而且删不掉（删掉后下一次
+ * 读取又被建回来）的分组 —— 这就是「收藏分组逻辑错误」的根因。现在分组只由用户
+ * 显式创建（新建分组），默认分组一律从设置里解析，解析不到就回落到「未分组」。
+ */
+function resolveDefaultFavoriteGroup(userId) {
   const principal = String(userId || "").trim();
   if (!principal) return null;
-
-  db.prepare(`
-    INSERT OR IGNORE INTO favorite_groups (user_id, name, created_at, updated_at)
-    VALUES (?, ?, datetime('now'), datetime('now'))
-  `).run(principal, DEFAULT_FAVORITE_GROUP_NAME);
-
-  const group = db.prepare(`
-    SELECT id, name, created_at, updated_at
-    FROM favorite_groups
-    WHERE user_id = ? AND name = ?
-  `).get(principal, DEFAULT_FAVORITE_GROUP_NAME);
-  if (!group) return null;
-
   const savedDefault = db.prepare(
     "SELECT value FROM user_settings WHERE user_id = ? AND key = 'defaultFavoriteGroupId'"
   ).get(principal)?.value;
-  let shouldUseDefault = savedDefault === undefined;
-  if (savedDefault && savedDefault !== "ungrouped") {
-    try {
-      const savedId = normalizeFavoriteGroupId(savedDefault);
-      shouldUseDefault = !db.prepare(
-        "SELECT 1 FROM favorite_groups WHERE id = ? AND user_id = ?"
-      ).get(savedId, principal);
-    } catch {
-      shouldUseDefault = true;
-    }
+  if (!savedDefault || savedDefault === "ungrouped") return null;
+  let savedId = null;
+  try {
+    savedId = normalizeFavoriteGroupId(savedDefault);
+  } catch {
+    return null;
   }
-
-  if (shouldUseDefault) {
-    db.prepare(`
-      INSERT INTO user_settings (user_id, key, value, updated_at)
-      VALUES (?, 'defaultFavoriteGroupId', ?, datetime('now'))
-      ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
-    `).run(principal, String(group.id));
-  }
-  return group;
+  if (savedId === null) return null;
+  return db.prepare(
+    "SELECT id, name, created_at, updated_at FROM favorite_groups WHERE id = ? AND user_id = ?"
+  ).get(savedId, principal) || null;
 }
 
 function favoriteArticleSelect() {
   return `
     SELECT a.id, a.external_id, a.title, a.authors, a.journal, a.year, a.volume, a.issue,
       a.doi, a.abstract, a.url, a.published_at, a.fetched_at, a.first_seen_at, a.keywords,
+      ${displayDateSql("a")} AS display_date,
       COALESCE(ui.is_read, 0) AS is_read,
       1 AS is_favorite,
       uf.group_id,
@@ -980,7 +1318,6 @@ function favoriteArticleSelect() {
 }
 
 export function listFavoriteGroups(userId) {
-  ensureDefaultFavoriteGroup(userId);
   const groups = db.prepare(`
     SELECT g.id, g.name, g.created_at, g.updated_at,
       COUNT(CASE WHEN is_non_research_title(a.title) = 0 THEN uf.article_id END) AS count
@@ -1003,11 +1340,7 @@ export function listFavoriteGroups(userId) {
 }
 
 export function getDefaultFavoriteGroupId(userId) {
-  ensureDefaultFavoriteGroup(userId);
-  const value = db.prepare("SELECT value FROM user_settings WHERE user_id = ? AND key = 'defaultFavoriteGroupId'").get(userId)?.value;
-  if (!value || value === "ungrouped") return null;
-  const id = normalizeFavoriteGroupId(value);
-  return db.prepare("SELECT id FROM favorite_groups WHERE id = ? AND user_id = ?").get(id, userId)?.id || null;
+  return resolveDefaultFavoriteGroup(userId)?.id ?? null;
 }
 
 export function setDefaultFavoriteGroupId(userId, groupId) {
@@ -1039,10 +1372,19 @@ export function listUserFavorites(userId, groupFilter = "all") {
 }
 
 export function getUserFavorites(userId, groupFilter = "all") {
+  // 顶部「N 篇收藏」与侧边栏「全部收藏」都必须是不随筛选变化的真实总数，
+  // 否则每切一个分组，同一个数字就会跟着列表长度跳来跳去。
+  const total = Number(db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM user_favorites uf
+    JOIN articles a ON a.id = uf.article_id
+    WHERE uf.user_id = ? AND is_non_research_title(a.title) = 0
+  `).get(userId)?.count || 0);
   return {
     groups: listFavoriteGroups(userId),
     favorites: listUserFavorites(userId, groupFilter),
-    defaultGroupId: getDefaultFavoriteGroupId(userId)
+    defaultGroupId: getDefaultFavoriteGroupId(userId),
+    total
   };
 }
 
@@ -1247,8 +1589,9 @@ export function listArticlesWithoutKeywords(limit = 50, excludeIds = []) {
     SELECT * FROM articles
     WHERE length(trim(coalesce(keywords, ''))) = 0
     AND is_non_research_title(title) = 0
+    AND ${EXCLUDE_OTHER_PLAIN}
     AND id NOT IN (SELECT value FROM json_each(?))
-    ORDER BY COALESCE(published_at, fetched_at) DESC
+    ORDER BY ${displayDateSql("articles")} DESC
     LIMIT ?
   `).all(JSON.stringify(excludeIds), limit);
 }
@@ -1259,6 +1602,7 @@ export function countArticlesWithoutKeywords() {
     FROM articles
     WHERE length(trim(coalesce(keywords, ''))) = 0
       AND is_non_research_title(title) = 0
+      AND ${EXCLUDE_OTHER_PLAIN}
   `).get()?.count || 0);
 }
 
@@ -1279,6 +1623,7 @@ export function listArticlesWithoutTranslation(targetLanguage, limit = 20) {
     LEFT JOIN translations t
       ON t.article_id = a.id AND t.target_language = ?
     WHERE is_non_research_title(a.title) = 0
+      AND ${EXCLUDE_OTHER_CLAUSE}
       AND (length(trim(coalesce(t.title, ''))) = 0
       OR (length(trim(coalesce(a.abstract, ''))) > 0 AND length(trim(coalesce(t.abstract, ''))) = 0))
     ORDER BY COALESCE(a.first_seen_at, a.fetched_at) DESC, a.id DESC
@@ -1291,6 +1636,7 @@ export function listArticlesMissingAbstract(limit = 50, excludeIds = []) {
     SELECT * FROM articles
     WHERE length(trim(coalesce(abstract, ''))) = 0
     AND is_non_research_title(title) = 0
+    AND ${EXCLUDE_OTHER_PLAIN}
     AND id NOT IN (SELECT value FROM json_each(?))
     ORDER BY COALESCE(first_seen_at, fetched_at) DESC, id DESC
     LIMIT ?
@@ -1303,6 +1649,7 @@ export function countArticlesMissingAbstract() {
     FROM articles
     WHERE length(trim(coalesce(abstract, ''))) = 0
       AND is_non_research_title(title) = 0
+      AND ${EXCLUDE_OTHER_PLAIN}
   `).get()?.count || 0);
 }
 
@@ -1315,6 +1662,7 @@ export function countArticlesMissingTranslation(field = "title", targetLanguage 
     LEFT JOIN translations t
       ON t.article_id = a.id AND t.target_language = ?
     WHERE is_non_research_title(a.title) = 0
+      AND ${EXCLUDE_OTHER_CLAUSE}
       AND length(trim(coalesce(a.${sourceColumn}, ''))) > 0
       AND contains_chinese_text(a.${sourceColumn}) = 0
       AND length(trim(coalesce(t.${translatedColumn}, ''))) = 0
@@ -1340,6 +1688,7 @@ export function listArticlesMissingTranslation(field = "title", targetLanguage =
     LEFT JOIN translations t
       ON t.article_id = a.id AND t.target_language = ?
     WHERE is_non_research_title(a.title) = 0
+      AND ${EXCLUDE_OTHER_CLAUSE}
       AND length(trim(coalesce(a.${sourceColumn}, ''))) > 0
       AND contains_chinese_text(a.${sourceColumn}) = 0
       AND length(trim(coalesce(t.${translatedColumn}, ''))) = 0
@@ -1388,7 +1737,7 @@ export function markTranslationAttempts(articleIds, field = "title", targetLangu
 }
 
 export function getKeywordStats(filters = {}) {
-  const clauses = ["keywords IS NOT NULL", "keywords != ''", "is_non_research_title(title) = 0"];
+  const clauses = ["keywords IS NOT NULL", "keywords != ''", "is_non_research_title(title) = 0", EXCLUDE_OTHER_PLAIN];
   const params = {};
 
   if (filters.journal) {
@@ -1396,20 +1745,20 @@ export function getKeywordStats(filters = {}) {
     params.journal = filters.journal;
   }
   if (filters.from) {
-    clauses.push("published_at >= @from");
+    clauses.push(`${displayDateSql("articles")} >= @from`);
     params.from = filters.from;
   }
   if (filters.to) {
-    clauses.push("published_at <= @to");
+    clauses.push(`${displayDateSql("articles")} <= @to`);
     params.to = filters.to;
   }
 
   const where = `WHERE ${clauses.join(" AND ")}`;
   const articles = db.prepare(`
-    SELECT id, title, journal, published_at, keywords, url, doi
+    SELECT id, title, journal, published_at, ${displayDateSql("articles")} AS display_date, keywords, url, doi
     FROM articles
     ${where}
-    ORDER BY COALESCE(published_at, fetched_at) DESC
+    ORDER BY ${displayDateSql("articles")} DESC
   `).all(params);
 
   // Aggregate keyword frequencies and track which articles contain each keyword
@@ -1432,6 +1781,8 @@ export function getKeywordStats(filters = {}) {
         title: article.title,
         journal: article.journal,
         published_at: article.published_at,
+        // 统计页/导出与列表页保持一致：都用统一口径算出来的日期。
+        display_date: article.display_date,
         url: article.url,
         doi: article.doi
       });
@@ -1443,7 +1794,7 @@ export function getKeywordStats(filters = {}) {
 }
 
 export function getKeywordCooccurrence(filters = {}) {
-  const clauses = ["keywords IS NOT NULL", "keywords != ''"];
+  const clauses = ["keywords IS NOT NULL", "keywords != ''", EXCLUDE_OTHER_PLAIN];
   const params = {};
 
   if (filters.journal) {
@@ -1451,20 +1802,20 @@ export function getKeywordCooccurrence(filters = {}) {
     params.journal = filters.journal;
   }
   if (filters.from) {
-    clauses.push("published_at >= @from");
+    clauses.push(`${displayDateSql("articles")} >= @from`);
     params.from = filters.from;
   }
   if (filters.to) {
-    clauses.push("published_at <= @to");
+    clauses.push(`${displayDateSql("articles")} <= @to`);
     params.to = filters.to;
   }
 
   const where = `WHERE ${clauses.join(" AND ")}`;
   const articles = db.prepare(`
-    SELECT id, title, journal, published_at, keywords, url, doi
+    SELECT id, title, journal, published_at, ${displayDateSql("articles")} AS display_date, keywords, url, doi
     FROM articles
     ${where}
-    ORDER BY COALESCE(published_at, fetched_at) DESC
+    ORDER BY ${displayDateSql("articles")} DESC
   `).all(params);
 
   // Build keyword frequency map
@@ -1664,7 +2015,7 @@ export function createUserAccount({ username, passwordHash, passwordSalt, regist
       VALUES (?, ?, ?, ?, ?)
     `).run(username, passwordHash, passwordSalt, registrationMarker, "user");
     const accountId = Number(result.lastInsertRowid);
-    ensureDefaultFavoriteGroup(`account:${accountId}`);
+    // 新账户不再预建「默认收藏夹」：分组只由用户自己新建，新收藏默认落到「未分组」。
     db.exec("COMMIT");
     return getUserAccountById(accountId);
   } catch (error) {
@@ -1711,9 +2062,14 @@ export function deleteUserAccount(accountId) {
 
 export function getAdminOverview() {
   const scalar = (sql) => Number(db.prepare(sql).get()?.count || 0);
-  const articleCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0");
-  const abstractCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(abstract, ''))) > 0");
-  const keywordCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(keywords, ''))) > 0");
+  // 管理端「内容完整性」与列表页同口径：AI 分类为 other 的文献已移出正式库，
+  // 覆盖率若仍把它计入分母，管理员看到的缺口明细点开后会对不上（other 的缺口
+  // 既不该补、也不该出现在待补全清单里）。补全/翻译 gap 查询（上方 7 个）同样
+  // 排除，三方（覆盖率 / 待补全明细 / 补全作业）保持一致，翻译额度不再花在
+  // other 文献上。
+  const articleCount = scalar(`SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND ${EXCLUDE_OTHER_PLAIN}`);
+  const abstractCount = scalar(`SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND ${EXCLUDE_OTHER_PLAIN} AND length(trim(coalesce(abstract, ''))) > 0`);
+  const keywordCount = scalar(`SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND ${EXCLUDE_OTHER_PLAIN} AND length(trim(coalesce(keywords, ''))) > 0`);
   // `translations` also stores attempt timestamps for records that have no text
   // yet, so a bare row count would overstate coverage.
   const translationCount = scalar(`
@@ -1722,13 +2078,16 @@ export function getAdminOverview() {
        OR length(trim(coalesce(abstract, ''))) > 0
        OR length(trim(coalesce(keywords, ''))) > 0
   `);
-  const translatableTitleCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(title, ''))) > 0 AND contains_chinese_text(title) = 0");
-  const translatableAbstractCount = scalar("SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND length(trim(coalesce(abstract, ''))) > 0 AND contains_chinese_text(abstract) = 0");
+  const translatableTitleCount = scalar(`SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND ${EXCLUDE_OTHER_PLAIN} AND length(trim(coalesce(title, ''))) > 0 AND contains_chinese_text(title) = 0`);
+  const translatableAbstractCount = scalar(`SELECT COUNT(*) AS count FROM articles WHERE is_non_research_title(title) = 0 AND ${EXCLUDE_OTHER_PLAIN} AND length(trim(coalesce(abstract, ''))) > 0 AND contains_chinese_text(abstract) = 0`);
+  // 分子与分母必须同口径（非中文标题才算可译）：否则中文刊在 translations 里
+  // 留下的行会混进分子，出现「中文标题 100.2%」这种超过 100% 的怪数字。
   const translatedTitleCount = scalar(`
     SELECT COUNT(*) AS count FROM articles a
     JOIN translations t ON t.article_id = a.id AND t.target_language = 'zh'
     WHERE length(trim(coalesce(a.title, ''))) > 0
       AND contains_chinese_text(a.title) = 0
+      AND ${EXCLUDE_OTHER_CLAUSE}
       AND length(trim(coalesce(t.title, ''))) > 0
   `);
   const translatedAbstractCount = scalar(`
@@ -1736,6 +2095,7 @@ export function getAdminOverview() {
     JOIN translations t ON t.article_id = a.id AND t.target_language = 'zh'
     WHERE length(trim(coalesce(a.abstract, ''))) > 0
       AND contains_chinese_text(a.abstract) = 0
+      AND ${EXCLUDE_OTHER_CLAUSE}
       AND length(trim(coalesce(t.abstract, ''))) > 0
   `);
   const pending = {
@@ -1757,6 +2117,7 @@ export function getAdminOverview() {
   const coverageArticleSelect = `
     SELECT a.id, a.title, a.authors, a.journal, a.year, a.volume, a.issue,
       a.doi, a.abstract, a.url, a.published_at, a.fetched_at, a.keywords,
+      ${displayDateSql("a")} AS display_date,
       zh.title AS translated_title,
       zh.abstract AS translated_abstract
     FROM articles a
@@ -1764,9 +2125,9 @@ export function getAdminOverview() {
   `;
   const buildCoverageDetails = (condition) => {
     const articles = db.prepare(`${coverageArticleSelect}
-      WHERE is_non_research_title(a.title) = 0 AND (${condition})
+      WHERE is_non_research_title(a.title) = 0 AND ${EXCLUDE_OTHER_CLAUSE} AND (${condition})
       ORDER BY COALESCE(NULLIF(a.journal, ''), '未标记期刊') ASC,
-        COALESCE(a.published_at, a.fetched_at) DESC, a.id DESC
+        ${displayDateSql("a")} DESC, a.id DESC
     `).all();
     const journals = new Map();
     for (const article of articles) {
@@ -1786,6 +2147,44 @@ export function getAdminOverview() {
   const coverageDetails = Object.fromEntries(
     Object.entries(coverageConditions).map(([key, condition]) => [key, buildCoverageDetails(condition)])
   );
+
+  // 时间数据质量（方案 §10 / §22 / 验收 11）：first_public_at 的 A/B/C/D 分布。
+  // D 级（system_first_seen_fallback，兜底用入库时间）的比例是时间数据质量的
+  // 监控指标，必须可单独统计；unresolved = 尚未回填主时间的行（理论上只出现在
+  // 回填作业还没跑过的过渡期）。
+  const dateQualityRows = db.prepare(`
+    SELECT COALESCE(NULLIF(first_public_confidence, ''), 'unresolved') AS confidence,
+           COUNT(*) AS count
+    FROM articles
+    WHERE is_non_research_title(title) = 0
+    GROUP BY confidence
+  `).all();
+  const dateQuality = {
+    grades: Object.fromEntries(dateQualityRows.map((row) => [row.confidence, Number(row.count)])),
+    systemFirstSeenFallback: Number(dateQualityRows.find((row) => row.confidence === "D")?.count || 0),
+    unresolved: Number(dateQualityRows.find((row) => row.confidence === "unresolved")?.count || 0)
+  };
+
+  // 「文献分布」只列期刊目录里的刊。采集侧偶发的 ISSN 串号 / 实体污染会让目录外的
+  // 期刊混进库（例如按 1751-4223 查 "Energy" 拉回的 ICE Energy 文章），直接照着
+  // articles 表 GROUP BY 输出，看起来就像期刊目录里多了一本根本不存在的刊。
+  //
+  // 目录真值 = DEFAULT_JOURNALS ∪ settings.journals，和采集侧的 refresh.js
+  // (#journalsToCollect) 保持同一个集合。⚠️ 不能只用 settings.journals：那是站点的
+  // 「附加期刊」设置，生产库里只有 3 本，照它过滤会把 13 本真期刊（Energy、
+  // Applied Energy、中国电机工程学报…）整批从表里删掉，页面上看就是「文献并不全」。
+  const catalogJournalNames = new Set(
+    [...DEFAULT_JOURNALS, ...(getSettings().journals || [])].map((journal) => journal.name)
+  );
+  const journalDistribution = db.prepare(`
+    SELECT journal, COUNT(*) AS count,
+      SUM(CASE WHEN length(trim(coalesce(abstract, ''))) > 0 THEN 1 ELSE 0 END) AS abstract_count
+    FROM articles GROUP BY journal ORDER BY count DESC, journal ASC
+  `).all().filter((row) => {
+    const name = String(row.journal || "").trim();
+    // 期刊名为空的记录按「未标记期刊」保留，只滤掉目录外的刊名。
+    return !name || catalogJournalNames.has(name);
+  });
 
   return {
     counts: {
@@ -1807,6 +2206,7 @@ export function getAdminOverview() {
     },
     coverageDetails,
     pending,
+    dateQuality,
     users: db.prepare(`
       SELECT a.id, a.username, a.role, a.created_at, a.updated_at,
         COALESCE(u.name, '') AS name, COALESCE(u.email, '') AS email,
@@ -1815,11 +2215,7 @@ export function getAdminOverview() {
       LEFT JOIN user_emails u ON u.user_id = 'account:' || a.id
       ORDER BY CASE a.role WHEN 'super_admin' THEN 0 ELSE 1 END, a.created_at ASC
     `).all(),
-    journals: db.prepare(`
-      SELECT journal, COUNT(*) AS count,
-        SUM(CASE WHEN length(trim(coalesce(abstract, ''))) > 0 THEN 1 ELSE 0 END) AS abstract_count
-      FROM articles GROUP BY journal ORDER BY count DESC, journal ASC
-    `).all(),
+    journals: journalDistribution,
     recentRefreshes: db.prepare(`
       SELECT started_at, finished_at, added_count, task_type,
         enriched_abstract_count, enriched_keyword_count, translated_count,
@@ -2048,7 +2444,9 @@ export function getUserSettings(userId) {
     pushIncludeAbstract: values.pushIncludeAbstract !== "false",
     pushIncludeKeywords: values.pushIncludeKeywords !== "false",
     pushIncludeTranslation: values.pushIncludeTranslation !== "false",
-    pushJournalFilter: values.pushJournalFilter || ""
+    pushJournalFilter: values.pushJournalFilter || "",
+    pushDirectionFilter: values.pushDirectionFilter || "",
+    pushIncludeAiReport: values.pushIncludeAiReport !== "false"
   };
 }
 
@@ -2084,6 +2482,8 @@ export function updateUserSettings(userId, settings) {
     upsert.run({ userId, key: "pushIncludeKeywords", value: String(settings.pushIncludeKeywords !== undefined ? settings.pushIncludeKeywords : current.pushIncludeKeywords) });
     upsert.run({ userId, key: "pushIncludeTranslation", value: String(settings.pushIncludeTranslation !== undefined ? settings.pushIncludeTranslation : current.pushIncludeTranslation) });
     upsert.run({ userId, key: "pushJournalFilter", value: settings.pushJournalFilter !== undefined ? String(settings.pushJournalFilter) : current.pushJournalFilter });
+    upsert.run({ userId, key: "pushDirectionFilter", value: settings.pushDirectionFilter !== undefined ? sanitizeDirectionFilter(settings.pushDirectionFilter) : current.pushDirectionFilter });
+    upsert.run({ userId, key: "pushIncludeAiReport", value: String(settings.pushIncludeAiReport !== undefined ? settings.pushIncludeAiReport : current.pushIncludeAiReport) });
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -2091,4 +2491,180 @@ export function updateUserSettings(userId, settings) {
   }
   
   return getUserSettings(userId);
+}
+
+// ── AI 研究方向：统计与管理员改判（RUNBOOK-AI-DIRECTION.md）─────────────────
+
+/** 研究方向维度统计：覆盖率、各方向计数（全量 + 近 N 日）、可选方向×期刊组矩阵。 */
+export function getDirectionStats({ windowDays = 30, withMatrix = false } = {}) {
+  const base = "is_non_research_title(a.title) = 0";
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM articles a WHERE ${base}`).get().n;
+  const classified = db.prepare(`SELECT COUNT(*) AS n FROM articles a WHERE ${base} AND a.research_direction IS NOT NULL`).get().n;
+  const pendingReview = db.prepare(`SELECT COUNT(*) AS n FROM articles a WHERE ${base} AND a.direction_reason LIKE '[待复核]%'`).get().n;
+
+  const { startDate, endDate } = businessWindow(windowDays);
+  const rows = db.prepare(`
+    SELECT a.research_direction AS key,
+      COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN ${displayDateSql("a")} >= @winStart AND ${displayDateSql("a")} <= @winEnd THEN 1 ELSE 0 END), 0) AS recent
+    FROM articles a
+    WHERE ${base} AND a.research_direction IS NOT NULL
+    GROUP BY a.research_direction
+  `).all({ winStart: startDate, winEnd: endDate });
+  const countsByKey = new Map(rows.map((row) => [row.key, { total: Number(row.total), recent: Number(row.recent) }]));
+  const directions = DIRECTIONS.map((direction) => ({
+    key: direction.key,
+    label: direction.label,
+    total: countsByKey.get(direction.key)?.total || 0,
+    lastN: countsByKey.get(direction.key)?.recent || 0
+  }));
+
+  const stats = {
+    coverage: { classified, total, pendingReview, uncovered: total - classified },
+    windowDays,
+    directions
+  };
+
+  if (withMatrix) {
+    const groups = new Map();
+    for (const journal of [...DEFAULT_JOURNALS, ...getSettings().journals]) {
+      if (journal?.name && journal?.group) groups.set(journal.name, journal.group);
+    }
+    const matrixRows = db.prepare(`
+      SELECT a.journal, a.research_direction AS key, COUNT(*) AS n
+      FROM articles a
+      WHERE ${base} AND a.research_direction IS NOT NULL
+      GROUP BY a.journal, a.research_direction
+    `).all();
+    const matrix = {};
+    for (const row of matrixRows) {
+      const group = groups.get(String(row.journal || "")) || "other";
+      matrix[row.key] = matrix[row.key] || { ieee: 0, elsevier: 0, cn: 0, other: 0 };
+      matrix[row.key][group] += Number(row.n);
+    }
+    stats.matrix = matrix;
+  }
+  return stats;
+}
+
+/** 管理员人工改判：置 direction_source='manual'，此后 apply 脚本永不覆盖该行。 */
+export function setArticleDirectionManually(id, direction, secondary = []) {
+  if (!isDirectionKey(direction)) throw new Error("未知的研究方向");
+  const keys = [...new Set((Array.isArray(secondary) ? secondary : []).map((key) => String(key || "").trim()).filter(Boolean))]
+    .filter((key) => key !== direction).slice(0, 2);
+  for (const key of keys) {
+    if (!isDirectionKey(key)) throw new Error(`未知的次方向：${key}`);
+  }
+  const info = db.prepare(`
+    UPDATE articles
+      SET research_direction = ?, research_direction_secondary = ?, direction_confidence = NULL,
+          direction_source = 'manual', direction_reason = NULL, classified_at = ?
+    WHERE id = ?
+  `).run(direction, keys.length ? keys.join(",") : null, new Date().toISOString(), id);
+  if (!info.changes) return null;
+  return db.prepare("SELECT id, research_direction, research_direction_secondary, direction_source, classified_at FROM articles WHERE id = ?").get(id);
+}
+
+// ── AI 研究速览：周报/月报（PLAN-AI-REPORTS.md）────────────────────────────
+// 报告内容由 WorkBuddy 智能体离线生成、经 scripts/apply-report.mjs 写入
+// ai_reports 表；服务端只读渲染，任何接口都不得在这里发起 LLM/联网调用。
+
+function parseReportRow(row) {
+  if (!row) return null;
+  let stats = null;
+  if (row.stats_json) {
+    try { stats = JSON.parse(row.stats_json); } catch { stats = null; }
+  }
+  return { ...row, stats_json: undefined, stats };
+}
+
+/**
+ * 历史期数列表（period_start 倒序），板块「研究速览」回看用。
+ * - direction：单个 key / null（仅总览）；缺省返回全部（总览+专报）。
+ * - directions：key 数组（多方向专报批量取，配合 periodStart 供前端分组浏览懒加载）。
+ * - periodStart：限定某期。
+ * - meta：轻量模式（研究速览 v2）——不含 content_md，stats 剥掉 paperBriefs
+ *   （json_remove 在 SQL 层完成，避免一次列表拉全量正文与速评数组）。
+ */
+export function listAiReports({ kind = "weekly", limit = 12, direction, directions, periodStart, meta = false } = {}) {
+  if (!["weekly", "monthly"].includes(kind)) return [];
+  const maxRows = Math.min(Math.max(Math.floor(Number(limit)) || 12, 1), 200);
+  const params = { kind, limit: maxRows };
+  const clauses = [];
+  if (direction !== undefined) {
+    // node:sqlite 严格校验：绑定对象的键必须与 SQL 占位符一一对应，
+    // 因此 IS NULL 分支（无占位符）不能带 direction 键。
+    if (direction === null) {
+      clauses.push("AND direction IS NULL");
+    } else {
+      clauses.push("AND direction = @direction");
+      params.direction = direction;
+    }
+  }
+  if (Array.isArray(directions)) {
+    const keys = directions.map((key) => String(key)).filter(isDirectionKey);
+    if (keys.length) {
+      clauses.push(`AND direction IN (${keys.map((_, index) => `@dirs${index}`).join(", ")})`);
+      keys.forEach((key, index) => { params[`dirs${index}`] = key; });
+    } else {
+      clauses.push("AND 0"); // 显式空数组 = 明确不要方向行
+    }
+  }
+  if (periodStart) {
+    clauses.push("AND period_start = @periodStart");
+    params.periodStart = String(periodStart);
+  }
+  // meta 模式在 SQL 层剥 paperBriefs；json_remove 对坏 JSON 返回 NULL（parseReportRow 容错）。
+  const statsSelect = meta ? "json_remove(stats_json, '$.paperBriefs') AS stats_json" : "stats_json";
+  const contentSelect = meta ? "NULL AS content_md" : "content_md";
+  return db.prepare(`
+    SELECT id, kind, period_start, period_end, direction, status, ${contentSelect}, ${statsSelect}, generated_at, generator
+    FROM ai_reports
+    WHERE kind = @kind AND status = 'ready' ${clauses.join(" ")}
+    ORDER BY period_start DESC, id DESC
+    LIMIT @limit
+  `).all(params).map(parseReportRow);
+}
+
+/**
+ * 单份报告详情（研究速览 v2 懒加载）：
+ * - { id }：按行 id 直取；
+ * - { kind, periodStart }：该期总览（direction IS NULL）；
+ * - { kind, periodStart, direction }：该期某方向专报（direction 须白名单 key）。
+ */
+export function getAiReportDetail({ id, kind = "weekly", periodStart, direction } = {}) {
+  if (id != null) {
+    const numeric = Number(id);
+    if (!Number.isInteger(numeric) || numeric <= 0) return null;
+    return parseReportRow(db.prepare(`
+      SELECT id, kind, period_start, period_end, direction, status, content_md, stats_json, generated_at, generator
+      FROM ai_reports WHERE id = ?
+    `).get(numeric));
+  }
+  if (!["weekly", "monthly"].includes(kind) || !periodStart) return null;
+  if (direction === undefined || direction === null || direction === "") {
+    return parseReportRow(db.prepare(`
+      SELECT id, kind, period_start, period_end, direction, status, content_md, stats_json, generated_at, generator
+      FROM ai_reports WHERE kind = ? AND period_start = ? AND status = 'ready' AND direction IS NULL
+      ORDER BY id DESC LIMIT 1
+    `).get(kind, String(periodStart)));
+  }
+  if (!isDirectionKey(direction)) return null;
+  return parseReportRow(db.prepare(`
+    SELECT id, kind, period_start, period_end, direction, status, content_md, stats_json, generated_at, generator
+    FROM ai_reports WHERE kind = ? AND period_start = ? AND status = 'ready' AND direction = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(kind, String(periodStart), String(direction)));
+}
+
+/** 最新一期 ready 报告：digest 邮件置顶与 /api/reports/latest 共用（默认取总览，direction IS NULL）。 */
+export function getLatestReadyReport(kind = "weekly", direction = null) {
+  if (!["weekly", "monthly"].includes(kind)) return null;
+  return parseReportRow(db.prepare(`
+    SELECT id, kind, period_start, period_end, direction, status, content_md, stats_json, generated_at, generator
+    FROM ai_reports
+    WHERE kind = ? AND status = 'ready' AND direction IS ?
+    ORDER BY period_start DESC, id DESC
+    LIMIT 1
+  `).get(kind, direction));
 }

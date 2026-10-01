@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { Activity, BookOpen, ChevronDown, Database, FileText, Languages, RefreshCw, ShieldCheck, Square, Trash2, UserPlus, Users } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Activity, BookOpen, ChevronDown, Compass, Database, FileText, Languages, RefreshCw, ShieldCheck, Square, Trash2, UserPlus, Users } from "lucide-react";
 import { api } from "../../lib/api.js";
-import { formatDate, formatDateTime } from "../../lib/format.js";
+import { articleDate, formatDate, formatDateTime } from "../../lib/format.js";
+import { directionVar } from "../../lib/directions.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
 
 /** One-click maintenance entry points; the server decides the batching. */
@@ -83,6 +84,18 @@ function AdminView({ onDataChanged }) {
   const [expandedCoverageKey, setExpandedCoverageKey] = useState(null);
   const [selectedCoverageArticle, setSelectedCoverageArticle] = useState(null);
   const [maintenance, setMaintenance] = useState(null);
+  const [directionStats, setDirectionStats] = useState(null);
+  const [statusStats, setStatusStats] = useState(null);
+  // Text a failed request wrote into `message`, so a recovered service can
+  // retract exactly that banner without clobbering messages from user actions.
+  const pollErrorRef = useRef("");
+
+  useEffect(() => {
+    // 只读状态卡：分类由 WorkBuddy 定时任务完成，这里不做任何触发。
+    api.getDirectionStats({ window: 30 }).then(setDirectionStats).catch(() => setDirectionStats(null));
+    // 顶栏统计胶囊自 2026-09-28 移入管理中心：同源 /api/status。
+    api.get("/api/status").then(setStatusStats).catch(() => setStatusStats(null));
+  }, []);
 
   async function loadOverview() {
     const next = await api.get("/api/admin/overview");
@@ -94,11 +107,43 @@ function AdminView({ onDataChanged }) {
     return next;
   }
 
+  // A transient outage must not leave a stale banner on screen. Retract only
+  // the text a failed request put there, so a message from an explicit action
+  // ("已请求停止…") survives a poll that recovers afterwards.
+  function clearStaleError() {
+    const stale = pollErrorRef.current;
+    if (!stale) return;
+    pollErrorRef.current = "";
+    setMessage((previous) => (previous === stale ? "" : previous));
+  }
+
+  // The first load has no poll to fall back on. Without a retry, opening the
+  // dashboard during a 20-60s service restart window parks the whole panel on
+  // "无法读取管理数据。" until the user refreshes by hand.
   useEffect(() => {
-    loadOverview().catch((error) => {
-      setMessage(error.message);
-      setLoading(false);
-    });
+    let cancelled = false;
+    let retryTimer = null;
+    const RETRY_DELAYS = [2000, 4000, 6000, 8000, 10000];
+    async function load(attempt) {
+      try {
+        await loadOverview();
+        if (cancelled) return;
+        clearStaleError();
+      } catch (error) {
+        if (cancelled) return;
+        pollErrorRef.current = error.message;
+        setMessage(error.message);
+        setLoading(false);
+        const delay = RETRY_DELAYS[attempt];
+        if (delay !== undefined) retryTimer = setTimeout(() => load(attempt + 1), delay);
+      }
+    }
+    load(0);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Poll the job while it runs. A maintenance drain is a long-lived server-side
@@ -112,13 +157,16 @@ function AdminView({ onDataChanged }) {
         const { state } = await api.get("/api/admin/maintenance");
         if (cancelled) return;
         setMaintenance(state);
+        clearStaleError();
         if (state && !state.running) {
           clearInterval(timer);
           setMessage(state.message || "");
           await Promise.all([loadOverview(), onDataChanged()]);
         }
       } catch (error) {
-        if (!cancelled) setMessage(error.message);
+        if (cancelled) return;
+        pollErrorRef.current = error.message;
+        setMessage(error.message);
       }
     }, 2000);
     return () => { cancelled = true; clearInterval(timer); };
@@ -408,6 +456,18 @@ function AdminView({ onDataChanged }) {
         <div className="ledger-metrics">{metrics.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value ?? 0}</strong></div>)}</div>
       </section>
 
+      <section className="admin-ledger" aria-label="站点阅读统计">
+        <header><span>站点阅读统计</span><small>未读 / 已读 / 收藏为当前管理员账户视角</small></header>
+        <div className="ledger-metrics">
+          <div><span>总文献</span><strong>{formatNumber(statusStats?.articleCount)}</strong></div>
+          <div><span>未读</span><strong>{formatNumber(statusStats?.unreadCount)}</strong></div>
+          <div><span>已读</span><strong>{formatNumber(statusStats?.readCount)}</strong></div>
+          <div><span>收藏</span><strong>{formatNumber(statusStats?.favoriteCount)}</strong></div>
+          <div><span>最近一周首发</span><strong>{formatNumber(statusStats?.newArticleCount7d)}</strong></div>
+          <div><span>最近一月首发</span><strong>{formatNumber(statusStats?.newArticleCount30d)}</strong></div>
+        </div>
+      </section>
+
       <div className="admin-dashboard-grid">
         <section className="admin-panel-card coverage-panel">
           <header><div><span className="eyebrow">数据健康</span><h2>内容完整度</h2></div><Activity size={19} /></header>
@@ -446,7 +506,7 @@ function AdminView({ onDataChanged }) {
                                 {(group.articles || []).map((article) => (
                                   <button className="coverage-article-button" type="button" key={article.id} onClick={() => setSelectedCoverageArticle(article)}>
                                     <span className="coverage-article-title">{article.title || "未命名文献"}</span>
-                                    <span className="coverage-article-meta">{article.year || formatDate(article.published_at)}{article.doi ? ` · DOI ${article.doi}` : ""}</span>
+                                    <span className="coverage-article-meta">{article.year || formatDate(articleDate(article))}{article.doi ? ` · DOI ${article.doi}` : ""}</span>
                                   </button>
                                 ))}
                               </div>
@@ -461,6 +521,42 @@ function AdminView({ onDataChanged }) {
             })}
           </div>
           <div className="coverage-pending" role="status"><span>当前待补全</span><strong>摘要 {pending.abstracts || 0} 篇 · 关键词 {pending.keywords || 0} 篇</strong></div>
+        </section>
+
+        <section className="admin-panel-card direction-panel" aria-label="AI 研究方向分类状态">
+          <header><div><span className="eyebrow">AI 研究方向</span><h2>方向分类状态</h2></div><Compass size={19} /></header>
+          {directionStats ? (
+            <>
+              <div className="direction-status-line" role="status">
+                已分类 <strong>{formatNumber(directionStats.coverage.classified)}</strong> / {formatNumber(directionStats.coverage.total)} 篇
+                <span className="direction-status-split">·</span>
+                待复核 <strong>{formatNumber(directionStats.coverage.pendingReview)}</strong> 篇
+                <span className="direction-status-split">·</span>
+                未分类 <strong>{formatNumber(directionStats.coverage.uncovered)}</strong> 篇
+              </div>
+              <div className="direction-status-bars">
+                {directionStats.directions
+                  .filter((d) => d.total > 0)
+                  .sort((a, b) => b.total - a.total)
+                  .slice(0, 8)
+                  .map((d) => {
+                    const max = Math.max(1, ...directionStats.directions.map((item) => item.total));
+                    return (
+                      <div className="direction-bar-row" key={d.key}>
+                        <span className="direction-bar-label">{d.label}</span>
+                        <div className="direction-bar-track">
+                          <div className="direction-bar" style={{ width: `${Math.max(2, (d.total / max) * 100)}%`, background: directionVar(d.key) }} />
+                        </div>
+                        <span className="direction-bar-count">{formatNumber(d.total)}</span>
+                      </div>
+                    );
+                  })}
+              </div>
+              <p className="direction-panel-note">分类由 WorkBuddy 定时任务自动执行（流程见 RUNBOOK-AI-DIRECTION.md），本面板只读。</p>
+            </>
+          ) : (
+            <p className="coverage-empty">方向统计暂不可用。</p>
+          )}
         </section>
 
         <section className="admin-panel-card refresh-panel">

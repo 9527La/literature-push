@@ -1,10 +1,9 @@
 import { memo } from "react";
-import { Check, FileText, Globe, Heart, Languages, Star } from "lucide-react";
+import { Check, FileText, Globe, Heart, Languages, Star, Tag } from "lucide-react";
 import Highlight from "./Highlight.jsx";
-import TopicIcon from "./TopicIcon.jsx";
-import { formatDate, formatRelativeDate, isChineseJournalArticle } from "../lib/format.js";
+import { articleDate, formatDate, formatRelativeDate, isChineseJournalArticle } from "../lib/format.js";
 import { findJournal, journalAbbr, journalGroup } from "../lib/journal.js";
-import { articleTopic, topicLabel } from "../lib/topics.js";
+import { directionLabel, directionVar } from "../lib/directions.js";
 
 /** Cards show the three strongest keywords; the rest collapse into "+N". */
 const KEYWORD_PREVIEW_LIMIT = 3;
@@ -29,7 +28,9 @@ function ArticleCard({
   const showTranslatedAbstract = displayPreferences.translatedAbstract
     && !isChineseJournalArticle(article, journals);
   const prepare = () => requestPreparation([article.id], { force: true });
-  const absoluteDate = formatDate(article.published_at);
+  // 统一日期口径：正式出版用出版日、提前访问用入库日（后端 display_date）。
+  const dateValue = articleDate(article);
+  const absoluteDate = formatDate(dateValue);
 
   const journalRecord = findJournal(journals, article.journal);
   const tone = journalGroup(journalRecord || article.journal);
@@ -38,7 +39,10 @@ function ArticleCard({
     .map((keyword) => keyword.trim())
     .filter(Boolean);
   const hiddenKeywordCount = Math.max(0, keywords.length - KEYWORD_PREVIEW_LIMIT);
-  const topic = articleTopic(keywords);
+  const direction = article.research_direction || "";
+  const directionTip = direction
+    ? `${article.direction_source === "manual" ? "人工确认" : "AI 方向"} · 置信 ${Number(article.direction_confidence ?? 0).toFixed(2)}${article.direction_reason ? ` · ${article.direction_reason}` : ""}`
+    : "";
 
   return (
     <article className={`article tone-${tone} ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}${isCursor ? " is-cursor" : ""}${selected ? " is-selected" : ""}${selectable ? " has-select" : ""}`}>
@@ -53,17 +57,28 @@ function ArticleCard({
         </label>
       )}
       <div className="article-main">
-        {/* Publication date leads the row: it is the axis a reader scans on, and
-            the journal identity follows as one visual unit after the divider. */}
-        <div className="article-meta">
-          <time dateTime={absoluteDate} title={absoluteDate}>{formatRelativeDate(article.published_at)}</time>
-          <span className="meta-divider" aria-hidden="true" />
+        {/* 期刊身份条（方案 B）：实底徽章 + 刊名居左，已读/收藏徽章、AI 方向
+            标签（实底白字，整卡最重的语义标签）与相对日期居右。日期仍走
+            first_public_at 口径（display_date），悬停给绝对日期。 */}
+        <div className="article-head">
           <span className={`journal-mark tone-${tone}`} aria-hidden="true">{journalAbbr(article.journal)}</span>
           <span className="article-journal">{article.journal || "未知期刊"}</span>
           {/* Unread is already carried by the 3px colour bar and the title
               weight, so only the exceptions (已读 / 收藏) get a badge. */}
           {article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : null}
           {article.is_favorite ? <span className="article-status-badge fav-badge"><Star size={11} /> 收藏</span> : null}
+          <span className="article-head-spacer" aria-hidden="true" />
+          {direction && (
+            <span
+              className="direction-chip"
+              style={{ "--dir-key": directionVar(direction) }}
+              title={directionTip}
+            >
+              <Tag size={11} aria-hidden="true" />
+              {directionLabel(direction)}
+            </span>
+          )}
+          <time dateTime={absoluteDate} title={absoluteDate}>{formatRelativeDate(dateValue)}</time>
         </div>
         <button className="title-button" onClick={() => onOpen(article)}>
           <Highlight text={article.title} terms={highlightTerms} />
@@ -79,13 +94,8 @@ function ArticleCard({
         {displayPreferences.authors && article.authors && <p className="authors"><Highlight text={article.authors} terms={highlightTerms} /></p>}
         {displayPreferences.keywords && keywords.length > 0 && (
           <div className="keywords">
-            {/* A second reading axis next to the publisher colour: which research
-                area this paper belongs to, before any keyword is read. */}
-            {topic && (
-              <span className="keyword-topic" title={`研究主题：${topicLabel(topic)}`}>
-                <TopicIcon topic={topic} size={15} />
-              </span>
-            )}
+            {/* 关键词胶囊：浅底次级标签。AI 方向标签已升格为期刊身份条里的
+                实底标签（行首），两者主次分明，不再挤在同一行抢权重。 */}
             {keywords.slice(0, KEYWORD_PREVIEW_LIMIT).map((keyword, index) => (
               <button
                 type="button"

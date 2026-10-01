@@ -2,15 +2,19 @@ import { useEffect, useState } from "react";
 import { Check, Copy, Globe, Heart, Languages, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { copyText } from "../../lib/clipboard.js";
-import { formatDate, formatRelativeDate, isChineseSourceText } from "../../lib/format.js";
+import { articleDate, formatDate, formatRelativeDate, isChineseSourceText } from "../../lib/format.js";
 import { journalAbbr, journalGroup } from "../../lib/journal.js";
+import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 import Modal from "../../components/Modal.jsx";
 
-function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpdated, showActions = true, hideTranslatedAbstract = false }) {
+function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpdated, showActions = true, hideTranslatedAbstract = false, canModerate = false }) {
   const [detail, setDetail] = useState(article);
   const [enriching, setEnriching] = useState(true);
   const [enrichError, setEnrichError] = useState("");
   const [copiedField, setCopiedField] = useState("");
+  const [directionDraft, setDirectionDraft] = useState(article.research_direction || "");
+  const [savingDirection, setSavingDirection] = useState(false);
+  const [directionError, setDirectionError] = useState("");
   const [translation, setTranslation] = useState(() => article.translated_title ? {
     target_language: "zh",
     title: article.translated_title,
@@ -24,6 +28,8 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
     setDetail(article);
     setEnrichError("");
     setCopiedField("");
+    setDirectionDraft(article.research_direction || "");
+    setDirectionError("");
     setTranslation(article.translated_title ? {
       target_language: "zh",
       title: article.translated_title,
@@ -106,7 +112,43 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
     if (ok) setTimeout(() => setCopiedField((current) => (current === field ? "" : current)), 2000);
   }
 
-  const absoluteDate = formatDate(detail.published_at);
+  /** 管理员改判：置 manual 后 apply 脚本永不覆盖（与 RUNBOOK 约定一致）。 */
+  async function saveDirection() {
+    if (!directionDraft || savingDirection) return;
+    setSavingDirection(true);
+    setDirectionError("");
+    try {
+      const data = await api.post(`/api/admin/articles/${detail.id}/direction`, { direction: directionDraft });
+      const updated = {
+        ...detail,
+        research_direction: data.article.research_direction,
+        research_direction_secondary: data.article.research_direction_secondary,
+        direction_source: data.article.direction_source,
+        direction_confidence: null,
+        direction_reason: null
+      };
+      setDetail(updated);
+      onArticleUpdated?.(updated);
+    } catch (error) {
+      setDirectionError(error.message);
+    } finally {
+      setSavingDirection(false);
+    }
+  }
+
+  const dateValue = articleDate(detail);
+  const absoluteDate = formatDate(dateValue);
+  // 三段时间各自含义（首次公开为主日期）：
+  //   · 首次公开 first_public_at —— 论文第一次正式公开的日期（卡片上的日期同源）；
+  //   · 正式出版 published_at —— 只在「已经发生」且与首次公开不同日时展示，
+  //     未来的卷期日仍留在数据库里但不对用户展示；
+  //   · 系统收录 first_seen_at —— 本系统首次抓到的时间，用于审计。
+  const todayStr = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  const publishedDate = String(detail.published_at || "").slice(0, 10);
+  const officialDate = publishedDate && publishedDate <= todayStr && publishedDate !== String(dateValue || "").slice(0, 10)
+    ? formatDate(publishedDate)
+    : "";
+  const seenDate = detail.first_seen_at ? formatDate(String(detail.first_seen_at)) : "";
   const tone = journalGroup(detail.journal);
   const translatedAbstract = hideTranslatedAbstract ? "" : String(translation?.abstract || "").trim();
   const translatedTitle = String(translation?.title || "").trim();
@@ -121,7 +163,7 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
             {/* Publication date first, then journal identity: same reading order
                 as the list card, so the dialog feels like the card opened up. */}
             <div className="article-meta">
-              <time dateTime={absoluteDate} title={absoluteDate}>{formatRelativeDate(detail.published_at)}</time>
+              <time dateTime={absoluteDate} title={absoluteDate}>{formatRelativeDate(dateValue)}</time>
               <span className="meta-divider" aria-hidden="true" />
               <span className={`journal-mark tone-${tone}`} aria-hidden="true">{journalAbbr(detail.journal)}</span>
               <span className="article-journal">{detail.journal || "未知期刊"}</span>
@@ -146,6 +188,69 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
         </header>
         {detail.authors && <p className="dialog-authors">{detail.authors}</p>}
 
+        {/* AI 研究方向区块：主方向 + 次方向 + 置信/依据；管理员可在此改判为 manual。 */}
+        {(detail.research_direction || canModerate) && (
+          <div className="dialog-direction">
+            <span className="fact-label">研究方向</span>
+            <div className="direction-block">
+              {detail.research_direction ? (
+                <>
+                  <div className="direction-block-chips">
+                    <span className="direction-chip" style={{ "--dir-key": directionVar(detail.research_direction) }}>
+                      <i className="direction-dot" aria-hidden="true" />
+                      {directionLabel(detail.research_direction)}
+                    </span>
+                    {String(detail.research_direction_secondary || "").split(",").filter(Boolean).map((key) => (
+                      <span key={key} className="direction-chip direction-chip-soft" style={{ "--dir-key": directionVar(key) }}>
+                        {directionLabel(key)}
+                      </span>
+                    ))}
+                    {String(detail.direction_reason || "").startsWith("[待复核]") && (
+                      <span className="direction-review-badge">待复核</span>
+                    )}
+                  </div>
+                  {detail.direction_source !== "manual" && detail.direction_confidence != null && (
+                    <p className="direction-meta">
+                      置信 {Number(detail.direction_confidence).toFixed(2)}
+                      {detail.direction_reason ? ` · ${String(detail.direction_reason).replace(/^\[待复核\]/, "")}` : ""}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <span className="direction-uncategorized">未分类</span>
+              )}
+              {canModerate && (
+                <div className="direction-moderate">
+                  <select
+                    value={directionDraft}
+                    aria-label="管理员改判研究方向"
+                    onChange={(event) => setDirectionDraft(event.target.value)}
+                  >
+                    <option value="">（未分类）</option>
+                    {DIRECTIONS.map((direction) => (
+                      <option key={direction.key} value={direction.key}>
+                        {directionLabel(direction.key)}
+                        {direction.key === detail.research_direction && detail.direction_source === "ai"
+                          ? `（AI · ${Number(detail.direction_confidence ?? 0).toFixed(2)}）`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="secondary direction-save"
+                    onClick={saveDirection}
+                    disabled={savingDirection || directionDraft === (detail.research_direction || "")}
+                  >
+                    {savingDirection ? "保存中" : "保存为人工确认"}
+                  </button>
+                  {directionError && <span className="direction-error">{directionError}</span>}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {(detail.doi || detail.volume || detail.issue) && (
           <div className="dialog-facts">
             {detail.doi && (
@@ -167,6 +272,27 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
               <span className="fact">
                 <span className="fact-label">卷期</span>
                 <span className="fact-value">{[detail.volume && `Vol. ${detail.volume}`, detail.issue && `No. ${detail.issue}`].filter(Boolean).join(" · ")}</span>
+              </span>
+            )}
+          </div>
+        )}
+
+        {(dateValue || officialDate || seenDate) && (
+          <div className="dialog-facts">
+            <span className="fact">
+              <span className="fact-label">首次公开</span>
+              <span className="fact-value">{dateValue ? absoluteDate : "未知"}</span>
+            </span>
+            {officialDate && (
+              <span className="fact">
+                <span className="fact-label">正式出版</span>
+                <span className="fact-value">{officialDate}</span>
+              </span>
+            )}
+            {seenDate && (
+              <span className="fact">
+                <span className="fact-label">系统收录</span>
+                <span className="fact-value">{seenDate}</span>
               </span>
             )}
           </div>

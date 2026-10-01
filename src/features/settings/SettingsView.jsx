@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Filter, Mail, Save, Send, Settings, UserRound } from "lucide-react";
+import { Compass, Filter, Mail, Save, Send, Settings, UserRound } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { groupJournals } from "../../lib/journal.js";
+import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 
 function SettingsView(props) {
   if (!props.canEdit) return <GuestSettingsView />;
@@ -17,6 +18,11 @@ function GuestSettingsView() {
       <div className="guest-prompt"><UserRound size={20} /><div><strong>登录个人账户后管理自己的设置</strong><p>前往“游客账户”注册或登录，不会影响网页通行证。</p></div></div>
     </section>
   );
+}
+
+/** CSV（推送方向过滤）→ Set；空串 = 全部方向。 */
+function parseDirectionFilter(value) {
+  return new Set(String(value || "").split(",").map((s) => s.trim()).filter(Boolean));
 }
 
 function SettingsEditor({ settings, availableJournals, status, onSave }) {
@@ -42,8 +48,10 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
   const [pushIncludeAbstract, setPushIncludeAbstract] = useState(settings.pushIncludeAbstract !== false);
   const [pushIncludeKeywords, setPushIncludeKeywords] = useState(settings.pushIncludeKeywords !== false);
   const [pushIncludeTranslation, setPushIncludeTranslation] = useState(settings.pushIncludeTranslation !== false);
+  const [pushIncludeAiReport, setPushIncludeAiReport] = useState(settings.pushIncludeAiReport !== false);
   const [pushJournalFilter, setPushJournalFilter] = useState(settings.pushJournalFilter || "");
   const [pushSelectedJournals, setPushSelectedJournals] = useState(new Set());
+  const [pushSelectedDirections, setPushSelectedDirections] = useState(() => parseDirectionFilter(settings.pushDirectionFilter));
   const [sending, setSending] = useState(false);
   const [pushMsg, setPushMsg] = useState("");
   const [pushEditing, setPushEditing] = useState(false);
@@ -91,7 +99,9 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
     setPushIncludeAbstract(settings.pushIncludeAbstract !== false);
     setPushIncludeKeywords(settings.pushIncludeKeywords !== false);
     setPushIncludeTranslation(settings.pushIncludeTranslation !== false);
+    setPushIncludeAiReport(settings.pushIncludeAiReport !== false);
     setPushJournalFilter(settings.pushJournalFilter || "");
+    setPushSelectedDirections(parseDirectionFilter(settings.pushDirectionFilter));
     // Parse pushJournalFilter to Set for checkbox selection
     if (settings.pushJournalFilter) {
       setPushSelectedJournals(new Set(settings.pushJournalFilter.split(",").map((s) => s.trim()).filter(Boolean)));
@@ -125,6 +135,12 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
     setPushJournalFilter([...next].join(", "));
   }
 
+  function togglePushDirection(key) {
+    const next = new Set(pushSelectedDirections);
+    next.has(key) ? next.delete(key) : next.add(key);
+    setPushSelectedDirections(next);
+  }
+
   async function saveEmail() {
     setEmailMsg("");
     try {
@@ -144,11 +160,20 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
   }
 
   async function sendPush() {
-    setSending(true); setPushMsg("");
+    setSending(true);
+    // 生成摘要要遍历本周期全部论文，几秒内不会有响应；先给出明确反馈，
+    // 否则用户点完看不到任何变化，会以为按钮没生效。
+    setPushMsg("正在生成摘要并投递邮件，请稍候…（此过程需要几秒）");
+    const startedAt = Date.now();
     try {
-      const res = await api.post("/api/push/send");
-      setPushMsg(res.sent ? `推送成功，共 ${res.count} 篇文献` : "推送失败，请检查 SMTP 配置");
-    } catch (e) { setPushMsg(e.message); }
+      const res = await api.post("/api/push/send", undefined, { timeoutMs: 180000 });
+      const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      setPushMsg(res.sent
+        ? `推送成功，共 ${res.count} 篇文献（耗时 ${seconds} 秒）`
+        : "推送失败，请检查 SMTP 配置");
+    } catch (e) {
+      setPushMsg(`发送失败：${e.message}`);
+    }
     finally { setSending(false); }
   }
 
@@ -169,7 +194,9 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
       pushIncludeAbstract,
       pushIncludeKeywords,
       pushIncludeTranslation,
-      pushJournalFilter
+      pushIncludeAiReport,
+      pushJournalFilter,
+      pushDirectionFilter: [...pushSelectedDirections].join(",")
     });
     setPushCron(generatedCron);
     setPushEditing(false);
@@ -243,13 +270,19 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                     <div className="push-summary-item">
                       <span className="push-summary-label">邮件内容</span>
                       <span className="push-summary-value">
-                        {[pushIncludeFile && "附件", pushIncludeAbstract && "摘要", pushIncludeKeywords && "关键词", pushIncludeTranslation && "翻译"].filter(Boolean).join("、")}
+                        {[pushIncludeFile && "附件", pushIncludeAbstract && "摘要", pushIncludeKeywords && "关键词", pushIncludeTranslation && "翻译", pushIncludeAiReport && "AI 速览"].filter(Boolean).join("、")}
                       </span>
                     </div>
                     <div className="push-summary-item">
                       <span className="push-summary-label">推送期刊</span>
                       <span className="push-summary-value">
                         {pushJournalFilter ? pushSelectedJournals.size + " 本期刊" : "全部已订阅"}
+                      </span>
+                    </div>
+                    <div className="push-summary-item">
+                      <span className="push-summary-label">研究方向</span>
+                      <span className="push-summary-value">
+                        {pushSelectedDirections.size > 0 ? pushSelectedDirections.size + " 个方向" : "全部方向"}
                       </span>
                     </div>
                   </div>
@@ -383,7 +416,16 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                         />
                         翻译
                       </label>
+                      <label className="checkline">
+                        <input
+                          type="checkbox"
+                          checked={pushIncludeAiReport}
+                          onChange={(e) => setPushIncludeAiReport(e.target.checked)}
+                        />
+                        AI 研究速览
+                      </label>
                     </div>
+                    <p className="field-hint">AI 研究速览由智能体每周生成；当期未生成时自动附最近一期并标注期数。</p>
                   </div>
 
                   <div className="push-journal-filter">
@@ -411,6 +453,31 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                           {j.name}
                         </label>
                       ))}
+                    </div>
+                  </div>
+
+                  <div className="push-journal-filter">
+                    <span className="settings-label"><Compass size={13} aria-hidden="true" /> 推送研究方向</span>
+                    <p className="field-hint">选择推送的研究方向，不选择则推送全部方向（「其他」默认不在推送范围，显式选择后仅推送其他）</p>
+                    <div className="keyword-filter-list direction-filter-list push-direction-list">
+                      {DIRECTIONS.map((direction) => {
+                        const active = pushSelectedDirections.has(direction.key);
+                        return (
+                          <button
+                            key={direction.key}
+                            type="button"
+                            className={`direction-filter-chip ${active ? "active" : ""}`}
+                            style={active ? { "--dir-key": directionVar(direction.key) } : undefined}
+                            onClick={() => togglePushDirection(direction.key)}
+                            title={direction.key === "other"
+                              ? "其他/交叉：默认不进入推送，选择此项可仅推送其他"
+                              : directionLabel(direction.key)}
+                          >
+                            <span className="direction-dot" style={{ "--dir-key": directionVar(direction.key) }} aria-hidden="true" />
+                            <span className="kw-name">{directionLabel(direction.key)}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatDate, formatDateTime, formatRelativeDate, isChineseJournalArticle, isChineseSourceText } from "./format.js";
+import { formatDate, formatDateTime, formatRelativeDate, isChineseJournalArticle, isChineseSourceText, articleDate } from "./format.js";
 
 const NOW = new Date("2026-09-11T12:00:00+08:00").getTime();
 
@@ -12,6 +12,17 @@ test("formatRelativeDate 按时间跨度选择相对或绝对表述", () => {
   assert.equal(formatRelativeDate("2025-03-04T12:00:00+08:00", NOW), "2025-03");
   assert.equal(formatRelativeDate("20250304", NOW), "2025-03");
   assert.equal(formatRelativeDate("", NOW), "未知日期");
+});
+
+// 界面上的日期一律读 display_date（服务端按统一口径算好的「文献日期」），
+// 拿不到时才退回 published_at —— 提前访问的论文 published_at 写的是未来卷期日，
+// 直接用会把上线时间显示成明年。
+test("articleDate 优先使用统一口径的 display_date", () => {
+  assert.equal(articleDate({ display_date: "2026-09-20", published_at: "2027-01-01" }), "2026-09-20");
+  assert.equal(articleDate({ published_at: "2026-09-01" }), "2026-09-01");
+  assert.equal(articleDate({ display_date: "", published_at: "2026-09-01" }), "2026-09-01");
+  assert.equal(articleDate({}), "");
+  assert.equal(articleDate(null), "");
 });
 
 test("formatDate 处理紧凑日期与 ISO 日期", () => {
