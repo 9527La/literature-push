@@ -41,7 +41,7 @@ function readPassport() {
     const match = env.match(/^ADMIN_PASSPORT\s*=\s*(.*)$/m);
     if (match && match[1].trim()) return match[1].trim().replace(/^["']|["']$/g, "");
   } catch { /* .env is required */ }
-    console.error("通行证缺失：请在仓库根目录 .env 配置 ADMIN_PASSPORT（代码中不允许硬编码通行证）");
+  console.error("通行证缺失：请在仓库根目录 .env 配置 ADMIN_PASSPORT（代码中不允许硬编码通行证）");
   process.exit(2);
 }
 
