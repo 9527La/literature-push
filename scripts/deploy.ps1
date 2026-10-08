@@ -9,7 +9,7 @@ New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  IEEE 电力文献 - 一键构建部署" -ForegroundColor Cyan
+Write-Host "  电气前沿速递 - 一键构建部署" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

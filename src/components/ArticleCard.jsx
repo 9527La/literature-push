@@ -23,7 +23,10 @@ function ArticleCard({
   selectable = false,
   selected = false,
   onToggleSelect,
-  isCursor = false
+  isCursor = false,
+  // 入场 stagger 延迟（B3-2，毫秒）。CSS 动画只在卡片首次挂载时播一次；
+  // 传 0（默认）时等价于无额外延迟。
+  enterDelay = 0
 }) {
   const showTranslatedAbstract = displayPreferences.translatedAbstract
     && !isChineseJournalArticle(article, journals);
@@ -45,7 +48,10 @@ function ArticleCard({
     : "";
 
   return (
-    <article className={`article tone-${tone} ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}${isCursor ? " is-cursor" : ""}${selected ? " is-selected" : ""}${selectable ? " has-select" : ""}`}>
+    <article
+      className={`article tone-${tone} ${article.is_read ? "read" : "unread"} ${article.is_favorite ? "favorited" : ""}${isCursor ? " is-cursor" : ""}${selected ? " is-selected" : ""}${selectable ? " has-select" : ""}`}
+      style={enterDelay ? { "--enter-delay": `${enterDelay}ms` } : undefined}
+    >
       {selectable && (
         <label className="article-select" title="选中后可批量操作">
           <input

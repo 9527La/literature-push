@@ -20,9 +20,13 @@ function GuestSettingsView() {
   );
 }
 
-/** CSV（推送方向过滤）→ Set；空串 = 全部方向。 */
+/**
+ * CSV（推送方向过滤）→ 有序数组；空串 = 全部方向。
+ * 顺序有意义（A3-4）：摘要邮件正文的方向分组按这里的存储顺序排列，
+ * 因此选择态必须保序（点击先后），不能用 Set。
+ */
 function parseDirectionFilter(value) {
-  return new Set(String(value || "").split(",").map((s) => s.trim()).filter(Boolean));
+  return String(value || "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 function SettingsEditor({ settings, availableJournals, status, onSave }) {
@@ -136,9 +140,11 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
   }
 
   function togglePushDirection(key) {
-    const next = new Set(pushSelectedDirections);
-    next.has(key) ? next.delete(key) : next.add(key);
-    setPushSelectedDirections(next);
+    // 保序切换：新选的方向追加到队尾，取消选择移除，剩余顺序不动——
+    // 用户通过重新点击即可调整邮件分组顺序。
+    setPushSelectedDirections((current) => (
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
+    ));
   }
 
   async function saveEmail() {
@@ -196,7 +202,7 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
       pushIncludeTranslation,
       pushIncludeAiReport,
       pushJournalFilter,
-      pushDirectionFilter: [...pushSelectedDirections].join(",")
+      pushDirectionFilter: pushSelectedDirections.join(",")
     });
     setPushCron(generatedCron);
     setPushEditing(false);
@@ -282,7 +288,7 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                     <div className="push-summary-item">
                       <span className="push-summary-label">研究方向</span>
                       <span className="push-summary-value">
-                        {pushSelectedDirections.size > 0 ? pushSelectedDirections.size + " 个方向" : "全部方向"}
+                        {pushSelectedDirections.length > 0 ? pushSelectedDirections.length + " 个方向" : "全部方向"}
                       </span>
                     </div>
                   </div>
@@ -458,10 +464,11 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
 
                   <div className="push-journal-filter">
                     <span className="settings-label"><Compass size={13} aria-hidden="true" /> 推送研究方向</span>
-                    <p className="field-hint">选择推送的研究方向，不选择则推送全部方向（「其他」默认不在推送范围，显式选择后仅推送其他）</p>
+                    <p className="field-hint">选择推送的研究方向，不选择则推送全部方向；邮件正文按下方选择顺序分组展示（点选先后即顺序，「其他」默认不在推送范围，显式选择后仅推送其他）</p>
                     <div className="keyword-filter-list direction-filter-list push-direction-list">
                       {DIRECTIONS.map((direction) => {
-                        const active = pushSelectedDirections.has(direction.key);
+                        const active = pushSelectedDirections.includes(direction.key);
+                        const order = pushSelectedDirections.indexOf(direction.key);
                         return (
                           <button
                             key={direction.key}
@@ -475,6 +482,7 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                           >
                             <span className="direction-dot" style={{ "--dir-key": directionVar(direction.key) }} aria-hidden="true" />
                             <span className="kw-name">{directionLabel(direction.key)}</span>
+                            {active && <span className="direction-order-badge" aria-hidden="true">{order + 1}</span>}
                           </button>
                         );
                       })}
@@ -502,7 +510,7 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
           <form className="settings-section" onSubmit={submit}>
             <h4>订阅期刊</h4>
             <div className="journal-compact-header">
-              <span className="section-hint">勾选订阅期刊，最新文献仅展示已订阅的论文。</span>
+              <span className="section-hint">勾选订阅期刊，文献库仅展示已订阅的论文。</span>
               <div>
                 <button type="button" className="link-button" onClick={() => setSelectedJournalNames(new Set(availableJournals.map((j) => j.name)))}>全选</button>
                 <button type="button" className="link-button" onClick={() => setSelectedJournalNames(new Set())}>清空</button>

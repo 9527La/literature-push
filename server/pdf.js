@@ -46,7 +46,7 @@ export async function generatePdfFromMarkdown(markdown, title = "文献周报") 
           {
             width: "*",
             text: [
-              { text: "电力文献", bold: true, fontSize: 14, color: BRAND.ink },
+              { text: "电气前沿速递", bold: true, fontSize: 14, color: BRAND.ink },
               { text: "  ·  ", color: BRAND.muted },
               { text: title, fontSize: 11, color: BRAND.body }
             ]
@@ -68,7 +68,7 @@ export async function generatePdfFromMarkdown(markdown, title = "文献周报") 
     pageMargins: [40, 44, 40, 52],
     footer: (currentPage, pageCount) => ({
       columns: [
-        { text: "电力文献 · 内部资料，引用前请核对原文", fontSize: 8, color: BRAND.muted },
+        { text: "电气前沿速递 · 内部资料，引用前请核对原文", fontSize: 8, color: BRAND.muted },
         { text: `${currentPage} / ${pageCount}`, fontSize: 8, color: BRAND.muted, alignment: "right" }
       ],
       margin: [40, 12, 40, 0]

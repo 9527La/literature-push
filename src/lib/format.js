@@ -63,6 +63,42 @@ export function isChineseSourceText(value) {
   return Boolean(text) && /[\u3400-\u9fff]/u.test(text);
 }
 
+/**
+ * GB/T 7714-2015（顺序编码制）期刊文献引用串。
+ *
+ * 库内没有页码字段，按规范允许的缺省处理省略「: 页码」；作者名单保持原文
+ * （「姓, 名」顺列与逗号分隔的多人名单无法可靠区分，不强行重排），作者分隔
+ * 符号 ≥3 个时按规范补「等 / et al」。任何字段缺失都跳过对应片段，保证残缺
+ * 记录也能给出可用的引用串。
+ */
+export function formatCitationGB7714(article) {
+  if (!article) return "";
+  const title = String(article.title || "").trim();
+  if (!title) return "";
+  const rawAuthors = String(article.authors || "").trim();
+  const etAl = rawAuthors && (rawAuthors.match(/[;；,，]/g) || []).length >= 3
+    ? (isChineseSourceText(rawAuthors) ? " 等" : " et al")
+    : "";
+  const authorPart = rawAuthors ? `${rawAuthors}${etAl}. ` : "";
+
+  const year = String(articleDate(article) || "").slice(0, 4) || String(article.year || "").trim();
+  const journal = String(article.journal || "").trim();
+  const volume = String(article.volume || "").trim();
+  const issue = String(article.issue || "").trim();
+  const volumePart = volume && issue ? `${volume}(${issue})` : volume || (issue ? `(${issue})` : "");
+  const doi = String(article.doi || "").trim();
+
+  const sourcePart = journal
+    ? `${journal}${year ? `, ${year}` : ""}${volumePart ? `, ${volumePart}` : ""}`
+    : year;
+  const parts = [
+    `${authorPart}${title}[J]`,
+    sourcePart,
+    doi ? `DOI: ${doi}` : ""
+  ].filter(Boolean);
+  return `${parts.join(". ")}.`;
+}
+
 export function isChineseJournalArticle(article, journals = []) {
   const journalName = String(article?.journal || "").trim();
   const journal = (Array.isArray(journals) ? journals : []).find((item) => (

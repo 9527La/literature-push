@@ -1,0 +1,17 @@
+{
+  "miniprogramRoot": "dist/",
+  "projectname": "literature-mp",
+  "description": "电力文献小程序",
+  "appid": "touristappid",
+  "setting": {
+    "urlCheck": false,
+    "es6": false,
+    "enhance": true,
+    "postcss": false,
+    "minified": false,
+    "uglifyFileName": false,
+    "ignoreUploadUnusedFiles": true
+  },
+  "compileType": "miniprogram",
+  "condition": {}
+}

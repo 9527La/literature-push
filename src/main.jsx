@@ -1,14 +1,17 @@
 import React, { lazy, StrictMode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import {
   Activity,
   ArrowDownUp,
   BarChart3,
   Bell,
+  BookOpen,
   Check,
   CloudDownload,
   CloudUpload,
   CircleStop,
+  CircleUserRound,
   ChevronDown,
   Database,
   Eye,
@@ -19,6 +22,7 @@ import {
   Heart,
   HardDrive,
   HelpCircle,
+  Library,
   Mail,
   MessageCircle,
   MessageSquare,
@@ -157,7 +161,7 @@ function LoginGate({ onAuthenticate }) {
   return (
     <main className="login-shell">
       <section className="login-panel" aria-labelledby="login-title">
-        <div className="login-brand"><BrandMark size={26} /><span>电力文献</span></div>
+        <div className="login-brand"><BrandMark size={26} /><span>电气前沿速递</span></div>
         <span className="eyebrow">受限访问</span>
         <h1 id="login-title">输入网页通行证</h1>
         <p>通行证用于进入网页。进入后可游客浏览，也可以注册或登录独立的个人账户。</p>
@@ -170,6 +174,26 @@ function LoginGate({ onAuthenticate }) {
         <small>通行证区分大小写（首尾空格会被自动忽略）；管理员通行证可进入管理中心。全站最多允许 20 个不同 IP 同时登录个人账户。</small>
       </section>
     </main>
+  );
+}
+
+// 2026-10-08 导航下拉组面板：portal 到 body —— .nav 是横向滚动的裁剪容器，
+// 面板挂在里面会被 overflow 裁掉；因此用 fixed 定位按触发按钮的视口坐标锚定。
+// 顶栏本身 fixed，页面滚动不改变按钮位置；窗口 resize / 导航横滚时由 App 关闭。
+function NavGroupPanel({ anchorRef, onMouseEnter, onMouseLeave, children }) {
+  const rect = anchorRef.current?.getBoundingClientRect();
+  if (!rect) return null;
+  return createPortal(
+    <div
+      className="nav-menu"
+      role="menu"
+      style={{ left: Math.max(12, Math.round(rect.left)), top: Math.round(rect.bottom + 6) }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
+      {children}
+    </div>,
+    document.body
   );
 }
 
@@ -836,6 +860,66 @@ function App() {
     // nav 在通行证门通过后才挂载；管理员登录会增删 tab（管理中心）影响 scrollWidth。
   }, [gateAuthenticated, account.is_admin]);
 
+  // 2026-10-08 导航分组：顶栏五个入口 = 文献库 / 资讯汇总▾ / 公共讨论 / 使用说明 / 个人中心▾。
+  // 下拉组单开互斥：hover 进组即开、离组 200ms 后收，点击切换；
+  // 外点 / Esc / 窗口 resize / 导航横滚时关闭（openGroup 非空才挂监听）。
+  const [openGroup, setOpenGroup] = useState(null);
+  const openGroupRef = useRef(null);
+  const groupOpenedAtRef = useRef(0);
+  const digestGroupBtnRef = useRef(null);
+  const personalGroupBtnRef = useRef(null);
+  const groupCloseTimersRef = useRef({});
+  const applyOpenGroup = (key) => {
+    openGroupRef.current = key;
+    setOpenGroup(key);
+  };
+  const openGroupMenu = (key) => {
+    clearTimeout(groupCloseTimersRef.current[key]);
+    if (openGroupRef.current !== key) groupOpenedAtRef.current = performance.now();
+    applyOpenGroup(key);
+  };
+  const scheduleCloseGroup = (key) => {
+    clearTimeout(groupCloseTimersRef.current[key]);
+    groupCloseTimersRef.current[key] = setTimeout(() => {
+      if (openGroupRef.current === key) applyOpenGroup(null);
+    }, 200);
+  };
+  const toggleGroup = (key) => {
+    clearTimeout(groupCloseTimersRef.current[key]);
+    if (openGroupRef.current === key) {
+      // hover 刚打开（<400ms）时的点击视为「确认」而不是关闭，避免一闪而过。
+      if (performance.now() - groupOpenedAtRef.current < 400) return;
+      applyOpenGroup(null);
+      return;
+    }
+    groupOpenedAtRef.current = performance.now();
+    applyOpenGroup(key);
+  };
+  const switchView = (view) => {
+    setActiveView(view);
+    applyOpenGroup(null);
+  };
+  useEffect(() => {
+    if (openGroup === null) return undefined;
+    const close = () => applyOpenGroup(null);
+    const onPointerDown = (event) => {
+      if (!event.target.closest(".nav-group") && !event.target.closest(".nav-menu")) close();
+    };
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", close);
+    navRef.current?.addEventListener("scroll", close);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", close);
+      navRef.current?.removeEventListener("scroll", close);
+    };
+  }, [openGroup]);
+
   if (initialLoading && !gateAuthenticated) {
     return <div className="login-shell"><div className="login-loading" aria-label="正在检查登录状态" /></div>;
   }
@@ -852,42 +936,83 @@ function App() {
         <div className="topbar-left">
           <div className="brand">
             <BrandMark size={26} />
-            <span>电力文献</span>
+            <span>电气前沿速递</span>
           </div>
           <div className={`nav-wrap${navEdges.left ? " can-left" : ""}${navEdges.right ? " can-right" : ""}`}>
           <nav className="nav" aria-label="主导航" ref={navRef}>
-            <button className={activeView === "feed" ? "active" : ""} onClick={() => setActiveView("feed")}>
-              <Bell size={16} /> 最新文献
+            <button className={activeView === "feed" ? "active" : ""} onClick={() => switchView("feed")}>
+              <Library size={16} /> 文献库
               {status?.unreadCount > 0 && <span className="nav-badge" aria-label={`${status.unreadCount} 篇未读`}>{status.unreadCount}</span>}
             </button>
-            <button className={activeView === "reports" ? "active" : ""} onClick={() => setActiveView("reports")}>
-              <Sparkles size={16} /> 研究速览
-            </button>
-            <button className={activeView === "news" ? "active" : ""} onClick={() => setActiveView("news")}>
-              <Newspaper size={16} /> 每日资讯
-            </button>
-            <button className={activeView === "stats" ? "active" : ""} onClick={() => setActiveView("stats")}>
-              <BarChart3 size={16} /> 关键词统计
-            </button>
-            <button className={activeView === "favorites" ? "active" : ""} onClick={() => setActiveView("favorites")}>
-              <Star size={16} /> 收藏文献
-              {status?.favoriteCount > 0 && <span className="nav-badge" aria-label={`${status.favoriteCount} 篇收藏文献`}>{status.favoriteCount}</span>}
-            </button>
-            <button className={activeView === "settings" ? "active" : ""} onClick={() => setActiveView("settings")}>
-              <Settings size={16} /> 文献推送
-            </button>
-            <button className={activeView === "feedback" ? "active" : ""} onClick={() => setActiveView("feedback")}>
+            <div
+              className={`nav-group${openGroup === "digest" ? " open" : ""}${["reports", "news", "stats"].includes(activeView) ? " active" : ""}`}
+              onMouseEnter={() => openGroupMenu("digest")}
+              onMouseLeave={() => scheduleCloseGroup("digest")}
+            >
+              <button className="group-btn" aria-haspopup="true" aria-expanded={openGroup === "digest"} onClick={() => toggleGroup("digest")} ref={digestGroupBtnRef}>
+                <BookOpen size={16} /> 资讯汇总
+                <ChevronDown size={14} className="chev" aria-hidden="true" />
+              </button>
+              {openGroup === "digest" && (
+                <NavGroupPanel anchorRef={digestGroupBtnRef} onMouseEnter={() => openGroupMenu("digest")} onMouseLeave={() => scheduleCloseGroup("digest")}>
+                  <button className={`nav-menu-item${activeView === "reports" ? " active" : ""}`} role="menuitem" onClick={() => switchView("reports")}>
+                    <Sparkles size={16} /> <span className="menu-label">研究速览</span>
+                    {activeView === "reports" && <Check size={15} className="menu-check" aria-hidden="true" />}
+                  </button>
+                  <button className={`nav-menu-item${activeView === "news" ? " active" : ""}`} role="menuitem" onClick={() => switchView("news")}>
+                    <Newspaper size={16} /> <span className="menu-label">每日资讯</span>
+                    {activeView === "news" && <Check size={15} className="menu-check" aria-hidden="true" />}
+                  </button>
+                  <button className={`nav-menu-item${activeView === "stats" ? " active" : ""}`} role="menuitem" onClick={() => switchView("stats")}>
+                    <BarChart3 size={16} /> <span className="menu-label">关键词统计</span>
+                    {activeView === "stats" && <Check size={15} className="menu-check" aria-hidden="true" />}
+                  </button>
+                </NavGroupPanel>
+              )}
+            </div>
+            <button className={activeView === "feedback" ? "active" : ""} onClick={() => switchView("feedback")}>
               <MessageSquare size={16} /> 公共讨论
             </button>
-            <button className={activeView === "account" ? "active" : ""} onClick={() => setActiveView("account")}>
-              <UserRound size={16} /> {account.authenticated ? account.username : "游客账户"}
-            </button>
-            {account.is_admin && <button className={activeView === "admin" ? "active" : ""} onClick={() => setActiveView("admin")}>
-              <ShieldCheck size={16} /> 管理中心
-            </button>}
-            <button className={activeView === "help" ? "active" : ""} onClick={() => setActiveView("help")}>
+            <button className={activeView === "help" ? "active" : ""} onClick={() => switchView("help")}>
               <HelpCircle size={16} /> 使用说明
             </button>
+            <div
+              className={`nav-group${openGroup === "personal" ? " open" : ""}${["favorites", "settings", "account", "admin"].includes(activeView) ? " active" : ""}`}
+              onMouseEnter={() => openGroupMenu("personal")}
+              onMouseLeave={() => scheduleCloseGroup("personal")}
+            >
+              <button className="group-btn" aria-haspopup="true" aria-expanded={openGroup === "personal"} onClick={() => toggleGroup("personal")} ref={personalGroupBtnRef}>
+                <CircleUserRound size={16} /> 个人中心
+                <ChevronDown size={14} className="chev" aria-hidden="true" />
+              </button>
+              {openGroup === "personal" && (
+                <NavGroupPanel anchorRef={personalGroupBtnRef} onMouseEnter={() => openGroupMenu("personal")} onMouseLeave={() => scheduleCloseGroup("personal")}>
+                  <button className={`nav-menu-item${activeView === "favorites" ? " active" : ""}`} role="menuitem" onClick={() => switchView("favorites")}>
+                    <Star size={16} /> <span className="menu-label">收藏文献</span>
+                    {status?.favoriteCount > 0 && <span className="nav-badge" aria-label={`${status.favoriteCount} 篇收藏文献`}>{status.favoriteCount}</span>}
+                    {activeView === "favorites" && <Check size={15} className="menu-check" aria-hidden="true" />}
+                  </button>
+                  <button className={`nav-menu-item${activeView === "settings" ? " active" : ""}`} role="menuitem" onClick={() => switchView("settings")}>
+                    <Settings size={16} /> <span className="menu-label">文献推送</span>
+                    {activeView === "settings" && <Check size={15} className="menu-check" aria-hidden="true" />}
+                  </button>
+                  <button className={`nav-menu-item${activeView === "account" ? " active" : ""}`} role="menuitem" onClick={() => switchView("account")}>
+                    <UserRound size={16} /> <span className="menu-label">个人账户</span>
+                    {account.authenticated && <span className="menu-sub">{account.username}</span>}
+                    {activeView === "account" && <Check size={15} className="menu-check" aria-hidden="true" />}
+                  </button>
+                  {account.is_admin && (
+                    <>
+                      <div className="nav-menu-sep" role="separator" />
+                      <button className={`nav-menu-item${activeView === "admin" ? " active" : ""}`} role="menuitem" onClick={() => switchView("admin")}>
+                        <ShieldCheck size={16} /> <span className="menu-label">管理中心</span>
+                        {activeView === "admin" && <Check size={15} className="menu-check" aria-hidden="true" />}
+                      </button>
+                    </>
+                  )}
+                </NavGroupPanel>
+              )}
+            </div>
           </nav>
           </div>
         </div>

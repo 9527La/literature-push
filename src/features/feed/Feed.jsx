@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownUp, Check, ChevronDown, Compass, Download, Eye, EyeOff, Filter, Keyboard, RefreshCw, Search, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { ARTICLE_PAGE_SIZE, DEFAULT_FILTERS } from "../../lib/constants.js";
@@ -40,6 +40,15 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   const preparationDelayRef = useRef(1500);
   const autoPreparationStartedRef = useRef(false);
   const preparationMountedRef = useRef(true);
+
+  // ── 入场 stagger（B3-2）─────────────────────────────────────────────────
+  // 只给「本批新挂载」的卡片算入场延迟：列表长度增长时，增长起点就是本批的
+  // 第一张卡。纯视觉层——不触碰 loading/requestId/commitArticles 任何逻辑，
+  // CSS 动画只在元素首次挂载时播一次，已挂载卡片重新渲染不会重播。
+  // 注意：visibleArticles 在下方 useMemo/slice 之后才有定义，effect 必须放在
+  // 它后面（依赖数组在渲染期求值，放前面会踩 TDZ）。
+  const enterStartRef = useRef(0);
+  const prevVisibleCountRef = useRef(0);
 
   useEffect(() => {
     api.get("/api/keyword-stats").then((data) => {
@@ -220,6 +229,16 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   }, [sortedArticles]);
 
   const visibleArticles = sortedArticles.slice(0, visibleCount);
+
+  // 入场 stagger 批次起点（B3-2）：长度增长时，旧长度就是本批第一张卡的下标；
+  // 长度不变或缩短（换筛选）时回到 0，让新键卡片从头级联。必须在
+  // visibleArticles 定义之后调用（依赖数组渲染期求值）。
+  useLayoutEffect(() => {
+    const count = visibleArticles.length;
+    enterStartRef.current = count > prevVisibleCountRef.current ? prevVisibleCountRef.current : 0;
+    prevVisibleCountRef.current = count;
+  }, [visibleArticles.length]);
+
   const visibleTranslatedCount = visibleArticles.filter((article) => (
     article.translated_title && article.translated_title !== article.title
   )).length;
@@ -407,7 +426,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     if (!selectedArticles.length) return;
     const stamp = new Date().toISOString().slice(0, 10);
     downloadTextFile(
-      `电力文献-${stamp}-${selectedArticles.length}篇.${format === "ris" ? "ris" : "bib"}`,
+      `电气前沿速递-${stamp}-${selectedArticles.length}篇.${format === "ris" ? "ris" : "bib"}`,
       format === "ris" ? toRis(selectedArticles) : toBibtex(selectedArticles)
     );
     notify?.(`已导出 ${selectedArticles.length} 篇文献（${format === "ris" ? "RIS" : "BibTeX"}）。`, { type: "success" });
@@ -758,6 +777,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                 preparationActive={preparation.active}
                 canPersonalize={canPersonalize}
                 isCursor={index === cursorIndex}
+                enterDelay={Math.min(Math.max(index - enterStartRef.current, 0), 15) * 40}
                 onOpen={setSelectedArticle}
                 markRead={markRead}
                 toggleFavorite={toggleFavorite}
@@ -787,6 +807,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           markRead={markRead}
           toggleFavorite={toggleFavorite}
           onArticleUpdated={handleArticleUpdated}
+          onOpenArticle={setSelectedArticle}
           hideTranslatedAbstract={isChineseJournalArticle(selectedArticle, journals)}
           canModerate={canModerate}
         />

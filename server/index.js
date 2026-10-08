@@ -72,6 +72,7 @@ import {
   finishRefreshRun,
   updateRefreshRunSummary,
   getDirectionStats,
+  listRelatedArticles,
   setArticleDirectionManually
 } from "./db.js";
 import {
@@ -191,6 +192,12 @@ app.get("/api/articles/:id", (req, res) => {
     return;
   }
   res.json(article);
+});
+
+// 相关文献推荐（摘要弹窗底部）：同方向 + 关键词共现打分取 3 篇，纯读、无 AI。
+// 找不到来源或库内无候选时返回空列表，前端整块隐藏。
+app.get("/api/articles/:id/related", (req, res) => {
+  res.json({ articles: listRelatedArticles(req.params.id, getPrincipalId(req), 3) });
 });
 
 // ── AI 研究方向（RUNBOOK-AI-DIRECTION.md / DESIGN-FRONTEND-DIRECTION.md）─────
@@ -1298,6 +1305,6 @@ app.listen(config.port, "0.0.0.0", () => {
       if (cfg.family === "IPv4" && !cfg.internal) { lanIp = cfg.address; break; }
     }
   }
-  console.log(`电力文献服务器运行在 http://127.0.0.1:${config.port}`);
+  console.log(`电气前沿速递服务器运行在 http://127.0.0.1:${config.port}`);
   console.log(`LAN access: http://${lanIp}:${config.port}`);
 });

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>公众号日报 Mockup · 电研新视界 2026-10-08</title>
+<style>
+  /* ── 仅 mockup 外壳样式；文章正文区域全部为内联样式（即渲染器产出形态）── */
+  body { margin: 0; background: #e8eaee; font-family: 'Microsoft YaHei','PingFang SC',Arial,sans-serif; }
+  .preview-bar { max-width: 640px; margin: 16px auto 0; padding: 10px 16px; background: #fff8e6;
+    border: 1px solid #eadfb8; border-radius: 8px; font-size: 13px; color: #8a6d1a; line-height: 1.6; }
+  .phone { max-width: 414px; margin: 20px auto 40px; background: #ffffff; box-shadow: 0 2px 16px rgba(23,27,36,.12); border-radius: 14px; overflow: hidden; }
+  .card-demo { max-width: 414px; margin: 0 auto 24px; }
+  .card-demo-label { font-size: 13px; color: #7d8592; margin: 0 0 8px 4px; }
+</style>
+</head>
+<body>
+
+<div class="preview-bar">
+  <b>Mockup 预览说明</b>（示意数据，非真实发布内容）｜上半部分为「转发卡片」效果，下半部分为微信文章页内的正文效果。正文区域（从标题到文末声明）全部采用内联样式的白名单标签编写，与未来渲染器 <code>wechat-render.mjs</code> 的产出形态一致——审批通过即模板定稿。
+</div>
+
+<!-- ═══ 转发卡片（封面 2.35:1）═══ -->
+<div class="card-demo">
+  <div class="card-demo-label">① 转发到微信会话时的卡片效果（封面图 2.35:1，品牌图待定稿）</div>
+  <div style="max-width:414px;border-radius:10px;overflow:hidden;background:#ffffff;box-shadow:0 2px 10px rgba(23,27,36,.10)">
+    <div style="position:relative;height:176px;background:#3157d5">
+      <svg width="414" height="176" viewBox="0 0 414 176" style="display:block">
+        <rect width="414" height="176" fill="#3157d5"/>
+        <circle cx="356" cy="36" r="64" fill="#ffffff" opacity="0.06"/>
+        <circle cx="40" cy="150" r="46" fill="#ffffff" opacity="0.05"/>
+        <!-- 双星芒 logo（与 favicon.svg 同源几何） -->
+        <path d="M52 52 L58 74 L80 80 L58 86 L52 108 L46 86 L24 80 L46 74 Z" fill="#ffffff"/>
+        <path d="M78 38 L81.5 50 L93 53.5 L81.5 57 L78 69 L74.5 57 L63 53.5 L74.5 50 Z" fill="#ffffff" opacity="0.9"/>
+        <text x="100" y="66" font-size="24" font-weight="700" fill="#ffffff" font-family="'Microsoft YaHei',sans-serif">电研新视界</text>
+        <text x="100" y="92" font-size="13" fill="#ffffff" opacity="0.82" font-family="'Microsoft YaHei',sans-serif">每日文献速递 · AI 研究速览 · 电力资讯</text>
+        <text x="28" y="152" font-size="15" fill="#ffffff" opacity="0.95" font-family="'Microsoft YaHei',sans-serif">日报｜2026-10-08</text>
+      </svg>
+    </div>
+    <div style="padding:10px 12px 12px">
+      <div style="font-size:15px;font-weight:600;color:#171b24;line-height:1.5">电研新视界 日报｜2026-10-08</div>
+      <div style="margin-top:6px;font-size:12px;color:#7d8592">今日速评 6 篇 · 政策 1 条 · 行业新闻 4 条</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 微信文章页 ═══ -->
+<div class="phone">
+  <div class="card-demo-label" style="margin:16px 0 0 18px">② 文章页内的正文效果（全内联样式）</div>
+
+  <!-- ─────────── 以下正文 = 渲染器产出（不含 H1/账号行：微信文章页自动渲染标题与作者，正文重复会双标题） ─────────── -->
+  <section style="padding:20px 18px 28px;font-family:'Microsoft YaHei','PingFang SC',Arial,sans-serif">
+
+    <!-- ① 今日导读 -->
+    <section style="margin:0 0 22px;padding:12px 14px;background:#eff3fa;border-radius:8px">
+      <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#3157d5">今日导读</p>
+      <p style="margin:0;font-size:14px;color:#525a68;line-height:1.8">
+        能源局就新型储能并网管理办法公开征求意见；精选 6 篇昨日新文献撰写速评，覆盖分布式光伏、储能报价与碳感知市场；今日新入库文献 42 篇，清单见文末。
+      </p>
+    </section>
+
+    <!-- ② 每日资讯 -->
+    <h2 style="margin:26px 0 12px;padding-left:9px;border-left:3px solid #3157d5;font-size:17px;font-weight:700;color:#171b24;line-height:1.4">每日资讯</h2>
+
+    <section style="margin:0 0 12px;padding:11px 13px;background:#f4f5f7;border-radius:8px">
+      <p style="margin:0 0 4px;font-size:15px;font-weight:600;color:#171b24;line-height:1.6">国家能源局就《新型储能电站并网调度管理办法（征求意见稿）》公开征求意见（示意）</p>
+      <p style="margin:0 0 4px;font-size:14px;color:#525a68;line-height:1.7">文件拟明确新型储能电站并网验收、调度调用与安全责任边界，并提出配建储能转为独立主体的技术条件。</p>
+      <p style="margin:0;font-size:12px;color:#7d8592">来源：国家能源局 · 政策文件</p>
+    </section>
+
+    <section style="margin:0 0 12px;padding:11px 13px;background:#f4f5f7;border-radius:8px">
+      <p style="margin:0 0 4px;font-size:15px;font-weight:600;color:#171b24;line-height:1.6">全国新型储能装机规模数据发布（示意）</p>
+      <p style="margin:0 0 4px;font-size:14px;color:#525a68;line-height:1.7">数据显示新型储能累计装机较去年同期增长约六成，锂电路线仍占主导，长时储能占比稳步提升。</p>
+      <p style="margin:0;font-size:12px;color:#7d8592">来源：行业媒体 · 重点新闻</p>
+    </section>
+
+    <section style="margin:0 0 18px;padding:11px 13px;background:#f4f5f7;border-radius:8px">
+      <p style="margin:0 0 4px;font-size:15px;font-weight:600;color:#171b24;line-height:1.6">某特高压直流工程全面投产（示意）</p>
+      <p style="margin:0 0 4px;font-size:14px;color:#525a68;line-height:1.7">工程额定输送容量刷新纪录，将显著提升西部大型能源基地外送能力，缓解受端电网高峰供电压力。</p>
+      <p style="margin:0;font-size:12px;color:#7d8592">来源：行业媒体 · 重点新闻</p>
+    </section>
+
+    <!-- ③ 今日文献速评 -->
+    <h2 style="margin:26px 0 12px;padding-left:9px;border-left:3px solid #3157d5;font-size:17px;font-weight:700;color:#171b24;line-height:1.4">今日文献速评</h2>
+
+    <section style="margin:0 0 14px;padding:13px 14px;border:1px solid #e3e7ee;border-radius:8px">
+      <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#171b24;line-height:1.6">Adaptive reactive power control of distributed PV inverters for voltage regulation in unbalanced feeders</p>
+      <p style="margin:0 0 10px;font-size:12px;color:#7d8592">IEEE Transactions on Smart Grid · 分布式电源与并网</p>
+      <section style="margin:0 0 6px;padding:8px 11px;background:#f4f5f7;border-radius:6px">
+        <p style="margin:0;font-size:14px;color:#525a68;line-height:1.75"><span style="color:#3157d5;font-weight:700">研究对象</span>｜非平衡馈线下分布式光伏逆变器的电压调节问题。</p>
+      </section>
+      <section style="margin:0 0 6px;padding:8px 11px;background:#f4f5f7;border-radius:6px">
+        <p style="margin:0;font-size:14px;color:#525a68;line-height:1.75"><span style="color:#3157d5;font-weight:700">研究方法</span>｜提出自适应无功控制策略，结合本地量测在线整定电压灵敏度系数。</p>
+      </section>
+      <section style="margin:0;padding:8px 11px;background:#f4f5f7;border-radius:6px">
+        <p style="margin:0;font-size:14px;color:#525a68;line-height:1.75"><span style="color:#3157d5;font-weight:700">核心结论</span>｜馈线电压偏差平均压低约 35%，且不加剧三相不平衡度。</p>
+      </section>
+    </section>
+
+    <section style="margin:0 0 14px;padding:13px 14px;border:1px solid #e3e7ee;border-radius:8px">
+      <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#171b24;line-height:1.6">Degradation-aware bidding strategy of battery storage in day-ahead energy and frequency markets</p>
+      <p style="margin:0 0 10px;font-size:12px;color:#7d8592">Applied Energy · 储能系统</p>
+      <section style="margin:0 0 6px;padding:8px 11px;background:#f4f5f7;border-radius:6px">
+        <p style="margin:0;font-size:14px;color:#525a68;line-height:1.75"><span style="color:#3157d5;font-weight:700">研究对象</span>｜电储能在能量与调频联合市场中的报价决策问题。</p>
+      </section>
+      <section style="margin:0 0 6px;padding:8px 11px;background:#f4f5f7;border-radius:6px">
+        <p style="margin:0;font-size:14px;color:#525a68;line-height:1.75"><span style="color:#3157d5;font-weight:700">研究方法</span>｜建立退化感知报价模型，将循环寿命成本耦合进联合出清约束。</p>
+      </section>
+      <section style="margin:0;padding:8px 11px;background:#f4f5f7;border-radius:6px">
+        <p style="margin:0;font-size:14px;color:#525a68;line-height:1.75"><span style="color:#3157d5;font-weight:700">核心结论</span>｜计入退化后单日收益降约 8%，但全寿命周期净收益提升约 12%。</p>
+      </section>
+    </section>
+
+    <section style="margin:0 0 18px;padding:13px 14px;border:1px solid #e3e7ee;border-radius:8px">
+      <p style="margin:0 0 6px;font-size:15px;font-weight:700;color:#171b24;line-height:1.6">Locational marginal emission factors in carbon-aware electricity markets</p>
+      <p style="margin:0 0 10px;font-size:12px;color:#7d8592">IEEE Transactions on Power Systems · 电力市场与机制</p>
+      <section style="margin:0 0 6px;padding:8px 11px;background:#f4f5f7;border-radius:6px">
+        <p style="margin:0;font-size:14px;color:#525a68;line-height:1.75"><span style="color:#3157d5;font-weight:700">研究对象</span>｜碳感知电力市场中的节点边际排放因子（LMEF）。</p>
+      </section>
+      <section style="margin:0 0 6px;padding:8px 11px;background:#f4f5f7;border-radius:6px">
+        <p style="margin:0;font-size:14px;color:#525a68;line-height:1.75"><span style="color:#3157d5;font-weight:700">研究方法</span>｜在 SCED 中嵌入排放追踪，推导 LMEF 解析表达并以算例验证。</p>
+      </section>
+      <section style="margin:0;padding:8px 11px;background:#f4f5f7;border-radius:6px">
+        <p style="margin:0;font-size:14px;color:#525a68;line-height:1.75"><span style="color:#3157d5;font-weight:700">核心结论</span>｜LMEF 时变性显著，引导负荷侧响应可带来约 6% 的减排收益。</p>
+      </section>
+    </section>
+
+    <!-- ④ 今日新入库文献 -->
+    <h2 style="margin:26px 0 12px;padding-left:9px;border-left:3px solid #3157d5;font-size:17px;font-weight:700;color:#171b24;line-height:1.4">今日新入库文献（42 篇）</h2>
+
+    <h3 style="margin:0 0 6px;font-size:14px;font-weight:700;color:#3157d5">分布式电源与并网 · 9 篇</h3>
+    <ul style="margin:0 0 14px;padding-left:20px;color:#525a68">
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">Voltage regulation assessment of high-PV feeders — <span style="color:#7d8592">IEEE Trans. Sustain. Energy</span></li>
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">Harmonic interaction of clustered rooftop inverters — <span style="color:#7d8592">IEEE Trans. Power Deliv.</span></li>
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">分布式光伏承载力的时序评估方法 — <span style="color:#7d8592">电网技术</span></li>
+    </ul>
+
+    <h3 style="margin:0 0 6px;font-size:14px;font-weight:700;color:#3157d5">储能系统 · 8 篇</h3>
+    <ul style="margin:0 0 14px;padding-left:20px;color:#525a68">
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">SOH estimation of second-life batteries via transfer learning — <span style="color:#7d8592">Energy</span></li>
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">Shared storage sizing with degradation coupling — <span style="color:#7d8592">Applied Energy</span></li>
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">考虑热管理的液冷储能舱温控优化 — <span style="color:#7d8592">电力系统自动化</span></li>
+    </ul>
+
+    <h3 style="margin:0 0 6px;font-size:14px;font-weight:700;color:#3157d5">电力市场与机制 · 6 篇</h3>
+    <ul style="margin:0 0 14px;padding-left:20px;color:#525a68">
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">Capacity remuneration design under high RES — <span style="color:#7d8592">IEEE Trans. Power Syst.</span></li>
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">灵活性资源的边际定价机制 — <span style="color:#7d8592">中国电机工程学报</span></li>
+    </ul>
+
+    <h3 style="margin:0 0 6px;font-size:14px;font-weight:700;color:#3157d5">输电网运行与规划 · 5 篇</h3>
+    <ul style="margin:0 0 14px;padding-left:20px;color:#525a68">
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">Security-constrained unit commitment with FFR — <span style="color:#7d8592">IEEE Trans. Power Syst.</span></li>
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">Probabilistic transmission expansion with weather correlation — <span style="color:#7d8592">IET GTD</span></li>
+    </ul>
+
+    <h3 style="margin:0 0 6px;font-size:14px;font-weight:700;color:#3157d5">微电网与虚拟电厂 · 4 篇</h3>
+    <ul style="margin:0 0 14px;padding-left:20px;color:#525a68">
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">Hierarchical EMS for multi-microgrid islands — <span style="color:#7d8592">IEEE Trans. Ind. Electron.</span></li>
+      <li style="margin:0 0 5px;font-size:14px;line-height:1.7">VPP 聚合需求响应的可信执行框架 — <span style="color:#7d8592">电力系统自动化</span></li>
+    </ul>
+
+    <p style="margin:0 0 18px;font-size:13px;color:#7d8592">完整文献库与全文摘要请点击文末「阅读原文」访问网站。</p>
+
+    <!-- ⑤ 文末声明 -->
+    <hr style="border:0;border-top:1px solid #e3e7ee;margin:20px 0" />
+    <p style="margin:0 0 6px;font-size:12px;color:#7d8592;line-height:1.7">本文由 AI 辅助创作，速评与摘要可能存在错误或幻觉，重要信息请以论文原文及官方发布为准。</p>
+    <p style="margin:0;font-size:12px;color:#7d8592;line-height:1.7">内容基于公开学术论文整理，仅用于学习交流。</p>
+
+  </section>
+  <!-- ─────────── 正文结束 ─────────── -->
+
+  <div style="padding:14px 18px 20px;background:#fafafa;border-top:1px solid #e3e7ee">
+    <div style="display:inline-block;padding:8px 22px;background:#f4f5f7;border:1px solid #e3e7ee;border-radius:20px;font-size:14px;color:#7d8592">阅读原文 · 电研新视界（网页版）</div>
+    <p style="margin:12px 0 0;font-size:12px;color:#a7adb8">电研新视界 · 每日 07:00 更新 · 微信内长期沉淀可搜索</p>
+  </div>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mockup · 顶部导航分组优化（电气前沿速递）</title>
+<style>
+  :root {
+    --bg-primary: #f2f4f7;
+    --surface: rgba(255, 255, 255, 0.96);
+    --surface-raised: #ffffff;
+    --surface-hover: #f6f8fb;
+    --text-primary: #171b24;
+    --text-secondary: #525a68;
+    --text-tertiary: #8a92a3;
+    --accent-primary: #3157d5;
+    --accent-hover: #2848b8;
+    --accent-light: rgba(49, 87, 213, 0.09);
+    --accent-glow: rgba(49, 87, 213, 0.18);
+    --border-color: #d8dce3;
+    --border-light: rgba(23, 27, 36, 0.09);
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-full: 999px;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-sans);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    padding: 28px 24px 80px;
+  }
+  .page { max-width: 1560px; margin: 0 auto; }
+  .page-head h1 { font-family: var(--font-serif); font-size: 26px; letter-spacing: -0.02em; }
+  .page-head p { margin-top: 6px; color: var(--text-secondary); font-size: 14px; line-height: 1.7; }
+  .page-head .meta { color: var(--text-tertiary); font-size: 13px; }
+
+  /* ── 控制条 ─────────────────────────── */
+  .controls {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+    margin: 22px 0 10px; padding: 12px 14px;
+    background: var(--surface-raised); border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+  }
+  .controls .label { font-size: 13px; font-weight: 700; color: var(--text-secondary); margin-right: 2px; }
+  .chip-btn {
+    font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    padding: 7px 14px; border-radius: var(--radius-full);
+    border: 1px solid var(--border-color); background: #fff; color: var(--text-secondary);
+    transition: all 140ms var(--ease-out);
+  }
+  .chip-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+  .chip-btn.on { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; box-shadow: 0 3px 10px var(--accent-glow); }
+  .controls .hint { margin-left: auto; font-size: 12.5px; color: var(--text-tertiary); }
+  .mode-note { font-size: 12.5px; color: var(--text-tertiary); margin: 0 0 12px 4px; min-height: 18px; }
+
+  /* ── 演示外框 ─────────────────────────── */
+  .frame {
+    background: var(--bg-primary); border: 1px solid var(--border-color);
+    border-radius: 14px; overflow: hidden; box-shadow: 0 10px 30px rgba(23,27,36,0.07);
+    transition: width 260ms var(--ease-out);
+  }
+  .frame + .section-title { margin-top: 34px; }
+
+  /* ── 顶栏复刻 ─────────────────────────── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    height: 72px; padding: 0 24px;
+    background: rgba(252, 253, 254, 0.97);
+    border-bottom: 1px solid #d5dae4;
+    box-shadow: 0 6px 18px rgba(23,27,36,0.07);
+  }
+  .topbar-left { display: flex; align-items: center; gap: 18px; min-width: 0; }
+  .brand {
+    display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
+    font-family: var(--font-serif); font-size: 24px; font-weight: 700;
+    letter-spacing: -0.04em; line-height: 1.1;
+    padding-right: 22px; border-right: 1px solid var(--border-color); white-space: nowrap;
+  }
+  .brand svg { flex: 0 0 auto; }
+
+  .nav { display: flex; align-items: stretch; gap: 4px; min-width: 0; }
+  .nav-btn, .group-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+    min-height: 44px; padding: 10px 12px 8px;
+    background: transparent; border: none;
+    border-bottom: 2px solid transparent; border-radius: 0;
+    color: var(--text-secondary); white-space: nowrap;
+    transition: all 140ms var(--ease-out);
+  }
+  .nav-btn:hover, .group-btn:hover { background: var(--accent-light); color: var(--accent-hover); }
+  .nav-btn.active { background: transparent; color: var(--accent-primary); border-bottom-color: var(--accent-primary); box-shadow: none; }
+  .i { width: 16px; height: 16px; flex: 0 0 auto; }
+
+  .nav-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 17px; height: 17px; padding: 0 5px;
+    background: #e6e9f0; color: var(--text-secondary);
+    border-radius: 9px; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .nav-btn.active .nav-badge { background: var(--accent-light); color: var(--accent-primary); }
+
+  /* ── 下拉组 ─────────────────────────── */
+  .nav-group { position: relative; display: flex; }
+  .group-btn .chev { width: 14px; height: 14px; margin-left: -2px; transition: transform 160ms var(--ease-out); }
+  .nav-group.open .group-btn .chev { transform: rotate(180deg); }
+  .nav-group.open .group-btn, .nav-group.active .group-btn {
+    background: transparent; color: var(--accent-primary); border-bottom-color: var(--accent-primary);
+  }
+  .nav-group.open .group-btn { background: var(--accent-light); }
+  .group-dot {
+    display: none; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent-primary); flex: 0 0 auto;
+  }
+  .nav-group.has-badge .group-btn:not(.active) .group-dot { display: block; }
+
+  .nav-menu {
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 60;
+    min-width: 216px; padding: 6px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border-color); border-radius: var(--radius-lg);
+    box-shadow: 0 14px 36px rgba(23,27,36,0.14), 0 2px 8px rgba(23,27,36,0.06);
+    opacity: 0; transform: translateY(-6px); pointer-events: none;
+    transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out);
+  }
+  .nav-group.open .nav-menu { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .menu-item {
+    display: flex; align-items: center; gap: 9px; width: 100%;
+    font-family: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer;
+    padding: 10px 12px; border: none; border-radius: var(--radius-md);
+    background: transparent; color: var(--text-primary);
+    transition: background 120ms var(--ease-out);
+  }
+  .menu-item:hover { background: var(--surface-hover); }
+  .menu-item .mi-check { width: 15px; height: 15px; margin-left: auto; color: var(--accent-primary); visibility: hidden; }
+  .menu-item.current { background: var(--accent-light); color: var(--accent-primary); }
+  .menu-item.current .mi-check { visibility: visible; }
+  .menu-sep { height: 1px; margin: 5px 8px; background: var(--border-light); }
+  .menu-cap { padding: 7px 12px 3px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em; color: var(--text-tertiary); }
+
+  /* ── 顶栏右侧 ─────────────────────────── */
+  .topbar-right { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+  .user-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+    min-height: 40px; padding: 8px 14px;
+    background: transparent; border: 1px solid transparent; border-radius: var(--radius-full);
+    color: var(--text-secondary); white-space: nowrap;
+    transition: all 140ms var(--ease-out);
+  }
+  .user-chip:hover { background: var(--accent-light); color: var(--accent-hover); }
+  .user-chip.active { background: var(--accent-light); color: var(--accent-primary); border-color: rgba(49,87,213,0.25); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+    min-height: 42px; padding: 8px 16px; border-radius: var(--radius-full);
+    white-space: nowrap; transition: all 140ms var(--ease-out);
+  }
+  .btn.primary { border: 1px solid var(--accent-primary); background: var(--accent-primary); color: #fff; box-shadow: 0 7px 18px rgba(49,87,213,0.18); }
+  .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .btn.secondary { background: var(--surface-raised); border: 1px solid var(--border-color); color: var(--text-primary); box-shadow: none; }
+  .btn.secondary:hover { background: var(--surface-hover); border-color: #b8c0cc; }
+
+  /* ── 内容占位 ─────────────────────────── */
+  .demo-main { padding: 18px 24px 26px; }
+  .demo-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .demo-toolbar .tip { font-size: 12.5px; color: var(--text-tertiary); margin-left: auto; }
+  .ghost-btn { font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text-secondary); background: #fff; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 7px 12px; cursor: pointer; }
+  .ghost-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+  .view-chip { font-size: 13px; font-weight: 700; color: var(--accent-primary); background: var(--accent-light); border-radius: var(--radius-full); padding: 6px 12px; }
+  .cards { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+  .card { background: var(--surface-raised); border: 1px solid var(--border-light); border-radius: 12px; padding: 14px; }
+  .card .ln { height: 10px; border-radius: 5px; background: #e9edf3; margin-bottom: 8px; }
+  .card .ln.w60 { width: 60%; } .card .ln.w85 { width: 85%; } .card .ln.w40 { width: 40%; margin-bottom: 0; }
+  .placeholder-note { margin-top: 12px; font-size: 12px; color: var(--text-tertiary); }
+
+  /* ── 宽度档位模拟（容器级 media query） ─────────────────────────── */
+  .frame[data-w="1440"] .topbar { padding: 0 20px; }
+  .frame[data-w="1280"] .topbar { padding: 0 16px; }
+  .frame[data-w="1280"] .topbar-left { gap: 14px; }
+  .frame[data-w="1280"] .brand { font-size: 21px; padding-right: 16px; }
+  .frame[data-w="1280"] .nav-btn, .frame[data-w="1280"] .group-btn { font-size: 14px; padding: 10px 10px 8px; }
+  .frame[data-w="1280"] .btn { padding: 8px 13px; }
+  .frame[data-w="1280"] .user-chip { padding: 8px 11px; }
+  .frame[data-w="1180"] .topbar { padding: 0 16px; }
+  .frame[data-w="1180"] .topbar-left { gap: 12px; }
+  .frame[data-w="1180"] .topbar-right { gap: 8px; }
+  .frame[data-w="1180"] .brand { font-size: 19px; padding-right: 13px; gap: 8px; }
+  .frame[data-w="1180"] .nav { gap: 2px; }
+  .frame[data-w="1180"] .nav-btn, .frame[data-w="1180"] .group-btn { font-size: 13.5px; padding: 10px 8px 8px; gap: 5px; }
+  .frame[data-w="1180"] .btn { min-height: 40px; padding: 7px 11px; font-size: 13.5px; }
+  .frame[data-w="1180"] .user-chip { min-height: 38px; padding: 7px 10px; font-size: 13.5px; }
+  /* 跟随真实浏览器窗口时的 media query（与实装将采用的断点一致） */
+  @media (max-width: 1339px) {
+    .frame[data-w="full"] .topbar { padding: 0 16px; }
+    .frame[data-w="full"] .topbar-left { gap: 14px; }
+    .frame[data-w="full"] .brand { font-size: 21px; padding-right: 16px; }
+  }
+  @media (max-width: 1279px) {
+    .frame[data-w="full"] .topbar-left { gap: 12px; }
+    .frame[data-w="full"] .topbar-right { gap: 8px; }
+    .frame[data-w="full"] .brand { font-size: 19px; padding-right: 13px; gap: 8px; }
+    .frame[data-w="full"] .nav { gap: 2px; }
+    .frame[data-w="full"] .nav-btn, .frame[data-w="full"] .group-btn { font-size: 13.5px; padding: 10px 8px 8px; gap: 5px; }
+    .frame[data-w="full"] .btn { min-height: 40px; padding: 7px 11px; font-size: 13.5px; }
+    .frame[data-w="full"] .user-chip { min-height: 38px; padding: 7px 10px; font-size: 13.5px; }
+  }
+
+  /* ── 现状对照（静态复刻，1180px 裁剪演示） ─────────────────────────── */
+  .old-frame-wrap { position: relative; }
+  .old-frame {
+    width: 1180px; max-width: 100%;
+    background: var(--bg-primary); border: 1px solid var(--border-color);
+    border-radius: 14px; overflow: hidden; box-shadow: 0 10px 30px rgba(23,27,36,0.07);
+  }
+  .old-clip { position: relative; }
+  .old-clip::after {
+    content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 46px;
+    background: linear-gradient(270deg, rgba(252,253,254,0.97) 20%, rgba(252,253,254,0) 100%);
+    pointer-events: none;
+  }
+  .old-clip-box {
+    position: absolute; top: 10px; bottom: 10px; right: 34px; width: 400px;
+    border: 2px dashed #d64545; border-radius: 10px; pointer-events: none; z-index: 5;
+  }
+  .old-clip-tag {
+    position: absolute; right: 44px; top: 50%; transform: translateY(-50%); z-index: 6;
+    background: #d64545; color: #fff; font-size: 12px; font-weight: 700;
+    padding: 6px 10px; border-radius: 8px; line-height: 1.5; text-align: left;
+    box-shadow: 0 6px 16px rgba(214,69,69,0.35); pointer-events: none;
+  }
+  .old-caption { margin-top: 10px; font-size: 13px; color: #b03030; font-weight: 600; }
+
+  /* ── 说明区 ─────────────────────────── */
+  .section-title { font-family: var(--font-serif); font-size: 20px; margin: 34px 0 12px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 14px; }
+  .panel { background: var(--surface-raised); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 18px 20px; }
+  .panel h3 { font-size: 15px; margin-bottom: 10px; }
+  .panel p, .panel li { font-size: 13.5px; color: var(--text-secondary); line-height: 1.75; }
+  .panel ul { padding-left: 18px; }
+  table.spec { width: 100%; border-collapse: collapse; background: var(--surface-raised); border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden; }
+  table.spec th, table.spec td { padding: 10px 14px; font-size: 13.5px; text-align: left; border-bottom: 1px solid var(--border-light); vertical-align: top; }
+  table.spec th { background: #f7f9fc; font-size: 12.5px; letter-spacing: 0.04em; color: var(--text-secondary); }
+  table.spec tr:last-child td { border-bottom: none; }
+  table.spec td b { color: var(--text-primary); }
+  .kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border-color); border-bottom-width: 2px; border-radius: 5px; background: #fff; font-size: 12px; font-family: Consolas, monospace; color: var(--text-secondary); }
+  .rec { display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: var(--radius-full); background: rgba(23,138,93,0.1); color: #12834f; font-size: 12px; font-weight: 700; }
+  .decision { padding: 14px 18px; }
+  .decision h3 { display: flex; align-items: center; }
+  .decision .opt { margin-top: 6px; }
+  .decision .opt b { color: var(--text-primary); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <h1>顶部导航分组优化 · 交互 Mockup</h1>
+    <p>方案：3 个常驻主 tab（最新文献 / 研究速览 / 每日资讯）+ 3 个功能分组（文献库 / 统计·讨论 / 更多）+ 右侧账户胶囊。账户名移到右侧，与「退出网页」相邻；管理员项（管理中心 / 立即刷新）保留。</p>
+    <p class="meta">配套文档：DESIGN-NAV-GROUPS.md · 决策点 D1–D4 见页尾 · 本页为纯静态原型，未改动任何源码</p>
+  </div>
+
+  <div class="controls">
+    <span class="label">窗口宽度模拟</span>
+    <button class="chip-btn on" data-w="full" id="w-full">跟随窗口</button>
+    <button class="chip-btn" data-w="1440">1440px</button>
+    <button class="chip-btn" data-w="1280">1280px</button>
+    <button class="chip-btn" data-w="1180">1180px（下限档）</button>
+    <span class="hint">下拉支持悬停 / 点击开合，<span class="kbd">Esc</span> 或点击空白处关闭</span>
+  </div>
+  <p class="mode-note" id="mode-note">当前：跟随窗口 —— 拖动浏览器窗口宽度可体验 1339px / 1279px 两级压缩档。</p>
+
+  <!-- ══ 方案演示 ══ -->
+  <div class="frame" id="frame" data-w="full">
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="brand">
+          <svg width="26" height="26" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#3157d5"/><path d="M29 14C31 26 35 30 46 32C35 34 31 38 29 50C27 38 23 34 13 32C23 30 27 26 29 14Z" fill="#ffffff"/><path d="M45 13C46 18 47.5 19.5 52 20.5C47.5 21.5 46 23 45 28C44 23 42.5 21.5 38 20.5C42.5 19.5 44 18 45 13Z" fill="#ffffff"/></svg>
+          <span>电气前沿速递</span>
+        </div>
+        <nav class="nav" aria-label="主导航（原型）">
+          <button class="nav-btn active" data-view="feed">
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+            最新文献<span class="nav-badge">2937</span>
+          </button>
+          <button class="nav-btn" data-view="reports">
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/><path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/></svg>
+            研究速览
+          </button>
+          <button class="nav-btn" data-view="news">
+            <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-4 0V9"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg>
+            每日资讯
+          </button>
+
+          <div class="nav-group" data-group="lib">
+            <button class="group-btn" aria-haspopup="true" aria-expanded="false">
+              <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+              文献库<span class="group-dot" aria-hidden="true"></span>
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div class="nav-menu" role="menu">
+              <div class="menu-cap">文献库</div>
+              <button class="menu-item" data-view="favorites" role="menuitem">
+                <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                收藏文献<span class="nav-badge">1</span>
+                <svg class="mi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </button>
+              <button class="menu-item" data-view="settings" role="menuitem">
+                <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                文献推送
+                <svg class="mi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="nav-group" data-group="tools">
+            <button class="group-btn" aria-haspopup="true" aria-expanded="false">
+              <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+              统计·讨论
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div class="nav-menu" role="menu">
+              <div class="menu-cap">统计与讨论</div>
+              <button class="menu-item" data-view="stats" role="menuitem">
+                <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+                关键词统计
+                <svg class="mi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </button>
+              <button class="menu-item" data-view="feedback" role="menuitem">
+                <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                公共讨论
+                <svg class="mi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="nav-group" data-group="more">
+            <button class="group-btn" aria-haspopup="true" aria-expanded="false">
+              <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+              更多
+              <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+            <div class="nav-menu" role="menu">
+              <div class="menu-cap">更多</div>
+              <button class="menu-item" data-view="help" role="menuitem">
+                <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+                使用说明
+                <svg class="mi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </button>
+              <div class="menu-sep"></div>
+              <button class="menu-item" data-view="admin" role="menuitem">
+                <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+                管理中心<span class="nav-badge">管理员</span>
+                <svg class="mi-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              </button>
+            </div>
+          </div>
+        </nav>
+      </div>
+
+      <div class="topbar-right">
+        <button class="user-chip" data-view="account">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
+          沈超2024
+        </button>
+        <button class="btn primary">
+          <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+          立即刷新
+        </button>
+        <button class="btn secondary">退出网页</button>
+      </div>
+    </header>
+
+    <div class="demo-main">
+      <div class="demo-toolbar">
+        <span class="view-chip">当前视图：<span id="view-name">最新文献</span></span>
+        <button class="ghost-btn">全选本页</button>
+        <button class="ghost-btn">标记已读</button>
+        <span class="tip">内容区仅为占位示意 —— 验证顶栏下方内容不被遮挡、可正常交互</span>
+      </div>
+      <div class="cards">
+        <div class="card"><div class="ln w60"></div><div class="ln w85"></div><div class="ln w40"></div></div>
+        <div class="card"><div class="ln w85"></div><div class="ln w60"></div><div class="ln w40"></div></div>
+        <div class="card"><div class="ln w40"></div><div class="ln w85"></div><div class="ln w60"></div></div>
+      </div>
+      <p class="placeholder-note">试一试：点击上方分组按钮与菜单项，观察激活态（蓝字 + 底线）与面板内 ✓；再切换到 1180px 档位，确认全部栏目单行完整可点。</p>
+    </div>
+  </div>
+
+  <!-- ══ 现状对照 ══ -->
+  <h2 class="section-title">现状对照（问题复现）</h2>
+  <div class="old-frame-wrap">
+    <div class="old-frame">
+      <div class="old-clip">
+        <div class="old-clip-box"></div>
+        <div class="old-clip-tag">1180px 窗口下被裁剪<br>公共讨论 / 沈超2024 / 管理中心 / 使用说明无法点击</div>
+        <header class="topbar">
+          <div class="topbar-left">
+            <div class="brand">
+              <svg width="26" height="26" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#3157d5"/><path d="M29 14C31 26 35 30 46 32C35 34 31 38 29 50C27 38 23 34 13 32C23 30 27 26 29 14Z" fill="#ffffff"/><path d="M45 13C46 18 47.5 19.5 52 20.5C47.5 21.5 46 23 45 28C44 23 42.5 21.5 38 20.5C42.5 19.5 44 18 45 13Z" fill="#ffffff"/></svg>
+              <span>电气前沿速递</span>
+            </div>
+            <nav class="nav" aria-hidden="true">
+              <button class="nav-btn active">最新文献<span class="nav-badge">2937</span></button>
+              <button class="nav-btn">研究速览</button>
+              <button class="nav-btn">每日资讯</button>
+              <button class="nav-btn">关键词统计</button>
+              <button class="nav-btn">收藏文献<span class="nav-badge">1</span></button>
+              <button class="nav-btn">文献推送</button>
+              <button class="nav-btn">公共讨论</button>
+              <button class="nav-btn">沈超2024</button>
+              <button class="nav-btn">管理中心</button>
+              <button class="nav-btn">使用说明</button>
+            </nav>
+          </div>
+          <div class="topbar-right">
+            <button class="btn primary">立即刷新</button>
+            <button class="btn secondary">退出网页</button>
+          </div>
+        </header>
+      </div>
+    </div>
+  </div>
+  <p class="old-caption">▲ 现状：10 个平铺 tab 约 1100px 宽，窄窗口溢出裁剪且滚动条隐藏，仅边缘渐隐（右上角白雾）——可发现性差，末尾栏目实际不可点击。</p>
+
+  <!-- ══ 分组结构 ══ -->
+  <h2 class="section-title">分组结构（方案 A）</h2>
+  <table class="spec">
+    <tr><th>层级</th><th>入口</th><th>包含视图</th><th>归类理由</th></tr>
+    <tr><td><b>常驻主 tab</b></td><td>—</td><td>最新文献 / 研究速览 / 每日资讯</td><td>日常高频阅读三视图，一级直达</td></tr>
+    <tr><td><b>下拉组 1</b></td><td>文献库 ▾</td><td>收藏文献（含收藏数 badge）、文献推送</td><td>个人文献资产与订阅推送设置</td></tr>
+    <tr><td><b>下拉组 2</b></td><td>统计·讨论 ▾</td><td>关键词统计、公共讨论</td><td>分析工具与社区互动</td></tr>
+    <tr><td><b>下拉组 3</b></td><td>更多 ▾</td><td>使用说明、管理中心（仅管理员）</td><td>低频帮助与系统功能</td></tr>
+    <tr><td><b>右侧常驻</b></td><td>—</td><td>用户名（账户视图）、立即刷新（管理员）、退出网页</td><td>账户与会话操作，与导航解耦</td></tr>
+  </table>
+
+  <!-- ══ 交互规格 ══ -->
+  <h2 class="section-title">交互规格</h2>
+  <div class="grid2">
+    <div class="panel">
+      <h3>开合与关闭</h3>
+      <ul>
+        <li>悬停约 120ms 延迟展开；点击切换开合。</li>
+        <li>点击菜单项 = 切换视图并收起面板。</li>
+        <li>点击面板外部、按 <span class="kbd">Esc</span>、窗口 resize 时关闭。</li>
+        <li>无障碍：<span class="kbd">aria-haspopup</span> / <span class="kbd">aria-expanded</span> / <span class="kbd">role=menu</span>，键盘可达。</li>
+      </ul>
+    </div>
+    <div class="panel">
+      <h3>激活态与 badge</h3>
+      <ul>
+        <li>组按钮沿用主 tab 同款激活语言：蓝字 + 2px 底边线，宽度不变（D3）。</li>
+        <li>面板内当前项浅蓝底 + 右侧 ✓。</li>
+        <li>最新文献未读数 badge 留在主 tab；收藏数显示在「文献库 ▾ 收藏文献」行内，&gt;0 时组按钮亮小圆点。</li>
+        <li>nav-wrap 边缘渐隐 + 滚轮横滚兜底机制保留（D4），正常档位不触发。</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ══ 决策点 ══ -->
+  <h2 class="section-title">决策点（D1–D4）</h2>
+  <div class="grid2">
+    <div class="panel decision">
+      <h3>D1 · 分组结构<span class="rec">推荐 A</span></h3>
+      <p class="opt"><b>A：</b>3 主 tab + 文献库 / 统计·讨论 / 更多 三组（本 mockup 所示）。</p>
+      <p class="opt"><b>B：</b>仅 2 组更紧凑——文献库（收藏/关键词统计/文献推送）+ 更多（公共讨论/使用说明/管理中心），公共讨论被收进「更多」。</p>
+    </div>
+    <div class="panel decision">
+      <h3>D2 · 账户入口<span class="rec">推荐右侧胶囊</span></h3>
+      <p class="opt"><b>方案 1：</b>账户名移到右侧用户胶囊，与「退出网页」相邻（本 mockup 所示）。</p>
+      <p class="opt"><b>方案 2：</b>账户入口留在「更多」下拉组内。</p>
+    </div>
+    <div class="panel decision">
+      <h3>D3 · 组激活态<span class="rec">推荐蓝字+底线</span></h3>
+      <p class="opt"><b>方案 1：</b>组按钮 = 主 tab 同款蓝字 + 底边线，宽度不变；面板内打勾（本 mockup 所示）。</p>
+      <p class="opt"><b>方案 2：</b>组按钮文字切换为当前子项名（如「文献库 · 收藏文献」），方向感强但宽度抖动。</p>
+    </div>
+    <div class="panel decision">
+      <h3>D4 · 横滚兜底<span class="rec">推荐保留</span></h3>
+      <p class="opt"><b>方案 1：</b>保留 nav-wrap 渐隐 + 滚轮横滚，极端窄窗口仍有退路，零风险。</p>
+      <p class="opt"><b>方案 2：</b>删除相关代码（main.jsx ~802–837 与样式），结构更简。</p>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var frame = document.getElementById("frame");
+  var note = document.getElementById("mode-note");
+  var viewName = document.getElementById("view-name");
+  var VIEW_LABEL = { feed: "最新文献", reports: "研究速览", news: "每日资讯", favorites: "收藏文献", settings: "文献推送", stats: "关键词统计", feedback: "公共讨论", help: "使用说明", admin: "管理中心", account: "账户（右侧入口）" };
+  var GROUP_OF = { favorites: "lib", settings: "lib", stats: "tools", feedback: "tools", help: "more", admin: "more" };
+
+  /* 宽度档位 */
+  var chipBtns = document.querySelectorAll(".chip-btn");
+  chipBtns.forEach(function (b) {
+    b.addEventListener("click", function () {
+      chipBtns.forEach(function (x) { x.classList.remove("on"); });
+      b.classList.add("on");
+      var w = b.getAttribute("data-w");
+      if (w === "full") { frame.style.width = ""; frame.setAttribute("data-w", "full"); note.textContent = "当前：跟随窗口 —— 拖动浏览器窗口宽度可体验 1339px / 1279px 两级压缩档。"; }
+      else { frame.style.width = w + "px"; frame.setAttribute("data-w", w); note.textContent = "当前：固定 " + w + "px 模拟档位（实装后由断点自动生效）。"; }
+      closeAllGroups();
+    });
+  });
+
+  /* 下拉组开合：hover + click */
+  var groups = document.querySelectorAll(".nav-group");
+  function closeAllGroups(except) {
+    groups.forEach(function (g) {
+      if (g === except) return;
+      g.classList.remove("open");
+      g.querySelector(".group-btn").setAttribute("aria-expanded", "false");
+    });
+  }
+  groups.forEach(function (g) {
+    var btn = g.querySelector(".group-btn");
+    var timer = null;
+    function open() { clearTimeout(timer); closeAllGroups(g); g.classList.add("open"); btn.setAttribute("aria-expanded", "true"); }
+    function close() { g.classList.remove("open"); btn.setAttribute("aria-expanded", "false"); }
+    g.addEventListener("mouseenter", open);
+    g.addEventListener("mouseleave", function () { timer = setTimeout(close, 160); });
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (g.classList.contains("open")) close(); else open();
+    });
+  });
+  document.addEventListener("click", function (e) { if (!e.target.closest(".nav-group")) closeAllGroups(); });
+  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeAllGroups(); });
+  window.addEventListener("resize", function () { closeAllGroups(); });
+
+  /* 视图切换模拟（仅演示激活态） */
+  function setView(view) {
+    document.querySelectorAll(".nav-btn[data-view]").forEach(function (b) { b.classList.toggle("active", b.getAttribute("data-view") === view); });
+    groups.forEach(function (g) { g.classList.toggle("active", GROUP_OF[view] === g.getAttribute("data-group")); });
+    document.querySelectorAll(".menu-item").forEach(function (m) { m.classList.toggle("current", m.getAttribute("data-view") === view); });
+    document.querySelectorAll(".user-chip").forEach(function (c) { c.classList.toggle("active", view === "account"); });
+    viewName.textContent = VIEW_LABEL[view] || view;
+    closeAllGroups();
+  }
+  document.querySelectorAll("[data-view]").forEach(function (el) {
+    el.addEventListener("click", function () { setView(el.getAttribute("data-view")); });
+  });
+})();
+</script>
+</body>
+</html>

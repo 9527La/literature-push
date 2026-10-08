@@ -10,8 +10,8 @@ description: 文献推送站（E:\SC\文献推送）全部 AI 批量作业的统
 # 文献推送 · AI 批量作业执行手册（唯一执行依据）
 
 > **本手册是所有文献 AI 作业的唯一执行依据**；执行会话动手前必须完整通读本文。
-> 版本：2026-10-01 v4（速评复用 priorBrief：月报/专报逐字复用周报已写速评，只新写未覆盖文献；定时任务提示词对齐全流程）
-> 上一版：2026-09-29 v3（研究速览 v2：三字段结构化速评 paperBriefs / 论文速评行格式 v2 / 方向分组浏览）
+> 版本：2026-10-08 v6（wechat-daily prompt 增加步骤 ④.5 交稿自评：三段/字数/数字一致/禁夸大措辞，§8.5.1 同步）
+> 上一版：2026-10-01 v4（速评复用 priorBrief：月报/专报逐字复用周报已写速评，只新写未覆盖文献；定时任务提示词对齐全流程）
 > 维护：方向体系增删须同步第 4.2 节与 `server/directions.js` + `src/lib/directions.js`
 > 取代关系：第 4 节 = 原 `RUNBOOK-AI-DIRECTION.md` 全量并入（后者已标注被本 Skill 取代）。
 
@@ -51,6 +51,7 @@ description: 文献推送站（E:\SC\文献推送）全部 AI 批量作业的统
 |---|---|---|
 | 每周日 23:00 / 「文献 AI 周作业」 | **classify → digest → 逐方向专报** | 专报依赖总览批次与分类完成，顺序不可颠倒 |
 | 每月 1 日 03:00 / 「文献 AI 月作业」 | **report → 逐方向专报** | 覆盖上一个完整自然月；速评优先复用周报（见 §6 复用规则），只新写未覆盖文献 |
+| 每日 06:30 / 「电气前沿速递公众号日报」 | **classify 增量 → wechat-daily** | 独立渠道不写库（§8.5）：classify 使素材带方向，产出 data\wechat-drafts\ 存档，草稿箱自动写入，发布由人工完成 |
 | 会话说「跑一次方向分类」 | 仅 classify | 手动补跑 |
 
 - 逐方向专报 = **当期所有非零方向**（≥1 篇即做，无门槛），逐个 export → 写结果 → 统一 bulk 写回。
@@ -346,26 +347,113 @@ Set-Location 'E:\\SC\\文献推送'; & .runtime\node\node.exe scripts\apply-repo
 - 异常与处理：无 / 描述
 ```
 
+## 8.5 job: wechat-daily（公众号日报，独立渠道，不写库）
+
+> 渠道设计真值 = DESIGN-WECHAT-MP-DAILY.md。本 job 与 §4-6.5 的写库链路完全独立：
+> 产物只落 `data\wechat-drafts\`，不触碰 ai_reports / articles；发布由人工完成
+> （个人订阅号无 freepublish 权限，2025-07 微信政策）。
+
+### 8.5.1 执行步骤
+
+**步骤 0**：`sc_status` 前置检查；不可用 → §8 汇报终止。
+
+**步骤 0.5 — classify 增量（PLAN-DAILY-UPGRADE，必须在步骤 1 之前）**：按 §4 全流程执行
+一轮：`export-direction-batch.mjs --limit 400`（只导 IS NULL）→ 会话按 4.2/4.3 分类 →
+`apply-directions.mjs` 写回 → 核对 invalid=0。日增量通常 40-60 篇一轮完成；exported=0
+空跑属正常。先分类再导出，日报素材才能带上方向（文献清单不再归「暂未分类」组）。
+
+**步骤 1 — 导出昨日素材**（`sc_run`）：
+
+```
+Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\export-wechat-daily.mjs
+```
+
+默认导出北京时间昨日业务日（`--date YYYY-MM-DD` 可显式指定）。空窗口（total=0）
+≠ 失败：清单板块如实写「今日无新入库文献」，继续步骤 2-5（只有导读与资讯的日报合法）。
+
+**步骤 2 — 下载素材**：`sc_download` 远端 `文献推送/data/wechat-daily-batch-<昨日>.json`
+→ 本地 `_ai-jobs-work\wechat-daily\batch-<昨日>.json`，Read 分段完整读完（禁止跳读）。
+
+**步骤 3 — 资讯与写作**：
+
+- Read 本地 `data\daily-news\<昨日>.md`（不存在则资讯板块如实留空，不得编造补位）；
+- 精选 5-8 篇（素材 ≤8 篇时全选）撰写三字段速评：契约同 §5.5（对象≤30 / 方法≤40 /
+  结论≤50 字）；素材带 priorBrief 的文献**逐字复用、禁止改写**；
+- **精选优先级（PLAN-DAILY-UPGRADE）**：IEEE Transactions on Smart Grid（TSG）文章优先，
+  当日多篇 TSG 时按方向分散选取；TSG 不足 5 篇时以其他 IEEE Trans 系刊补足，仍不足再按
+  方向分散补足；
+- 资讯精选：政策 ≤3 条、新闻 ≤5 条，概览式短句改写并 `**加粗**` 关键数字；
+  来源与数字必须与每日资讯原文一致，不得编造；政策文件优先全收录。
+
+**步骤 4 — 写 issue JSON**：Write `data\wechat-drafts\<期号日>.json`（期号日 = 今天，
+报道窗口 = 昨日）。结构契约：`{version, date, digest≤60字, intro, news{policy≤3,
+general≤5}, briefs 1-8 条, listing[], siteUrl}`；渲染器硬校验，违规清单见步骤 5。
+
+**步骤 4.5 — 交稿自评（A1-3，2026-10-08）**：进入渲染前对照自查——①每篇速评三段
+齐全且逐条满足 §5.5 字数上限；②导读条目与正文一致；③所有数字与素材/资讯原文一致，
+不得编造；④无「首次 / 重大突破 / 国际领先 / 填补空白」等夸大措辞。发现不符先改
+JSON 再进步骤 5（探针管结构，本步管措辞，两道闸门互补）。
+
+**步骤 5 — 渲染与探针**（本地）：
+
+```
+node scripts/wechat-render.mjs --in data/wechat-drafts/<期号日>.json
+node scripts/probe-wechat-html.mjs --in data/wechat-drafts/<期号日>.html --issue data/wechat-drafts/<期号日>.json
+```
+
+渲染器校验失败 → 修正 JSON 重跑；**禁止手改 HTML**。探针 0 违规才算完成。
+
+**步骤 5.5 — L1 草稿写入（.env 已配 WECHAT_APPID/WECHAT_SECRET 时执行；M4 实测 2026-10-08 通过）**：
+
+```
+node scripts/publish-wechat-draft.mjs --in data/wechat-drafts/<期号日>.json
+```
+
+成功输出草稿 media_id（封面由脚本**按期号日自动生成（含日期）并上传永久素材**，按日缓存
+`data\wechat-drafts\cover-thumb.json`，同日重跑复用）；失败（48001 无权限 / 40164 白名单 /
+40001 密钥）按脚本提示如实汇报，**不回滚产物**，L0 路径不受影响；
+未配置凭据时跳过本步（L0 档）。
+
+**步骤 6 — 收尾**：清理 `_ai-jobs-work\wechat-daily\` 下临时自测文件；按 8.5.2 汇报。
+人工发布按 `scripts\sop-wechat-publish.md` 执行（L1：草稿箱 → 订阅号助手 App 点发表；L0：网页端粘贴）——本 job 不做最后群发。
+
+### 8.5.2 汇报
+
+```
+【公众号日报】<期号日>
+- 素材：昨日（<日期>）新入库 N 篇，精选 k 篇写速评（复用 priorBrief R 篇）
+- 资讯：政策 P 条 / 新闻 M 条（来源 data\daily-news\<昨日>.md）
+- 产物：data\wechat-drafts\<期号日>.{json,html}，探针 0 违规
+- 草稿：media_id=<id> / 未配置凭据跳过（L0） / 失败原因
+- 异常与处理：无 / 描述
+```
+
 ## 9. 附录 A · 定时任务配置与提示词
 
-| 项 | 周作业 | 月作业 |
-|---|---|---|
-| 名称 | 文献 AI 周作业（分类+速览） | 文献 AI 月作业（月度趋势） |
-| 模型 | Hy3 | Hy3 |
-| 频率 | 每周日 23:00 | 每月 1 日 03:00 |
-| 关联目录 | 文献推送（项目根） | 文献推送（项目根） |
-| 权限 | 允许完全访问 | 允许完全访问 |
+| 项 | 周作业 | 月作业 | 公众号日报 |
+|---|---|---|---|
+| 名称 | 文献 AI 周作业（分类+速览） | 文献 AI 月作业（月度趋势） | 电气前沿速递公众号日报 |
+| 模型 | Hy3 | Hy3 | Hy3 |
+| 频率 | 每周日 23:00 | 每月 1 日 03:00 | 每天 06:30 |
+| 关联目录 | 文献推送（项目根） | 文献推送（项目根） | 文献推送（项目根） |
+| 权限 | 允许完全访问 | 允许完全访问 | 允许完全访问 |
 
 **周作业提示词（原文粘贴，与定时任务「周」逐字一致）：**
 
 ```
-执行 literature-ai-jobs skill（若未加载，通读项目根目录 RUNBOOK-AI-JOBS.md），运行「周作业」三步：① classify——按手册第 4 节完成本周 AI 方向分类（每轮≤400 篇）；② digest——按第 5 节生成全方向总览周报；③ digest-direction——按第 6.5 节为本期所有非零方向逐个生成方向专报（每个方向一份 export+结果 JSON，全部写入本地 _ai-jobs-work\direction-inbox\ 后整目录上传，用 apply-reports-bulk.mjs --dir data\direction-inbox 批量写回）。写回前按手册第 7 节完成本地质量自检（[id] ⊆ 批次、五个头字段逐字一致、paperBriefs 覆盖与三字段字数上限）。最后按第 8 节模板汇报。全程遵守第 2 节红线。sc-remote 不可用或脚本缺失时汇报终止，不做变通。
+执行 literature-ai-jobs skill（若未加载，通读项目根目录 RUNBOOK-AI-JOBS.md），运行「周作业」三步：① classify——按手册第 4 节完成本周 AI 方向分类（每轮≤400 篇；每日 06:30 日报任务通常已清空增量，exported=0 空跑属正常，非故障）；② digest——按第 5 节生成全方向总览周报；③ digest-direction——按第 6.5 节为本期所有非零方向逐个生成方向专报（每个方向一份 export+结果 JSON，全部写入本地 _ai-jobs-work\direction-inbox\ 后整目录上传，用 apply-reports-bulk.mjs --dir data\direction-inbox 批量写回）。写回前按手册第 7 节完成本地质量自检（[id] ⊆ 批次、五个头字段逐字一致、paperBriefs 覆盖与三字段字数上限）。最后按第 8 节模板汇报。全程遵守第 2 节红线。sc-remote 不可用或脚本缺失时汇报终止，不做变通。
 ```
 
 **月作业提示词（原文粘贴，与定时任务「月」逐字一致）：**
 
 ```
 执行 literature-ai-jobs skill（若未加载，通读项目根目录 RUNBOOK-AI-JOBS.md），运行「月作业」两步：① report——按手册第 6 节导出上月完整自然月素材（--kind monthly --month 上月）生成全方向总览月报（含环比与新兴主题）；② 逐方向专报——按第 6.5 节为上月所有非零方向逐个生成月度方向专报（主题聚类形式）。素材中带 priorBrief 的文献，其三字段速评必须逐字复用、禁止改写，仅对无 priorBrief 的文献新写（手册第 5.5/6 节复用规则）。全部结果写入 _ai-jobs-work\direction-inbox\ 后整目录上传，用 apply-reports-bulk.mjs --dir data\direction-inbox 批量写回。写回前按第 7 节自检（含 priorBrief 复用一致性）。最后按第 8 节模板汇报。全程遵守第 2 节红线。sc-remote 不可用或脚本缺失时汇报终止，不做变通。
+```
+
+**公众号日报提示词（原文粘贴，与定时任务「每日 06:30」逐字一致）：**
+
+```
+执行 literature-ai-jobs skill（若未加载，通读项目根目录 RUNBOOK-AI-JOBS.md），运行「job: wechat-daily」（第 8.5 节）：⓪ 先按第 4 节执行 classify 增量一轮（export-direction-batch.mjs --limit 400 只导未分类 → 会话按 4.2/4.3 分类 → apply-directions.mjs 写回，invalid 必须=0；exported=0 空跑属正常）——必须在导出日报素材之前完成，使素材带方向；① sc_run 远端跑 scripts\export-wechat-daily.mjs 导出昨日新入库文献素材（空窗口≠失败，如实写「今日无新入库文献」），sc_download 到 _ai-jobs-work\wechat-daily\ 并 Read 完整读完；② Read 本地 data\daily-news\<昨日>.md（不存在则资讯板块如实留空）；③ 精选 5-8 篇写三字段速评（契约同第 5.5 节：对象≤30/方法≤40/结论≤50 字，priorBrief 逐字复用禁止改写；精选优先级：IEEE Trans. on Smart Grid 文章优先、不足以其他 IEEE Trans 系刊补足、再按方向分散），资讯精选政策≤3 条、新闻≤5 条概览式改写、**加粗**关键数字、不得编造；④ Write data\wechat-drafts\<期号日>.json（期号日=今天，报道窗口=昨日）；④.5 交稿自评：对照自查——每篇速评三段齐全且逐条满足 5.5 字数上限、导读与正文条目一致、所有数字与素材/资讯原文一致不得编造、无「首次/重大突破/国际领先/填补空白」等夸大措辞，发现不符先改 JSON 再进 ⑤；⑤ 本地跑 scripts\wechat-render.mjs 渲染 + scripts\probe-wechat-html.mjs 探针，0 违规才算完成，校验失败修正 JSON 重跑、禁止手改 HTML；⑤.5 若 .env 已配置 WECHAT_APPID/WECHAT_SECRET，本地跑 scripts\publish-wechat-draft.mjs --in data\wechat-drafts\<期号日>.json 自动写入公众号草稿箱（失败按脚本提示如实汇报、不影响产物已完成，未配置凭据则跳过）；⑥ 清理临时文件并按第 8.5.2 节模板汇报。本 job 不写数据库、不做最后群发（草稿写入见⑤.5，人工按 scripts\sop-wechat-publish.md 点发表）。全程遵守第 2 节红线。sc-remote 不可用或脚本缺失时汇报终止，不做变通。
 ```
 
 ## 10. 附录 B · 常见问题

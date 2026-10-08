@@ -89,7 +89,7 @@ function renderMarkdownFragment(markdown) {
 }
 
 function renderDigestEmailHtml(bodyMarkdown, options = {}) {
-  const subject = options.subject || "电力文献周报";
+  const subject = options.subject || "电气前沿速递 周报";
   const stamp = new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
   return `<div style="margin:0;padding:24px 12px;background:${BRAND.page};font-family:${FONT}">
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="max-width:760px;margin:0 auto;border-collapse:collapse">
@@ -99,7 +99,7 @@ function renderDigestEmailHtml(bodyMarkdown, options = {}) {
           <tr>
             ${brandMarkCell(28)}
             <td valign="middle">
-              <div style="font-size:15px;font-weight:700;color:${BRAND.ink};line-height:1.3">电力文献</div>
+              <div style="font-size:15px;font-weight:700;color:${BRAND.ink};line-height:1.3">电气前沿速递</div>
               <div style="font-size:12px;color:${BRAND.muted};line-height:1.4">${escapeHtml(subject)}</div>
             </td>
             <td valign="middle" align="right" style="font-size:12px;color:${BRAND.muted};white-space:nowrap">${stamp}</td>
@@ -114,7 +114,7 @@ function renderDigestEmailHtml(bodyMarkdown, options = {}) {
     </tr>
     <tr>
       <td style="background:${BRAND.soft};border:1px solid ${BRAND.line};border-top:0;border-radius:0 0 12px 12px;padding:14px 22px;font-size:12px;line-height:1.7;color:${BRAND.muted}">
-        由「电力文献」订阅系统自动发送，仅供课题组内部参考。引用前请回到原文页面核对标题、作者与出版信息。
+        由「电气前沿速递」自动发送，仅供课题组内部参考。引用前请回到原文页面核对标题、作者与出版信息。
       </td>
     </tr>
   </table>
@@ -140,12 +140,12 @@ export function canSendEmail(settings = {}) {
 
 function buildDigestMailOptions(filePath, options = {}) {
   const recipients = options.recipients?.length ? options.recipients.join(",") : config.smtp.to;
-  const bodyMarkdown = options.bodyMarkdown || "# 电力文献周报\n\n完整文献周报见附件。";
+  const bodyMarkdown = options.bodyMarkdown || "# 电气前沿速递 周报\n\n完整文献周报见附件。";
   const attachmentPath = options.attachFile === false ? "" : (options.filePath || filePath || "");
   return {
     from: config.smtp.from,
     to: recipients,
-    subject: options.subject || "电力文献周报",
+    subject: options.subject || "电气前沿速递 周报",
     text: bodyMarkdown,
     html: renderDigestEmailHtml(bodyMarkdown, options),
     attachments: attachmentPath
@@ -162,7 +162,7 @@ export async function sendMarkdownDigestEmail(filePath, options = {}) {
 
 export async function sendNewArticlesEmail(articles, settings = {}) {
   if (!articles.length || !canSendEmail(settings)) return false;
-  const subject = `电力文献更新：${articles.length} 篇新文献`;
+  const subject = `电气前沿速递：${articles.length} 篇新文献`;
   const shown = articles.slice(0, 30);
   const body = shown.map((article, index) =>
     `${index + 1}. ${article.title}\n${article.journal || ""}\n${article.url || ""}`
@@ -193,7 +193,7 @@ export async function sendWeeklyDigestEmail(items, settings = {}, options = {}) 
     article.url || ""
   ].filter(Boolean).join("\n")).join("\n\n---\n\n");
   return sendMarkdownDigestEmail("", {
-    subject: `电力文献周报：${items.length} 篇新论文`,
+    subject: `电气前沿速递 周报：${items.length} 篇新论文`,
     bodyMarkdown: body,
     recipients: settings.emailRecipients,
     attachFile: false,

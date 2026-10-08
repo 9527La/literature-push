@@ -900,6 +900,95 @@ export function getArticleForUser(id, userId) {
   };
 }
 
+// ── 相关文献推荐（摘要弹窗「相关文献」，纯 SQL+JS 打分，零 AI、零联网）──────
+// 打分口径：关键词共现数（主信号）→ 展示日期新→旧 → id 新→旧。
+// 候选池：来源文章有主方向（且非 other）时取同方向；来源是 other 或未分类时
+// 在「非 other」全库里找（other 默认移出用户可见面，见 DESIGN-FRONTEND-DIRECTION §2.2）。
+function relatedKeywordSet(keywords) {
+  return new Set(String(keywords || "")
+    .split(/[;；,，]/)
+    .map((keyword) => keyword.trim().toLowerCase())
+    .filter((keyword) => keyword.length >= 2));
+}
+
+export function listRelatedArticles(id, userId, limit = 3) {
+  const articleId = Number(id);
+  if (!Number.isInteger(articleId) || articleId <= 0) return [];
+  const cappedLimit = Math.min(Math.max(Math.floor(Number(limit)) || 3, 1), 10);
+  const source = db
+    .prepare("SELECT id, keywords, research_direction FROM articles WHERE id = ?")
+    .get(articleId);
+  if (!source) return [];
+
+  const hasUsableDirection = Boolean(source.research_direction) && source.research_direction !== "other";
+  const directionClause = hasUsableDirection
+    ? "a.research_direction = @sourceDirection"
+    : EXCLUDE_OTHER_CLAUSE;
+
+  const interactionJoins = userId
+    ? `
+      LEFT JOIN user_interactions ui_read ON ui_read.article_id = a.id AND ui_read.user_id = @userId AND ui_read.is_read = 1
+      LEFT JOIN user_interactions ui_fav ON ui_fav.article_id = a.id AND ui_fav.user_id = @userId AND ui_fav.is_favorite = 1
+    `
+    : "";
+  const interactionFields = userId
+    ? "COALESCE(ui_read.is_read, 0) AS is_read, COALESCE(ui_fav.is_favorite, 0) AS is_favorite"
+    : "0 AS is_read, 0 AS is_favorite";
+
+  // 候选池按展示日期倒序取 240 篇，共现打分在 JS 侧完成（keywords 是分号分隔
+  // 自由文本，SQL 侧算交集需要逐词展开，不值得）；池深按最大方向规模估算。
+  const pool = db.prepare(`
+    SELECT
+      a.id,
+      a.title,
+      a.journal,
+      a.doi,
+      substr(a.abstract, 1, 200) AS abstract,
+      a.url,
+      a.published_at,
+      a.keywords,
+      a.research_direction,
+      a.research_direction_secondary,
+      a.direction_confidence,
+      a.direction_source,
+      a.direction_reason,
+      ${displayDateSql("a")} AS display_date,
+      zh.title AS translated_title,
+      substr(zh.abstract, 1, 200) AS translated_abstract,
+      ${interactionFields}
+    FROM articles a
+    LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
+    ${interactionJoins}
+    WHERE a.id != @sourceId
+      AND is_non_research_title(a.title) = 0
+      AND ${directionClause}
+    ORDER BY ${displayDateSql("a")} DESC, a.id DESC
+    LIMIT @poolLimit
+  `).all({
+    sourceId: articleId,
+    ...(hasUsableDirection ? { sourceDirection: source.research_direction } : {}),
+    ...(userId ? { userId } : {}),
+    poolLimit: 240
+  });
+
+  const sourceKeywords = relatedKeywordSet(source.keywords);
+  const scored = pool.map((row) => {
+    let overlap = 0;
+    if (sourceKeywords.size) {
+      for (const keyword of relatedKeywordSet(row.keywords)) {
+        if (sourceKeywords.has(keyword)) overlap += 1;
+      }
+    }
+    return { row, overlap };
+  });
+  scored.sort((a, b) =>
+    b.overlap - a.overlap
+    || String(b.row.display_date || "").localeCompare(String(a.row.display_date || ""))
+    || b.row.id - a.row.id
+  );
+  return scored.slice(0, cappedLimit).map(({ row }) => row);
+}
+
 export function updateArticleDetails(id, details) {
   details = { ...details };
   for (const field of ["title", "authors", "journal", "abstract", "keywords"]) {

@@ -1,4 +1,4 @@
-import { BarChart3, Bell, HelpCircle, Keyboard, Mail, RefreshCw, Star, UserRound } from "lucide-react";
+import { BarChart3, HelpCircle, Keyboard, Library, Mail, RefreshCw, Star, UserRound } from "lucide-react";
 import InternalUseNotice from "../../components/InternalUseNotice.jsx";
 
 
@@ -15,7 +15,7 @@ function HelpView() {
       </section>
 
       <section className="help-section">
-        <h3><Bell size={18} /> 最新文献</h3>
+        <h3><Library size={18} /> 文献库</h3>
         <p>展示已订阅期刊的最新论文。页面会优先显示本地已有内容，缺失的摘要、关键词和中文翻译在后台补全。</p>
         <ul>
           <li><strong>搜索与筛选</strong>：点击“打开筛选”后，可按标题、作者、摘要、关键词、期刊、日期、未读状态和收藏状态筛选；同一条件内的多选为“或”关系，不同条件之间为“且”关系。</li>
@@ -27,7 +27,7 @@ function HelpView() {
 
       <section className="help-section">
         <h3><Keyboard size={18} /> 键盘快捷键</h3>
-        <p>“最新文献”页支持纯键盘浏览：先按 J 或 ↓ 选中一篇文献，再执行阅读或收藏操作。焦点在输入框中时不会触发快捷键。</p>
+        <p>“文献库”页支持纯键盘浏览：先按 J 或 ↓ 选中一篇文献，再执行阅读或收藏操作。焦点在输入框中时不会触发快捷键。</p>
         <ul>
           <li><strong>J / ↓</strong> 选中下一篇，<strong>K / ↑</strong> 选中上一篇，选中项左侧边框高亮。</li>
           <li><strong>Enter</strong> 打开选中文献详情，<strong>Esc</strong> 取消选中（或关闭已打开的弹窗）。</li>
@@ -62,7 +62,7 @@ function HelpView() {
         <p>在“文献推送”页面管理邮箱、订阅期刊和自动推送计划。</p>
         <ul>
           <li><strong>邮箱</strong>：填写并保存邮箱后，可以发送测试邮件。</li>
-          <li><strong>订阅期刊</strong>：勾选需要关注的期刊，最新文献和推送会使用账户自己的订阅范围。</li>
+          <li><strong>订阅期刊</strong>：勾选需要关注的期刊，文献库和推送会使用账户自己的订阅范围。</li>
           <li><strong>推送计划</strong>：支持每天、每周或每月推送，可设置发送时间、邮件内容和推送期刊范围。</li>
           <li>游客可以浏览设置页面，但需要登录个人账户才能保存邮箱、期刊和推送配置。</li>
         </ul>

@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, Globe, Heart, Languages, Star, X } from "lucide-react";
+import { Check, Copy, Globe, Heart, Languages, Quote, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { copyText } from "../../lib/clipboard.js";
-import { articleDate, formatDate, formatRelativeDate, isChineseSourceText } from "../../lib/format.js";
+import { articleDate, formatDate, formatCitationGB7714, formatRelativeDate, isChineseSourceText } from "../../lib/format.js";
 import { journalAbbr, journalGroup } from "../../lib/journal.js";
 import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 import Modal from "../../components/Modal.jsx";
 
-function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpdated, showActions = true, hideTranslatedAbstract = false, canModerate = false }) {
+function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpdated, onOpenArticle, showActions = true, hideTranslatedAbstract = false, canModerate = false }) {
   const [detail, setDetail] = useState(article);
   const [enriching, setEnriching] = useState(true);
   const [enrichError, setEnrichError] = useState("");
@@ -22,6 +22,23 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
   } : null);
   const [translating, setTranslating] = useState("");
   const [translationError, setTranslationError] = useState("");
+  const [related, setRelated] = useState([]);
+
+  // 相关文献推荐（A3-3）：与详情并行请求，失败静默整块隐藏，绝不阻塞主内容。
+  useEffect(() => {
+    let ignore = false;
+    setRelated([]);
+    api.get(`/api/articles/${article.id}/related`)
+      .then((data) => {
+        if (!ignore) setRelated(Array.isArray(data?.articles) ? data.articles : []);
+      })
+      .catch(() => {
+        if (!ignore) setRelated([]);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [article.id]);
 
   useEffect(() => {
     let ignore = false;
@@ -174,6 +191,15 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
             )}
           </div>
           <div className="dialog-header-actions">
+            {/* 引用一键复制（B2-1）：科研用户的高频动作，图标按钮与关闭键同级。 */}
+            <button
+              className="icon-button"
+              title={copiedField === "citation" ? "引用已复制" : "复制引用（GB/T 7714）"}
+              aria-label="复制引用（GB/T 7714）"
+              onClick={() => copyField("citation", formatCitationGB7714(detail))}
+            >
+              {copiedField === "citation" ? <Check size={18} /> : <Quote size={18} />}
+            </button>
             {/* The single most common action stays in the first screenful
                 instead of sitting at the end of a long abstract. */}
             {detail.url && (
@@ -340,6 +366,37 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
               ))}
             </div>
           </div>
+        )}
+
+        {/* 相关文献（A3-3）：同方向 + 关键词共现取 3 篇；列表为空/请求失败时整块
+            不渲染。有 onOpenArticle（文献库）时点击可直接在弹窗内切换文献。 */}
+        {related.length > 0 && (
+          <section className="related-articles" aria-label="相关文献">
+            <h4>相关文献</h4>
+            <ul className="related-list">
+              {related.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className={`related-item${onOpenArticle ? "" : " is-static"}`}
+                    onClick={onOpenArticle ? () => onOpenArticle(item) : undefined}
+                    title={onOpenArticle ? "查看这篇文献" : undefined}
+                  >
+                    <span className="related-item-meta">
+                      {item.research_direction && (
+                        <span className="direction-chip direction-chip-soft" style={{ "--dir-key": directionVar(item.research_direction) }}>
+                          {directionLabel(item.research_direction)}
+                        </span>
+                      )}
+                      <span className="related-item-journal">{item.journal || "未知期刊"}</span>
+                      <time dateTime={formatDate(item.display_date)}>{formatDate(item.display_date)}</time>
+                    </span>
+                    <span className="related-item-title">{item.title}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         {showActions && (

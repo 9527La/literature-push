@@ -88,7 +88,10 @@ try {
     await page.keyboard.press("Escape");
     await page.waitForTimeout(400);
   }
-  await page.getByRole("button", { name: "管理中心" }).first().click();
+  // 2026-10-08 导航分组后「管理中心」收进「个人中心」下拉：hover 展开再点菜单项。
+  await page.hover(".group-btn:has-text('个人中心')");
+  await page.waitForTimeout(400);
+  await page.getByRole("menuitem", { name: "管理中心" }).click();
   await page.waitForSelector(".admin-translate-controls", { timeout: 20000 });
   await page.waitForTimeout(600);
 
