@@ -5538,4 +5538,161 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
   line-height: 1;
 }
 
+/* ══ 2026-10-08 晚 · 第二批 UI 改进（铁律：新规则一律追加在文件末尾）══════ */
+
+/* ── 需求1：速览文献行统一两行——徽章独占首行、标题第二行 ──────────────
+   5309 行历史规则把 .journal-article-title 设为 flex-wrap，徽章与标题有时
+   同行有时换行，长短标题排版不一致。徽章改为块级（fit-content 防止拉伸），
+   后面的标题文本自然换到第二行，与徽章长短无关。 */
+.journal-article-title { display: block; }
+.journal-article-title .journal-article-journal {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 4px;
+}
+
+/* ── 需求2：期刊小节可展开/折叠 ───────────────────────────────────────── */
+.journal-group-head {
+  width: 100%;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.journal-group-head:hover .journal-group-label { color: var(--accent-primary); }
+.journal-group-chevron { color: var(--text-tertiary); transition: transform 150ms var(--ease-out); }
+.journal-group-head.is-collapsed .journal-group-chevron { transform: rotate(-90deg); }
+/* .keyword-filter-list 有显式 display，会覆盖 hidden 属性的 UA 样式；补一条
+   与 .filter-group-content[hidden] 同款的规则，折叠才真正收起。 */
+.keyword-filter-list[hidden] { display: none; }
+
+/* ── 需求4：筛选组头行（图标+标签+清除）与总清除 ──────────────────────── */
+.filter-group-head-row { display: flex; align-items: center; gap: 6px; }
+.filter-group-head-row .filter-group-toggle { flex: 1; }
+.filter-group-clear {
+  border: none;
+  background: none;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+}
+.filter-group-clear:hover { color: var(--error); background: var(--surface-subtle); }
+.filter-reset-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 18px 6px;
+  align-self: flex-start;
+  color: var(--text-secondary);
+}
+
+/* ── 需求5：每日资讯——日期查找、分类筛选与内容查找 ───────────────────── */
+.daily-rail-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 12px 6px;
+  padding: 6px 9px;
+  border: 0.5px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-tertiary);
+}
+.daily-rail-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  outline: none;
+}
+.daily-rail-search input::placeholder { color: var(--text-tertiary); }
+.daily-rail-search-clear {
+  display: inline-flex;
+  border: none;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+}
+.daily-rail-search-clear:hover { color: var(--error); }
+.daily-rail-empty {
+  margin: 4px 14px 10px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.daily-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.daily-category-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.daily-category-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border: 0.5px solid var(--border-color);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 120ms var(--ease-out), background 120ms var(--ease-out), color 120ms var(--ease-out);
+}
+.daily-category-chip:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+.daily-category-chip.active {
+  border-color: var(--accent-primary);
+  background: var(--accent-light);
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+.daily-chip-count { font-size: 11px; color: var(--text-tertiary); }
+.daily-category-chip.active .daily-chip-count { color: var(--accent-primary); }
+.daily-content-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 200px;
+  min-width: 180px;
+  max-width: 320px;
+  padding: 5px 10px;
+  border: 0.5px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-tertiary);
+}
+.daily-content-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  outline: none;
+}
+.daily-content-search input::placeholder { color: var(--text-tertiary); }
+.daily-tools-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+}
+.daily-tools-reset:hover { color: var(--error); background: var(--surface-subtle); }
+
+
 

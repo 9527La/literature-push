@@ -1,4 +1,4 @@
-import { BarChart3, HelpCircle, Keyboard, Library, Mail, RefreshCw, Star, UserRound } from "lucide-react";
+import { BarChart3, HelpCircle, Keyboard, Library, Mail, Newspaper, RefreshCw, Sparkles, Star, UserRound } from "lucide-react";
 import InternalUseNotice from "../../components/InternalUseNotice.jsx";
 
 
@@ -18,10 +18,35 @@ function HelpView() {
         <h3><Library size={18} /> 文献库</h3>
         <p>展示已订阅期刊的最新论文。页面会优先显示本地已有内容，缺失的摘要、关键词和中文翻译在后台补全。</p>
         <ul>
-          <li><strong>搜索与筛选</strong>：点击“打开筛选”后，可按标题、作者、摘要、关键词、期刊、日期、未读状态和收藏状态筛选；同一条件内的多选为“或”关系，不同条件之间为“且”关系。</li>
+          <li><strong>搜索与筛选</strong>：点击“打开筛选”后，可按标题、作者、摘要、关键词、期刊、研究方向、日期、未读状态和收藏状态筛选；同一条件内的多选为“或”关系，不同条件之间为“且”关系。</li>
+          <li><strong>筛选管理</strong>：每个筛选分组右上角有独立的“清除”按钮；面板顶部提供“清除全部筛选”，一键回到初始状态。期刊分组（IEEE / 爱思唯尔 / 中文期刊）可点击组名展开或收起。</li>
+          <li><strong>AI 研究方向</strong>：每篇文献由 AI 自动标注研究方向（卡片上的彩色标签），可按方向多选筛选；“其他/交叉”类文献不进入文献库列表。筛选为空时表示全部分向。</li>
           <li><strong>排序</strong>：支持最新优先、最早优先和按相关性排序。相关性按标题、关键词和摘要中的匹配程度计算。</li>
           <li><strong>阅读操作</strong>：点击标题或摘要图标查看文献详情；使用勾选按钮标记或取消已读，使用心形按钮收藏或取消收藏。</li>
+          <li><strong>详情弹窗</strong>：底部自动列出 3 篇“相关文献”（同研究方向、关键词相近），点击可直接切换查看；顶部引用按钮可一键复制 GB/T 7714 格式的引用条目，DOI 也可单独复制。</li>
           <li><strong>显示控制</strong>：顶部“显示内容”开关可分别控制作者、关键词、摘要、中文标题和中文摘要；中文摘要默认关闭，中文期刊不会重复显示中文摘要。</li>
+          <li><strong>批量与导出</strong>：勾选多篇文献后可批量标记已读、批量收藏，或导出 RIS / BibTeX 文件。</li>
+        </ul>
+      </section>
+
+      <section className="help-section">
+        <h3><Sparkles size={18} /> 研究速览</h3>
+        <p>AI 每周生成的文献速报：总览各方向本期动态，并为主要研究方向各生成一份方向专报。</p>
+        <ul>
+          <li><strong>总览与专报</strong>：总览按方向分组展示本期文献与速评；点击方向 chips 或分组可查看该方向的完整专报与全部文献。</li>
+          <li><strong>三段式速评</strong>：每篇精选文献附“研究对象 / 研究方法 / 核心结论”速评，点击速评行可直接打开对应文献。</li>
+          <li><strong>历史回看</strong>：可切换往期周报与月报，观察各方向的热度变化。</li>
+        </ul>
+      </section>
+
+      <section className="help-section">
+        <h3><Newspaper size={18} /> 每日资讯</h3>
+        <p>每天自动汇总前一天的电力能源政策文件与重点新闻，左侧为日期列表，右侧为当日内容。</p>
+        <ul>
+          <li><strong>日期查找</strong>：左栏顶部输入框支持按日期片段过滤（如输入 <code>2026-10</code> 或 <code>10-05</code>），日期多时快速定位。</li>
+          <li><strong>分类筛选</strong>：正文顶部可按“政策文件 / 重点新闻”分类筛选，分类计数一目了然。</li>
+          <li><strong>内容查找</strong>：查找框可匹配当日资讯的标题与正文，配合分类筛选即可锁定目标条目。</li>
+          <li><strong>概览跳转</strong>：点击“今日导读”中的任意条目可滚动定位到对应详情。</li>
         </ul>
       </section>
 
@@ -64,6 +89,7 @@ function HelpView() {
           <li><strong>邮箱</strong>：填写并保存邮箱后，可以发送测试邮件。</li>
           <li><strong>订阅期刊</strong>：勾选需要关注的期刊，文献库和推送会使用账户自己的订阅范围。</li>
           <li><strong>推送计划</strong>：支持每天、每周或每月推送，可设置发送时间、邮件内容和推送期刊范围。</li>
+          <li><strong>研究方向偏好</strong>：可只推送选定的研究方向；邮件正文按方向分组展示，分组顺序与设置页点选顺序一致（方向 chips 上有顺序编号）。</li>
           <li>游客可以浏览设置页面，但需要登录个人账户才能保存邮箱、期刊和推送配置。</li>
         </ul>
       </section>

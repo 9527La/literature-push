@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownUp, Check, ChevronDown, Compass, Download, Eye, EyeOff, Filter, Keyboard, RefreshCw, Search, Star, X } from "lucide-react";
+import { ArrowDownUp, BookOpen, CalendarDays, Check, ChevronDown, Compass, Download, Eye, EyeOff, Filter, Keyboard, RefreshCw, RotateCcw, Search, Star, Tag, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { ARTICLE_PAGE_SIZE, DEFAULT_FILTERS } from "../../lib/constants.js";
 import { downloadTextFile, toBibtex, toRis } from "../../lib/export.js";
@@ -30,6 +30,8 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [batchBusy, setBatchBusy] = useState("");
+  // 期刊小节折叠（需求 2）：出版社分组可展开/收起，默认全部展开。
+  const [collapsedJournalGroups, setCollapsedJournalGroups] = useState(() => new Set());
   const searchInputRef = useRef(null);
   const sentinelRef = useRef(null);
   const preparationHandlersRef = useRef({});
@@ -93,21 +95,41 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     setCollapsedFilterGroups((current) => ({ ...current, [group]: !current[group] }));
   }
 
-  function filterGroupHeader(group, label, icon = null) {
+  function filterGroupHeader(group, label, icon = null, clear = null) {
     const contentId = `feed-filter-group-${group}`;
     const collapsed = Boolean(collapsedFilterGroups[group]);
     return (
-      <button
-        className="filter-group-toggle"
-        type="button"
-        aria-expanded={!collapsed}
-        aria-controls={contentId}
-        onClick={() => toggleFilterGroup(group)}
-      >
-        <span>{icon}{label}</span>
-        <ChevronDown size={15} aria-hidden="true" />
-      </button>
+      <div className="filter-group-head-row">
+        <button
+          className="filter-group-toggle"
+          type="button"
+          aria-expanded={!collapsed}
+          aria-controls={contentId}
+          onClick={() => toggleFilterGroup(group)}
+        >
+          <span>{icon}{label}</span>
+          <ChevronDown size={15} aria-hidden="true" />
+        </button>
+        {clear?.active && (
+          <button
+            className="filter-group-clear"
+            type="button"
+            title={`清除${label}筛选`}
+            onClick={clear.onClear}
+          >
+            清除
+          </button>
+        )}
+      </div>
     );
+  }
+
+  function toggleJournalGroup(key) {
+    setCollapsedJournalGroups((current) => {
+      const next = new Set(current);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
   }
 
   function handleArticleUpdated(nextArticles) {
@@ -446,8 +468,21 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           <div><span className="eyebrow">检索工具</span><h2>筛选条件</h2></div>
           <button className="icon-button filter-close-button" type="button" title="收起筛选" aria-label="收起筛选" onClick={() => setFilterOpen(false)}><X size={18} /></button>
         </div>
+        {activeFilterCount > 0 && (
+          <button
+            className="secondary compact filter-reset-all"
+            type="button"
+            title="清除全部筛选条件"
+            onClick={() => setFilters({ ...DEFAULT_FILTERS })}
+          >
+            <RotateCcw size={13} /> 清除全部筛选（{activeFilterCount}）
+          </button>
+        )}
         <div className={`filter-group ${collapsedFilterGroups.search ? "is-collapsed" : ""}`}>
-          {filterGroupHeader("search", "搜索", <Search size={14} aria-hidden="true" />)}
+          {filterGroupHeader("search", "搜索", <Search size={14} aria-hidden="true" />, {
+            active: Boolean(filters.q),
+            onClear: () => setFilters({ ...filters, q: "" })
+          })}
           <div className="filter-group-content" id="feed-filter-group-search" hidden={collapsedFilterGroups.search}>
             <div className="search-field">
               <Search size={14} className="search-field-icon" aria-hidden="true" />
@@ -470,55 +505,63 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           </div>
         </div>
         <div className={`filter-group ${collapsedFilterGroups.journal ? "is-collapsed" : ""}`}>
-          {filterGroupHeader("journal", "期刊")}
+          {filterGroupHeader("journal", "期刊", <BookOpen size={14} aria-hidden="true" />, {
+            active: filters.journal.length > 0,
+            onClear: () => setFilters({ ...filters, journal: [] })
+          })}
           <div className="filter-group-content" id="feed-filter-group-journal" hidden={collapsedFilterGroups.journal}>
             {/* Grouped by publisher so a 15-journal catalogue reads as four
-                blocks instead of one long list. Empty groups never render. */}
-            {journalGroups.map((group) => (
-              <div className="journal-group" key={group.key}>
-                <div className="journal-group-head">
-                  <span className={`journal-group-dot tone-${group.key}`} aria-hidden="true" />
-                  <span className="journal-group-label">{group.label}</span>
-                  <span className="journal-group-count">{group.items.length} 本</span>
+                blocks instead of one long list. Empty groups never render.
+                Each block is collapsible (需求 2): the head toggles its list. */}
+            {journalGroups.map((group) => {
+              const groupCollapsed = collapsedJournalGroups.has(group.key);
+              return (
+                <div className="journal-group" key={group.key}>
+                  <button
+                    type="button"
+                    className={`journal-group-head${groupCollapsed ? " is-collapsed" : ""}`}
+                    aria-expanded={!groupCollapsed}
+                    aria-controls={`feed-journal-group-${group.key}`}
+                    onClick={() => toggleJournalGroup(group.key)}
+                  >
+                    <span className={`journal-group-dot tone-${group.key}`} aria-hidden="true" />
+                    <span className="journal-group-label">{group.label}</span>
+                    <span className="journal-group-count">{group.items.length} 本</span>
+                    <ChevronDown size={14} className="journal-group-chevron" aria-hidden="true" />
+                  </button>
+                  <div className="keyword-filter-list journal-filter-list" id={`feed-journal-group-${group.key}`} hidden={groupCollapsed}>
+                    {group.items.map((j) => (
+                      <button
+                        key={j.name}
+                        className={`keyword-filter-chip journal-filter-chip tone-${group.key} ${filters.journal.includes(j.name) ? "active" : ""}`}
+                        onClick={() => {
+                          const next = filters.journal.includes(j.name)
+                            ? filters.journal.filter((k) => k !== j.name)
+                            : [...filters.journal, j.name];
+                          setFilters({ ...filters, journal: next });
+                        }}
+                        title={j.name}
+                      >
+                        <span className="kw-name">{j.name}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="keyword-filter-list journal-filter-list">
-                  {group.items.map((j) => (
-                    <button
-                      key={j.name}
-                      className={`keyword-filter-chip journal-filter-chip tone-${group.key} ${filters.journal.includes(j.name) ? "active" : ""}`}
-                      onClick={() => {
-                        const next = filters.journal.includes(j.name)
-                          ? filters.journal.filter((k) => k !== j.name)
-                          : [...filters.journal, j.name];
-                        setFilters({ ...filters, journal: next });
-                      }}
-                      title={j.name}
-                    >
-                      <span className="kw-name">{j.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
         <div className={`filter-group ${collapsedFilterGroups.direction ? "is-collapsed" : ""}`}>
-          <div className="direction-group-head-extra">
-            {filterGroupHeader("direction", "研究方向", <Compass size={14} aria-hidden="true" />)}
-            {filters.direction.length > 0 && (
-              <button
-                className="direction-clear"
-                type="button"
-                title="清除研究方向筛选"
-                onClick={() => setFilters({ ...filters, direction: [] })}
-              >
-                清除
-              </button>
-            )}
-          </div>
+          {filterGroupHeader("direction", "研究方向", <Compass size={14} aria-hidden="true" />, {
+            active: filters.direction.length > 0,
+            onClear: () => setFilters({ ...filters, direction: [] })
+          })}
           <div className="filter-group-content" id="feed-filter-group-direction" hidden={collapsedFilterGroups.direction}>
             <div className="keyword-filter-list direction-filter-list">
-              {DIRECTIONS.map((direction) => {
+              {/* 「其他」不进入文献库展示与筛选入口（需求 3）：后端默认排除
+                  research_direction='other'，这里不再提供豁免入口；数据保留，
+                  管理端与 /api/directions 统计仍可见。 */}
+              {DIRECTIONS.filter((direction) => direction.key !== "other").map((direction) => {
                 const count = directionCounts?.find((item) => item.key === direction.key)?.total;
                 const active = filters.direction.includes(direction.key);
                 return (
@@ -532,9 +575,7 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                         : [...filters.direction, direction.key];
                       setFilters({ ...filters, direction: next });
                     }}
-                    title={direction.key === "other"
-                      ? "其他/交叉：默认不进入正式列表与推送，选择此项可查看"
-                      : directionLabel(direction.key)}
+                    title={directionLabel(direction.key)}
                   >
                     <span className="direction-dot" style={{ "--dir-key": directionVar(direction.key) }} aria-hidden="true" />
                     <span className="kw-name">{directionLabel(direction.key)}</span>
@@ -546,7 +587,10 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           </div>
         </div>
         <div className={`filter-group ${collapsedFilterGroups.date ? "is-collapsed" : ""}`}>
-          {filterGroupHeader("date", "时间范围")}
+          {filterGroupHeader("date", "时间范围", <CalendarDays size={14} aria-hidden="true" />, {
+            active: Boolean(filters.from || filters.to),
+            onClear: () => setFilters({ ...filters, from: "", to: "" })
+          })}
           <div className="filter-group-content" id="feed-filter-group-date" hidden={collapsedFilterGroups.date}>
             <input
               type="date"
@@ -563,7 +607,10 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           </div>
         </div>
         <div className={`filter-group ${collapsedFilterGroups.flags ? "is-collapsed" : ""}`}>
-          {filterGroupHeader("flags", "筛选", <Filter size={14} aria-hidden="true" />)}
+          {filterGroupHeader("flags", "筛选", <Filter size={14} aria-hidden="true" />, {
+            active: Boolean(filters.unread || filters.favorite),
+            onClear: () => setFilters({ ...filters, unread: false, favorite: false })
+          })}
           <div className="filter-group-content" id="feed-filter-group-flags" hidden={collapsedFilterGroups.flags}>
             <div className="filter-row">
               <label className="checkline">
@@ -586,7 +633,10 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           </div>
         </div>
         <div className={`filter-group ${collapsedFilterGroups.keyword ? "is-collapsed" : ""}`}>
-          {filterGroupHeader("keyword", "关键词")}
+          {filterGroupHeader("keyword", "关键词", <Tag size={14} aria-hidden="true" />, {
+            active: filters.keyword.length > 0,
+            onClear: () => setFilters({ ...filters, keyword: [] })
+          })}
           <div className="filter-group-content" id="feed-filter-group-keyword" hidden={collapsedFilterGroups.keyword}>
             <div className="keyword-filter-list">
               {topKeywords.map((item) => (
