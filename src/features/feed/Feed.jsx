@@ -13,15 +13,16 @@ import ArticleDialog from "./ArticleDialog.jsx";
 
 function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, canModerate = false, onLoadMore, hasMoreArticles, loadingMoreArticles, queryKey = "", notify, onRefresh = null, refreshing = false, onDataChanged = null }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
-  const [filterOpen, setFilterOpen] = useState(true);
+  // 筛选面板默认收起（需求 2）：文献库首屏让位给文献列表，需要时点「打开筛选」。
+  const [filterOpen, setFilterOpen] = useState(false);
   const [collapsedFilterGroups, setCollapsedFilterGroups] = useState({
-    search: false,
-    journal: false,
-    direction: false,
-    date: false,
-    flags: false,
-    keyword: false,
-    sort: false
+    search: true,
+    journal: true,
+    direction: true,
+    date: true,
+    flags: true,
+    keyword: true,
+    sort: true
   });
   const [topKeywords, setTopKeywords] = useState([]);
   const [directionCounts, setDirectionCounts] = useState(null);

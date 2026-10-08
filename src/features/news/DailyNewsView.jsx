@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, RotateCcw, ScrollText, Search, X } from "lucide-react";
+import { CalendarDays, Filter, RotateCcw, ScrollText, Search, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { renderInlineMarkdown, renderMarkdown } from "../../lib/markdown.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
@@ -115,11 +115,14 @@ export default function DailyNewsView() {
   const [detailError, setDetailError] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [flashN, setFlashN] = useState(null);
-  // 筛选/查找（需求 5）：日期再多也能定位。
-  //   dateQuery   —— 左栏日期过滤（子串匹配，支持 "2026-10" / "10-05"）；
+  // 筛选/查找（需求 5 + 本轮改进）：日期再多也能定位。
+  //   dateFilterOpen —— 左栏日期筛选面板，默认收起，点「筛选」展开；
+  //   dateFrom/dateTo —— 日期范围（年月日自主选择，闭区间）；
   //   category    —— 内容分类（"all" 或概览分组名：政策文件/重点新闻）；
   //   contentQuery —— 单日内容查找（匹配条目标题与正文，不区分大小写）。
-  const [dateQuery, setDateQuery] = useState("");
+  const [dateFilterOpen, setDateFilterOpen] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [category, setCategory] = useState("all");
   const [contentQuery, setContentQuery] = useState("");
   const detailRequestId = useRef(0);
@@ -179,8 +182,17 @@ export default function DailyNewsView() {
   }, []);
 
   // ── 筛选/查找派生数据（hooks 必须在任何提前 return 之前，React #310）────
+  const dateFilterActive = Boolean(dateFrom || dateTo);
+  const filteredDates = useMemo(() => {
+    if (!list?.items?.length) return [];
+    return list.items.filter((item) => {
+      if (dateFrom && item.date < dateFrom) return false;
+      if (dateTo && item.date > dateTo) return false;
+      return true;
+    });
+  }, [list, dateFrom, dateTo]);
+
   const groupMap = useMemo(() => (parsed ? sectionGroupMap(parsed) : new Map()), [parsed]);
-  const trimmedDateQuery = dateQuery.trim();
   const trimmedContentQuery = contentQuery.trim();
   const contentQueryLower = trimmedContentQuery.toLowerCase();
 
@@ -245,11 +257,6 @@ export default function DailyNewsView() {
   const groupCounts = parsed ? countByGroupName(parsed) : new Map();
   const selectedMeta = list.items.find((item) => item.date === selectedDate);
 
-  // 左栏日期过滤（非 hook，随渲染计算即可）。
-  const filteredDates = trimmedDateQuery
-    ? list.items.filter((item) => item.date.includes(trimmedDateQuery))
-    : list.items;
-
   return (
     <div className="daily-news">
       <aside className="daily-rail" aria-label="资讯日期列表">
@@ -257,21 +264,45 @@ export default function DailyNewsView() {
           <ScrollText size={16} />
           <span>每日资讯</span>
         </div>
-        <div className="daily-rail-search">
-          <Search size={13} aria-hidden="true" />
-          <input
-            value={dateQuery}
-            onChange={(event) => setDateQuery(event.target.value)}
-            placeholder="查找日期，如 2026-10"
-            aria-label="按日期查找资讯"
-          />
-          {dateQuery && (
-            <button type="button" className="daily-rail-search-clear" aria-label="清除日期查找" onClick={() => setDateQuery("")}>
-              <X size={12} />
+        {/* 日期范围筛选（本轮改进）：默认收起，点「筛选」展开面板，自主选择
+            起止年月日做闭区间过滤；应用中按钮高亮并可一键清除。 */}
+        <div className="daily-rail-filter">
+          <button
+            type="button"
+            className={`daily-filter-toggle${dateFilterActive ? " active" : ""}`}
+            aria-expanded={dateFilterOpen}
+            aria-controls="daily-date-filter"
+            onClick={() => setDateFilterOpen((open) => !open)}
+          >
+            <Filter size={13} aria-hidden="true" /> 筛选日期
+            {dateFilterActive && <span className="daily-filter-dot" aria-hidden="true" />}
+          </button>
+          {dateFilterActive && (
+            <button
+              type="button"
+              className="daily-filter-clear"
+              title="清除日期筛选"
+              aria-label="清除日期筛选"
+              onClick={() => { setDateFrom(""); setDateTo(""); }}
+            >
+              <RotateCcw size={12} /> 清除
             </button>
           )}
         </div>
-        {filteredDates.length === 0 && <p className="daily-rail-empty">没有匹配的日期</p>}
+        {dateFilterOpen && (
+          <div className="daily-date-filter" id="daily-date-filter">
+            <label>
+              <span>开始日期</span>
+              <input type="date" value={dateFrom} max={dateTo || undefined} onChange={(event) => setDateFrom(event.target.value)} />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(event) => setDateTo(event.target.value)} />
+            </label>
+            {dateFilterActive && <p className="daily-date-filter-hint">当前显示 {filteredDates.length} 天（{filteredDates.length ? filteredDates[filteredDates.length - 1].date : "—"} ~ {filteredDates.length ? filteredDates[0].date : "—"}）</p>}
+          </div>
+        )}
+        {filteredDates.length === 0 && <p className="daily-rail-empty">没有符合筛选条件的日期</p>}
         {filteredDates.map((item) => (
           <button
             key={item.date}
