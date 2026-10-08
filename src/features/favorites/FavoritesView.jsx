@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, FolderPlus, Languages, Pencil, Save, Star, Trash2, X } from "lucide-react";
+import { Check, FolderPlus, Languages, Pencil, Plus, Save, Star, Trash2, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { articleDate, formatDate, isChineseJournalArticle } from "../../lib/format.js";
+import { findJournal, journalAbbr, journalGroup } from "../../lib/journal.js";
+import { directionLabel, directionVar } from "../../lib/directions.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
 
-function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpdated, onDataChanged }) {
+function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpdated, onDataChanged, journals = [] }) {
   const [data, setData] = useState({ groups: [], favorites: [], total: 0 });
   const [selectedGroup, setSelectedGroup] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -13,6 +15,8 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [editingGroupId, setEditingGroupId] = useState(null);
   const [editingGroupName, setEditingGroupName] = useState("");
+  // 新建分组不常驻（需求 6）：默认只显示「+ 新建分组」按钮，点击才展开输入行。
+  const [createOpen, setCreateOpen] = useState(false);
   const [savingArticleId, setSavingArticleId] = useState(null);
   const [noteDrafts, setNoteDrafts] = useState({});
   const [selectedArticle, setSelectedArticle] = useState(null);
@@ -187,15 +191,16 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
     <section className="profile-layout favorites-view" aria-labelledby="favorites-title">
       <div className="page-intro account-heading">
         <div><span className="eyebrow">个人账户 · 自动同步</span><h1 id="favorites-title">收藏文献</h1><p>把重要文献集中保存，按研究方向分组，并为每篇文献记录自己的备注。</p></div>
-        <div className="favorites-total"><Star size={17} fill="currentColor" /> <strong>{data.total}</strong> 篇收藏</div>
       </div>
       {message && <div className="admin-notice favorites-notice" role="status">{message}</div>}
       <div className="favorites-layout">
         <aside className="favorites-sidebar" aria-label="收藏分组">
           <div className="favorites-sidebar-header"><div><span className="eyebrow">我的收藏</span><h2>分组</h2></div><Star size={18} /></div>
           <div className="favorites-group-list">
+            {/* 分组行右侧不再显示篇数（需求 7/8）：计数没有操作价值，行内只保留
+                名称；自定义分组的重命名/删除按钮常驻显示。 */}
             <button className={`favorites-group-button ${selectedGroup === "all" ? "active" : ""}`} type="button" onClick={() => setSelectedGroup("all")}>
-              <span>全部收藏</span><strong>{data.groups.reduce((total, group) => total + Number(group.count || 0), 0)}</strong>
+              <span>全部收藏</span>
             </button>
             {allGroups.map((group) => {
               const value = group.id === null ? "ungrouped" : String(group.id);
@@ -211,7 +216,7 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
                   ) : (
                     <>
                       <button className={`favorites-group-button ${selectedGroup === value ? "active" : ""}`} type="button" onClick={() => setSelectedGroup(value)}>
-                        <span>{group.name}</span><strong>{group.count || 0}</strong>
+                        <span>{group.name}</span>
                       </button>
                       {group.id !== null && <div className="favorites-group-actions">
                         <button className="icon-button" type="button" title="重命名分组" aria-label={`重命名分组 ${group.name}`} onClick={() => startRenameGroup(group)}><Pencil size={13} /></button>
@@ -223,21 +228,44 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
               );
             })}
           </div>
-          <form className="favorites-create-form" onSubmit={createGroup}>
-            <label htmlFor="new-favorite-group">新建分组</label>
-            <div><input id="new-favorite-group" value={newGroupName} maxLength={40} onChange={(event) => setNewGroupName(event.target.value)} placeholder="例如：储能方向" /><button className="secondary compact" type="submit" disabled={creatingGroup || !newGroupName.trim()}><FolderPlus size={14} /> 新建</button></div>
-          </form>
+          {/* 新建入口折叠（需求 6）：点「+ 新建分组」才展开输入行。 */}
+          {createOpen ? (
+            <form className="favorites-create-form" onSubmit={createGroup}>
+              <div><input id="new-favorite-group" value={newGroupName} maxLength={40} onChange={(event) => setNewGroupName(event.target.value)} placeholder="例如：储能方向" autoFocus /><button className="secondary compact" type="submit" disabled={creatingGroup || !newGroupName.trim()}><FolderPlus size={14} /> 新建</button></div>
+            </form>
+          ) : (
+            <button className="secondary compact favorites-create-toggle" type="button" onClick={() => { setCreateOpen(true); }}>
+              <Plus size={14} /> 新建分组
+            </button>
+          )}
         </aside>
         <section className="favorites-content" aria-live="polite">
-          <header className="favorites-content-header"><div><span className="eyebrow">收藏列表</span><h2>{selectedGroupData.name}</h2></div><span>{selectedGroupData.count || 0} 篇</span></header>
+          <header className="favorites-content-header"><div><span className="eyebrow">收藏列表</span><h2>{selectedGroupData.name}</h2></div></header>
           {loading ? <div className="loading-skeleton"><div className="skeleton" style={{ height: 140, marginBottom: 12 }} /><div className="skeleton" style={{ height: 140 }} /></div> : data.favorites.length ? (
             <div className="favorites-list">
               {data.favorites.map((article) => {
                 const selectedValue = article.group_id === null || article.group_id === undefined ? "ungrouped" : String(article.group_id);
                 const note = noteDrafts[article.id] ?? article.note ?? "";
+                // 色系卡片（需求 5）：与文献库同源的期刊身份条（实底徽章 + 刊名 +
+                // 方向 chip），整卡带期刊色系。
+                const journalRecord = findJournal(journals, article.journal);
+                const tone = journalGroup(journalRecord || article.journal);
+                const direction = article.research_direction || "";
                 return (
-                  <article className="favorite-card" key={article.id}>
-                    <header><div className="article-meta"><span>{article.journal || "未知期刊"}</span><span>{formatDate(articleDate(article))}</span>{article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : <span className="article-status-badge unread-badge">未读</span>}</div><button className="icon-button favorite-remove-button" type="button" title="取消收藏" aria-label={`取消收藏：${article.title}`} disabled={savingArticleId === article.id} onClick={() => removeFavorite(article)}><Star size={18} fill="currentColor" /></button></header>
+                  <article className={`favorite-card tone-${tone}`} key={article.id}>
+                    <header className="article-head">
+                      <span className={`journal-mark tone-${tone}`} aria-hidden="true">{journalAbbr(article.journal)}</span>
+                      <span className="article-journal">{article.journal || "未知期刊"}</span>
+                      {article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : null}
+                      <span className="article-head-spacer" aria-hidden="true" />
+                      {direction && (
+                        <span className="direction-chip" style={{ "--dir-key": directionVar(direction) }} title={directionLabel(direction)}>
+                          {directionLabel(direction)}
+                        </span>
+                      )}
+                      <time dateTime={formatDate(articleDate(article))}>{formatDate(articleDate(article))}</time>
+                      <button className="icon-button favorite-remove-button" type="button" title="取消收藏" aria-label={`取消收藏：${article.title}`} disabled={savingArticleId === article.id} onClick={() => removeFavorite(article)}><Star size={17} fill="currentColor" /></button>
+                    </header>
                     <button className="favorite-card-title" type="button" onClick={() => setSelectedArticle(article)}>{article.title || "未命名文献"}</button>
                     {article.translated_title && article.translated_title !== article.title && <p className="translated-title"><Languages size={14} /> {article.translated_title}</p>}
                     {article.authors && <p className="authors">{article.authors}</p>}
@@ -253,7 +281,7 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
           ) : <div className="empty favorites-empty"><Star size={22} /><strong>这个分组还没有收藏文献</strong><p>在文献库页面点击星标即可加入收藏。</p></div>}
         </section>
       </div>
-      {selectedArticle && <ArticleDialog article={selectedArticle} close={() => setSelectedArticle(null)} markRead={markFavoriteRead} toggleFavorite={toggleFavoriteFromDialog} onArticleUpdated={mergeUpdatedArticle} hideTranslatedAbstract={isChineseJournalArticle(selectedArticle)} />}
+      {selectedArticle && <ArticleDialog article={selectedArticle} close={() => setSelectedArticle(null)} markRead={markFavoriteRead} toggleFavorite={toggleFavoriteFromDialog} onArticleUpdated={mergeUpdatedArticle} hideTranslatedAbstract={isChineseJournalArticle(selectedArticle, journals)} />}
     </section>
   );
 }

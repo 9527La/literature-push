@@ -200,6 +200,9 @@ function NavGroupPanel({ anchorRef, onMouseEnter, onMouseLeave, children }) {
 function App() {
   const [articles, setArticles] = useState([]);
   const [articlesHasMore, setArticlesHasMore] = useState(false);
+  // 接口返回的「符合当前筛选条件的总数」：列表是分页的，前端加载条数不等于
+  // 筛选命中总数，「共 N 篇文献」必须用这个值（需求 13）。
+  const [articlesTotal, setArticlesTotal] = useState(0);
   const [loadingMoreArticles, setLoadingMoreArticles] = useState(false);
   const [settings, setSettings] = useState({ journals: [], refreshCron: "", emailEnabled: false, emailRecipients: [] });
   const [status, setStatus] = useState(null);
@@ -449,6 +452,8 @@ function App() {
       if (requestId !== articleRequestRef.current) return 0;
       loadedArticleQueryRef.current = normalizedQuery;
       commitArticles(nextArticles);
+      // 筛选命中总数只随替换式刷新更新（追加批次不改变总数）。
+      setArticlesTotal(Number(page?.total) || 0);
       setArticlesHasMore(Boolean(page?.hasMore));
       return nextArticles.length;
     } finally {
@@ -989,7 +994,6 @@ function App() {
                 <NavGroupPanel anchorRef={personalGroupBtnRef} onMouseEnter={() => openGroupMenu("personal")} onMouseLeave={() => scheduleCloseGroup("personal")}>
                   <button className={`nav-menu-item${activeView === "favorites" ? " active" : ""}`} role="menuitem" onClick={() => switchView("favorites")}>
                     <Star size={16} /> <span className="menu-label">收藏文献</span>
-                    {status?.favoriteCount > 0 && <span className="nav-badge" aria-label={`${status.favoriteCount} 篇收藏文献`}>{status.favoriteCount}</span>}
                     {activeView === "favorites" && <Check size={15} className="menu-check" aria-hidden="true" />}
                   </button>
                   <button className={`nav-menu-item${activeView === "settings" ? " active" : ""}`} role="menuitem" onClick={() => switchView("settings")}>
@@ -1037,6 +1041,7 @@ function App() {
         ) : activeView === "feed" ? (
           <Feed
             articles={articles}
+            articlesTotal={articlesTotal}
             subscribedJournals={settings.journals.map((j) => j.name)}
             journals={settings.journals}
             filters={filters}
@@ -1072,6 +1077,7 @@ function App() {
             toggleFavorite={toggleFavorite}
             onArticleUpdated={updateArticleInList}
             onDataChanged={() => loadAll({ forceArticles: true })}
+            journals={settings.journals}
           />
         ) : activeView === "help" ? (
           <HelpView />

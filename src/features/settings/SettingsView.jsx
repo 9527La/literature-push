@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Compass, Filter, Mail, Save, Send, Settings, UserRound } from "lucide-react";
 import { api } from "../../lib/api.js";
-import { groupJournals } from "../../lib/journal.js";
 import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 
 function SettingsView(props) {
@@ -30,12 +29,7 @@ function parseDirectionFilter(value) {
 }
 
 function SettingsEditor({ settings, availableJournals, status, onSave }) {
-  const [selectedJournalNames, setSelectedJournalNames] = useState(
-    new Set(settings.journals.map((j) => j.name))
-  );
   const [refreshCron, setRefreshCron] = useState(settings.refreshCron);
-  // Same publisher buckets as the feed filter, so the two lists agree.
-  const journalGroups = useMemo(() => groupJournals(availableJournals), [availableJournals]);
 
   const [userEmail, setUserEmail] = useState("");
   const [savedEmail, setSavedEmail] = useState("");
@@ -93,7 +87,6 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
   }, [settings.pushCron]);
 
   useEffect(() => {
-    setSelectedJournalNames(new Set(settings.journals.map((j) => j.name)));
     setRefreshCron(settings.refreshCron);
     setPushEnabled(settings.pushEnabled || false);
     setPushFrequency(settings.pushFrequency || "weekly");
@@ -125,12 +118,6 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
       setSavedEmail(data.email || "");
     }).catch(() => {});
   }, []);
-
-  function toggleJournal(name) {
-    const next = new Set(selectedJournalNames);
-    next.has(name) ? next.delete(name) : next.add(name);
-    setSelectedJournalNames(next);
-  }
 
   function togglePushJournal(name) {
     const next = new Set(pushSelectedJournals);
@@ -185,12 +172,12 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
 
   function submit(event) {
     event.preventDefault();
-    const journals = availableJournals.filter((j) => selectedJournalNames.has(j.name));
     const generatedCron = generateCron();
-    onSave({ 
-      journals, 
-      refreshCron, 
-      emailEnabled: settings.emailEnabled, 
+    onSave({
+      // 订阅期刊入口已移除（需求 9）：文献库展示范围与推送默认范围沿用账户
+      // 现有值，不再由该页修改；筛选面板的期刊多选已覆盖按刊查看的需求。
+      refreshCron,
+      emailEnabled: settings.emailEnabled,
       emailRecipients: settings.emailRecipients,
       pushEnabled,
       pushFrequency,
@@ -306,6 +293,10 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
 
               {pushEnabled && pushEditing && (
                 <>
+                  {/* 编辑态两列布局（需求 10）：左列频率/时间/邮件内容，右列
+                      期刊范围/方向偏好，一屏看全，少滚动。 */}
+                  <div className="push-edit-grid">
+                  <div className="push-edit-col">
                   <div className="push-frequency">
                     <span className="settings-label">推送频率</span>
                     <div className="radio-group">
@@ -433,7 +424,8 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                     </div>
                     <p className="field-hint">AI 研究速览由智能体每周生成；当期未生成时自动附最近一期并标注期数。</p>
                   </div>
-
+                  </div>
+                  <div className="push-edit-col">
                   <div className="push-journal-filter">
                     <span className="settings-label">推送期刊范围</span>
                     <p className="field-hint">勾选需要推送的期刊，不勾选则推送所有已订阅期刊</p>
@@ -488,6 +480,8 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                       })}
                     </div>
                   </div>
+                  </div>
+                  </div>
 
                   <div className="push-actions">
                     <button className="primary" type="submit"><Save size={16} /> 保存推送设置</button>
@@ -503,41 +497,6 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
               )}
             </div>
           </form>
-        </div>
-
-        {/* Right Column: Journals */}
-        <div className="settings-right">
-          <form className="settings-section" onSubmit={submit}>
-            <h4>订阅期刊</h4>
-            <div className="journal-compact-header">
-              <span className="section-hint">勾选订阅期刊，文献库仅展示已订阅的论文。</span>
-              <div>
-                <button type="button" className="link-button" onClick={() => setSelectedJournalNames(new Set(availableJournals.map((j) => j.name)))}>全选</button>
-                <button type="button" className="link-button" onClick={() => setSelectedJournalNames(new Set())}>清空</button>
-              </div>
-            </div>
-            <div className="journal-list-compact">
-              {journalGroups.map((group) => (
-                <div className="journal-group" key={group.key}>
-                  <div className="journal-group-head">
-                    <span className={`journal-group-dot tone-${group.key}`} aria-hidden="true" />
-                    <span className="journal-group-label">{group.label}</span>
-                    <span className="journal-group-count">{group.items.length} 本</span>
-                  </div>
-                  {group.items.map((j) => (
-                    <label className="journal-item" key={j.name}>
-                      <input type="checkbox" checked={selectedJournalNames.has(j.name)} onChange={() => toggleJournal(j.name)} />
-                      <span>{j.name}</span>
-                    </label>
-                  ))}
-                </div>
-              ))}
-            </div>
-            <div className="settings-actions">
-              <button className="primary" type="submit"><Save size={16} /> 保存设置</button>
-            </div>
-          </form>
-
         </div>
       </div>
     </div>

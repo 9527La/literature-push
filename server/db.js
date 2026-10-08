@@ -1390,6 +1390,7 @@ function favoriteArticleSelect() {
   return `
     SELECT a.id, a.external_id, a.title, a.authors, a.journal, a.year, a.volume, a.issue,
       a.doi, a.abstract, a.url, a.published_at, a.fetched_at, a.first_seen_at, a.keywords,
+      a.research_direction,
       ${displayDateSql("a")} AS display_date,
       COALESCE(ui.is_read, 0) AS is_read,
       1 AS is_favorite,
@@ -2278,7 +2279,9 @@ export function getAdminOverview() {
   );
   const journalDistribution = db.prepare(`
     SELECT journal, COUNT(*) AS count,
-      SUM(CASE WHEN length(trim(coalesce(abstract, ''))) > 0 THEN 1 ELSE 0 END) AS abstract_count
+      SUM(CASE WHEN length(trim(coalesce(abstract, ''))) > 0 THEN 1 ELSE 0 END) AS abstract_count,
+      SUM(CASE WHEN research_direction IS NOT NULL AND research_direction != '' THEN 1 ELSE 0 END) AS classified_count,
+      SUM(CASE WHEN length(trim(coalesce(abstract, ''))) > 0 AND length(trim(coalesce(keywords, ''))) > 0 THEN 1 ELSE 0 END) AS analyzed_count
     FROM articles GROUP BY journal ORDER BY count DESC, journal ASC
   `).all().filter((row) => {
     const name = String(row.journal || "").trim();

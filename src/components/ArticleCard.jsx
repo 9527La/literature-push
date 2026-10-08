@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Check, FileText, Globe, Heart, Languages, Star, Tag } from "lucide-react";
 import Highlight from "./Highlight.jsx";
-import { articleDate, formatDate, formatRelativeDate, isChineseJournalArticle } from "../lib/format.js";
+import { articleDate, formatDate, formatRelativeDate } from "../lib/format.js";
 import { findJournal, journalAbbr, journalGroup } from "../lib/journal.js";
 import { directionLabel, directionVar } from "../lib/directions.js";
 
@@ -13,12 +13,10 @@ function ArticleCard({
   journals,
   displayPreferences,
   highlightTerms,
-  preparationActive,
   canPersonalize,
   onOpen,
   markRead,
   toggleFavorite,
-  requestPreparation,
   onSelectKeyword,
   selectable = false,
   selected = false,
@@ -28,9 +26,7 @@ function ArticleCard({
   // 传 0（默认）时等价于无额外延迟。
   enterDelay = 0
 }) {
-  const showTranslatedAbstract = displayPreferences.translatedAbstract
-    && !isChineseJournalArticle(article, journals);
-  const prepare = () => requestPreparation([article.id], { force: true });
+  const showTranslatedAbstract = displayPreferences.translatedAbstract;
   // 统一日期口径：正式出版用出版日、提前访问用入库日（后端 display_date）。
   const dateValue = articleDate(article);
   const absoluteDate = formatDate(dateValue);
@@ -92,11 +88,6 @@ function ArticleCard({
         {displayPreferences.bilingual && article.translated_title && article.translated_title !== article.title && (
           <p className="translated-title"><Languages size={14} /> {article.translated_title}</p>
         )}
-        {displayPreferences.bilingual && !article.translated_title && (
-          <button type="button" className="translation-missing" disabled={preparationActive} onClick={prepare}>
-            <Languages size={13} /> 获取中文翻译
-          </button>
-        )}
         {displayPreferences.authors && article.authors && <p className="authors"><Highlight text={article.authors} terms={highlightTerms} /></p>}
         {displayPreferences.keywords && keywords.length > 0 && (
           <div className="keywords">
@@ -125,18 +116,11 @@ function ArticleCard({
             )}
           </div>
         )}
-        {displayPreferences.abstract && (
-          article.abstract
-            ? <p className="abstract"><Highlight text={article.abstract} terms={highlightTerms} /></p>
-            : <button type="button" className="abstract-missing" disabled={preparationActive} onClick={prepare}>获取摘要与中文翻译</button>
+        {displayPreferences.abstract && article.abstract && (
+          <p className="abstract"><Highlight text={article.abstract} terms={highlightTerms} /></p>
         )}
         {showTranslatedAbstract && article.translated_abstract && (
           <div className="translated-abstract"><span>中文摘要</span><p>{article.translated_abstract}</p></div>
-        )}
-        {showTranslatedAbstract && article.abstract && !article.translated_abstract && (
-          <button type="button" className="translation-missing" disabled={preparationActive} onClick={prepare}>
-            <Languages size={13} /> 获取中文摘要
-          </button>
         )}
       </div>
       <div className="article-actions">

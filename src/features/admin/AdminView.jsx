@@ -610,7 +610,7 @@ function AdminView({ onDataChanged }) {
 
       <section className="admin-panel-card admin-table-card">
         <header><div><span className="eyebrow">期刊数据</span><h2>文献分布</h2></div><BookOpen size={19} /></header>
-        <div className="admin-table-wrap"><table><thead><tr><th>期刊</th><th>文献数量</th><th>带摘要</th><th>摘要覆盖率</th></tr></thead><tbody>{overview.journals.map((journal) => <tr key={journal.journal}><td><strong>{journal.journal || "未标记期刊"}</strong></td><td>{journal.count}</td><td>{journal.abstract_count}</td><td>{journal.count ? (journal.abstract_count * 100 / journal.count).toFixed(1) : "0.0"}%</td></tr>)}</tbody></table></div>
+        <div className="admin-table-wrap"><table><thead><tr><th>期刊</th><th>文献数量</th><th>带摘要</th><th>摘要覆盖率</th><th title="AI 研究方向已标注的文献占比">分类覆盖率</th><th title="摘要与关键词齐备、可供 AI 分析的文献占比">分析覆盖率</th></tr></thead><tbody>{overview.journals.map((journal) => <tr key={journal.journal}><td><strong>{journal.journal || "未标记期刊"}</strong></td><td>{journal.count}</td><td>{journal.abstract_count}</td><td>{journal.count ? (journal.abstract_count * 100 / journal.count).toFixed(1) : "0.0"}%</td><td>{journal.count ? (journal.classified_count * 100 / journal.count).toFixed(1) : "0.0"}%</td><td>{journal.count ? (journal.analyzed_count * 100 / journal.count).toFixed(1) : "0.0"}%</td></tr>)}</tbody></table></div>
       </section>
       {selectedCoverageArticle && (
         <ArticleDialog

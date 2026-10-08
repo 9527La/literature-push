@@ -11,7 +11,7 @@ import EmptyState from "../../components/EmptyState.jsx";
 import useListShortcuts from "../../hooks/useListShortcuts.js";
 import ArticleDialog from "./ArticleDialog.jsx";
 
-function Feed({ articles, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, canModerate = false, onLoadMore, hasMoreArticles, loadingMoreArticles, queryKey = "", notify, onRefresh = null, refreshing = false, onDataChanged = null }) {
+function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, canModerate = false, onLoadMore, hasMoreArticles, loadingMoreArticles, queryKey = "", notify, onRefresh = null, refreshing = false, onDataChanged = null }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [filterOpen, setFilterOpen] = useState(true);
   const [collapsedFilterGroups, setCollapsedFilterGroups] = useState({
@@ -34,14 +34,6 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
   const [collapsedJournalGroups, setCollapsedJournalGroups] = useState(() => new Set());
   const searchInputRef = useRef(null);
   const sentinelRef = useRef(null);
-  const preparationHandlersRef = useRef({});
-  const [preparation, setPreparation] = useState({ active: false, total: 0, completed: 0, enriched: 0, enrichedAbstract: 0, enrichedKeywords: 0, translated: 0, failed: 0, failedAbstract: 0, failedKeywords: 0, message: "" });
-  const attemptedPreparationIdsRef = useRef(new Set());
-  const preparationJobRef = useRef("");
-  const preparationTimerRef = useRef(null);
-  const preparationDelayRef = useRef(1500);
-  const autoPreparationStartedRef = useRef(false);
-  const preparationMountedRef = useRef(true);
 
   // ── 入场 stagger（B3-2）─────────────────────────────────────────────────
   // 只给「本批新挂载」的卡片算入场延迟：列表长度增长时，增长起点就是本批的
@@ -69,16 +61,6 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     setVisibleCount(50);
     setSelectedIds((current) => (current.size ? new Set() : current));
   }, [queryKey]);
-
-  useEffect(() => {
-    preparationMountedRef.current = true;
-    return () => {
-      preparationMountedRef.current = false;
-      preparationJobRef.current = "";
-      preparationDelayRef.current = 1500;
-      if (preparationTimerRef.current) clearTimeout(preparationTimerRef.current);
-    };
-  }, []);
 
   useEffect(() => {
     if (!selectedArticle) return;
@@ -142,70 +124,6 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     });
   }
 
-  function articleNeedsPreparation(article) {
-    return !article.abstract?.trim()
-      || !article.keywords?.trim()
-      || (!isChineseSourceText(article.title) && !article.translated_title?.trim())
-      || (Boolean(article.abstract?.trim()) && !isChineseSourceText(article.abstract) && !article.translated_abstract?.trim());
-  }
-
-  async function pollPreparationJob(jobId) {
-    if (!preparationMountedRef.current || preparationJobRef.current !== jobId) return;
-    try {
-      const job = await api.get(`/api/articles/prepare/${jobId}`);
-      if (job.results?.length) handleArticleUpdated(job.results);
-      const finished = job.status === "complete";
-      setPreparation({
-        active: !finished,
-        total: job.total,
-        completed: job.completed,
-        enriched: job.enriched,
-        enrichedAbstract: job.enrichedAbstract,
-        enrichedKeywords: job.enrichedKeywords,
-        translated: job.translated,
-        failed: job.failed,
-        failedAbstract: job.failedAbstract,
-        failedKeywords: job.failedKeywords,
-        message: finished
-          ? `后台补全完成：摘要 +${job.enrichedAbstract || 0}，关键词 +${job.enrichedKeywords || 0}，翻译 +${job.translated || 0}；失败：摘要 ${job.failedAbstract || 0}，关键词 ${job.failedKeywords || 0}，其他 ${Math.max((job.failed || 0) - (job.failedAbstract || 0) - (job.failedKeywords || 0), 0)}。`
-          : "已有内容已从本地数据库直接显示，正在后台补全缺失的摘要、关键词和中文翻译。"
-      });
-      if (finished) {
-        preparationJobRef.current = "";
-        preparationTimerRef.current = setTimeout(() => {
-          if (preparationMountedRef.current) setPreparation((current) => ({ ...current, message: "" }));
-        }, 6000);
-        return;
-      }
-      const delay = preparationDelayRef.current;
-      preparationDelayRef.current = Math.min(delay * 2, 5000);
-      preparationTimerRef.current = setTimeout(() => pollPreparationJob(jobId), delay);
-    } catch (error) {
-      preparationJobRef.current = "";
-      setPreparation((current) => ({ ...current, active: false, message: `批量补全暂未完成：${error.message}` }));
-    }
-  }
-
-  async function startArticlePreparation(ids, { force = false } = {}) {
-    if (preparationJobRef.current) return;
-    const uniqueIds = [...new Set(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0))];
-    const selectedIds = force
-      ? uniqueIds
-      : uniqueIds.filter((id) => !attemptedPreparationIdsRef.current.has(id));
-    if (!selectedIds.length) return;
-    selectedIds.forEach((id) => attemptedPreparationIdsRef.current.add(id));
-    preparationDelayRef.current = 1500;
-    setPreparation({ active: true, total: selectedIds.length, completed: 0, enriched: 0, enrichedAbstract: 0, enrichedKeywords: 0, translated: 0, failed: 0, failedAbstract: 0, failedKeywords: 0, message: `已从本地数据库直接显示已有内容，正在创建 ${selectedIds.length} 篇缺失内容的补全任务…` });
-    try {
-      const job = await api.post("/api/articles/prepare", { ids: selectedIds });
-      preparationJobRef.current = job.jobId;
-      setPreparation((current) => ({ ...current, total: job.total, message: "已有内容已从本地数据库直接显示，正在后台补全缺失的摘要、关键词和中文翻译。" }));
-      await pollPreparationJob(job.jobId);
-    } catch (error) {
-      setPreparation((current) => ({ ...current, active: false, message: `无法启动批量补全：${error.message}` }));
-    }
-  }
-
   // Only show articles from subscribed journals
   const filteredArticles = articles.filter((article) =>
     subscribedJournals.length === 0 || subscribedJournals.includes(article.journal)
@@ -260,47 +178,6 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
     enterStartRef.current = count > prevVisibleCountRef.current ? prevVisibleCountRef.current : 0;
     prevVisibleCountRef.current = count;
   }, [visibleArticles.length]);
-
-  const visibleTranslatedCount = visibleArticles.filter((article) => (
-    article.translated_title && article.translated_title !== article.title
-  )).length;
-  const visibleAbstractCount = visibleArticles.filter((article) => Boolean(article.abstract?.trim())).length;
-  const visibleTranslatedAbstractCount = visibleArticles.filter((article) => (
-    !isChineseJournalArticle(article, journals) && Boolean(article.translated_abstract?.trim())
-  )).length;
-  const visiblePendingArticles = visibleArticles.filter(articleNeedsPreparation);
-  const visibleReadyCount = visibleArticles.length - visiblePendingArticles.length;
-  const visiblePendingCount = visiblePendingArticles.length;
-  const visiblePreparationKey = visibleArticles.map((article) => [
-    article.id,
-    Boolean(article.abstract?.trim()),
-    Boolean(article.keywords?.trim()),
-    Boolean(article.translated_title?.trim()),
-    Boolean(article.translated_abstract?.trim())
-  ].join(":" )).join("|");
-
-  useEffect(() => {
-    if (autoPreparationStartedRef.current || preparationJobRef.current || !visibleArticles.length) return;
-    const missingIds = visiblePendingArticles.map((article) => article.id);
-    if (!missingIds.length) return;
-    autoPreparationStartedRef.current = true;
-    void startArticlePreparation(missingIds);
-  }, [visiblePreparationKey, preparation.active, visibleArticles.length]);
-
-  useEffect(() => {
-    // A completion notice belongs to the page that started the job. Clear it
-    // when the user switches to a different journal/filter so it is not
-    // mistaken for another round of background loading.
-    if (!preparation.active && preparation.message) {
-      setPreparation((current) => ({ ...current, message: "" }));
-    }
-  }, [visiblePreparationKey]);
-
-  preparationHandlersRef.current.startArticlePreparation = startArticlePreparation;
-  // Stable wrappers keep every memoized card's props identical between renders.
-  const requestPreparation = useCallback((ids, options) => (
-    preparationHandlersRef.current.startArticlePreparation(ids, options)
-  ), []);
 
   const hasMoreList = visibleCount < sortedArticles.length || hasMoreArticles;
   // 滚动哨兵和「加载下一批」按钮都会走到这里。实现放在 ref 里，observer 的
@@ -715,13 +592,6 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           <button type="button" className={`display-toggle ${displayPreferences.translatedAbstract ? "active" : ""}`} onClick={() => toggleDisplay("translatedAbstract")}>
             {displayPreferences.translatedAbstract ? <Eye size={14} /> : <EyeOff size={14} />} 中文摘要
           </button>
-          <span className="display-summary" role="status">
-            {`数据库已载入 ${visibleReadyCount} 篇`}
-            {visiblePendingCount > 0 && ` · ${visiblePendingCount} 篇待补全`}
-            {displayPreferences.bilingual && ` · ${visibleTranslatedCount} 篇有中文标题`}
-            {displayPreferences.abstract && ` · ${visibleAbstractCount} 篇有摘要`}
-            {displayPreferences.translatedAbstract && ` · ${visibleTranslatedAbstractCount} 篇有中文摘要`}
-          </span>
         </div>
         </div>
 
@@ -744,33 +614,8 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
           </div>
         )}
 
-        {(preparation.active || preparation.message) && (
-          <div className={`preparation-bar ${preparation.active ? "active" : ""}`} role="status" aria-live="polite">
-            <div className="preparation-copy">
-              <strong>{preparation.active ? "正在补全当前页面缺失内容" : "当前页面后台补全结果"}</strong>
-              <span>{preparation.message || "已有内容直接来自本地数据库，仅对缺失的摘要、关键词和翻译进行补全。"}</span>
-            </div>
-            {preparation.active && (
-              <div className="preparation-progress">
-                <progress max={Math.max(preparation.total, 1)} value={preparation.completed} />
-                <span>{preparation.completed}/{preparation.total}</span>
-              </div>
-            )}
-            {visiblePendingCount > 0 && (
-              <button
-                className="secondary compact"
-                type="button"
-                disabled={preparation.active}
-                onClick={() => startArticlePreparation(visiblePendingArticles.map((article) => article.id), { force: true })}
-              >
-                <RefreshCw size={14} className={preparation.active ? "spin" : ""} /> 批量补全当前批次
-              </button>
-            )}
-          </div>
-        )}
-
         <div className="article-count" role="status" aria-live="polite">
-          共 <strong>{sortedArticles.length}</strong> 篇文献
+          共 <strong>{articlesTotal || sortedArticles.length}</strong> 篇文献
           {counts.read > 0 && <>，已读 <strong>{counts.read}</strong> 篇</>}
           {counts.favorite > 0 && <>，收藏 <strong>{counts.favorite}</strong> 篇</>}
         </div>
@@ -824,14 +669,12 @@ function Feed({ articles, subscribedJournals, journals, filters, setFilters, mar
                 journals={journals}
                 displayPreferences={displayPreferences}
                 highlightTerms={highlightTerms}
-                preparationActive={preparation.active}
                 canPersonalize={canPersonalize}
                 isCursor={index === cursorIndex}
                 enterDelay={Math.min(Math.max(index - enterStartRef.current, 0), 15) * 40}
                 onOpen={setSelectedArticle}
                 markRead={markRead}
                 toggleFavorite={toggleFavorite}
-                requestPreparation={requestPreparation}
                 onSelectKeyword={selectKeyword}
                 selectable={canPersonalize}
                 selected={selectedIds.has(article.id)}
