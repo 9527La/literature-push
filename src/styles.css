@@ -5982,3 +5982,25 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
   border-bottom: 1px solid color-mix(in srgb, var(--tone-line, var(--border-light)) 55%, transparent);
 }
 .favorite-card .article-head { border-bottom: none; }
+
+/* ── 2026-10-09 需求：使用说明铺满页面且左右对称 ─────────────────────────
+   旧规则 width min(100%,1240px) 且不居中，宽屏下右侧留白；改为占满内容区，
+   两列 grid 自然对称，窄屏回退单列。 */
+.help-view {
+  width: 100%;
+  max-width: none;
+}
+@media (max-width: 1100px) {
+  .help-view { grid-template-columns: 1fr; }
+}
+
+/* ── 2026-10-09 需求：使用说明铺满页面且左右对称 ─────────────────────────
+   旧规则 width min(100%,1240px) 且不居中，宽屏下右侧留白；改为占满内容区，
+   两列 grid 自然对称，窄屏回退单列。 */
+.help-view {
+  width: 100%;
+  max-width: none;
+}
+@media (max-width: 1100px) {
+  .help-view { grid-template-columns: 1fr; }
+}
