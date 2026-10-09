@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarRange, ChevronDown, GripVertical, Plus, RotateCcw, Settings2, Sparkles, X } from "lucide-react";
+import { CalendarRange, Check, ChevronDown, GripVertical, Plus, RotateCcw, Settings2, Sparkles, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 import { journalAbbr, journalGroup } from "../../lib/journal.js";
@@ -189,6 +189,8 @@ function BriefCard({ id, article, brief, fallbackText, onOpen }) {
           <>
             <span className="reports-brief-mark">{journalAbbr(article.journal) || (article.journal || "").slice(0, 4)}</span>
             <span className="reports-brief-journal">{article.journal}</span>
+            {article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : null}
+            {article.is_favorite ? <span className="article-status-badge fav-badge"><Star size={11} /> 收藏</span> : null}
             <span className="reports-brief-date">{formatRelativeDate(article.display_date || article.published_at)}</span>
           </>
         ) : (
@@ -378,6 +380,8 @@ function ArticleListDialog({ title, markLabel, subtitle, items, loading, error, 
               <span className="journal-article-meta">
                 {direction && <span className="journal-article-dot" aria-hidden="true" />}
                 <span>{direction ? directionLabel(direction) : "未标注方向"}</span>
+                {article?.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : null}
+                {article?.is_favorite ? <span className="article-status-badge fav-badge"><Star size={11} /> 收藏</span> : null}
                 {article && <span>{formatRelativeDate(article.display_date || article.published_at)}</span>}
               </span>
             </button>

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import { Compass, Filter, Mail, Save, Send, Settings, UserRound } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Compass, Filter, Mail, Pencil, Save, Send, Settings, UserRound } from "lucide-react";
 import { api } from "../../lib/api.js";
+import { groupJournals } from "../../lib/journal.js";
 import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 
 function SettingsView(props) {
@@ -30,12 +31,20 @@ function parseDirectionFilter(value) {
 
 function SettingsEditor({ settings, availableJournals, status, onSave }) {
   const [refreshCron, setRefreshCron] = useState(settings.refreshCron);
-
   const [userEmail, setUserEmail] = useState("");
   const [savedEmail, setSavedEmail] = useState("");
+  // 邮箱编辑态（需求 2）：已保存时只读，点「修改」才可编辑
+  const [emailEditing, setEmailEditing] = useState(true);
   const [emailMsg, setEmailMsg] = useState("");
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState("");
+  // 推送期刊范围按出版社分组（需求 3），与筛选面板同一分组
+  const pushJournalGroups = useMemo(() => groupJournals(availableJournals), [availableJournals]);
+
+  useEffect(() => {
+    // 邮箱拉取/保存后同步编辑态：有已保存邮箱即只读
+    setEmailEditing(!savedEmail);
+  }, [savedEmail]);
 
   // Push settings
   const [pushEnabled, setPushEnabled] = useState(settings.pushEnabled || false);
@@ -140,6 +149,8 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
       await api.post("/api/user-email", { email: userEmail });
       setSavedEmail(userEmail);
       setEmailMsg("邮箱已保存");
+      // 保存成功后回到只读态（需求 2）：需再次点击「修改」才能编辑。
+      setEmailEditing(false);
     } catch (e) { setEmailMsg(e.message); }
   }
 
@@ -205,24 +216,36 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
             <p className="section-hint">填写后系统将每周推送最新文献到此邮箱。</p>
             <div className="saved-email-status">
               {savedEmail ? (
-                <span>已保存：<strong>{savedEmail}</strong>{userEmail !== savedEmail && <span className="unsaved-hint">（已修改，未保存）</span>}</span>
+                <span>已保存：<strong>{savedEmail}</strong>{emailEditing && userEmail !== savedEmail && <span className="unsaved-hint">（已修改，未保存）</span>}</span>
               ) : (
                 <span className="no-email-hint">尚未保存邮箱</span>
               )}
             </div>
+            {/* 邮箱 + 测试按钮一行（需求 1）；已保存时输入只读、按钮变「修改」（需求 2） */}
             <div className="email-row">
               <input
                 type="email"
                 value={userEmail}
                 onChange={(e) => setUserEmail(e.target.value)}
                 placeholder="your@email.com"
+                disabled={Boolean(savedEmail) && !emailEditing}
               />
-              <button className="primary" type="button" onClick={saveEmail}><Save size={14} /> 保存</button>
+              {savedEmail && !emailEditing ? (
+                <button
+                  className="secondary"
+                  type="button"
+                  onClick={() => { setUserEmail(savedEmail); setEmailEditing(true); }}
+                >
+                  <Pencil size={14} /> 修改
+                </button>
+              ) : (
+                <button className="primary" type="button" onClick={saveEmail}><Save size={14} /> 保存</button>
+              )}
+              <button className="secondary" type="button" onClick={testEmail} disabled={testing || !savedEmail}>
+                <Send size={14} /> {testing ? "发送中..." : "发送测试邮箱"}
+              </button>
             </div>
             {emailMsg && <div className="inline-msg">{emailMsg}</div>}
-            <button className="secondary" type="button" onClick={testEmail} disabled={testing || !savedEmail} style={{ marginTop: 8 }}>
-              <Send size={14} /> {testing ? "发送中..." : "发送测试邮箱"}
-            </button>
             {testMsg && <div className="inline-msg">{testMsg}</div>}
           </section>
 
@@ -428,29 +451,57 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                   <div className="push-edit-col">
                   <div className="push-journal-filter">
                     <span className="settings-label">推送期刊范围</span>
-                    <p className="field-hint">勾选需要推送的期刊，不勾选则推送所有已订阅期刊</p>
-                    <div className="push-journal-list">
-                      <label className="checkline push-journal-all">
-                        <input
-                          type="checkbox"
-                          checked={pushSelectedJournals.size === 0}
-                          onChange={() => {
-                            setPushSelectedJournals(new Set());
-                            setPushJournalFilter("");
-                          }}
-                        />
-                        全部已订阅期刊
-                      </label>
-                      {availableJournals.map((j) => (
-                        <label className="checkline" key={j.name}>
-                          <input
-                            type="checkbox"
-                            checked={pushSelectedJournals.has(j.name)}
-                            onChange={() => togglePushJournal(j.name)}
-                          />
-                          {j.name}
-                        </label>
-                      ))}
+                    <p className="field-hint">勾选需要推送的期刊，不勾选则推送全部期刊；按出版社分组，支持组级全选/清除</p>
+                    <label className="checkline push-journal-all">
+                      <input
+                        type="checkbox"
+                        checked={pushSelectedJournals.size === 0}
+                        onChange={() => {
+                          setPushSelectedJournals(new Set());
+                          setPushJournalFilter("");
+                        }}
+                      />
+                      全部期刊（不限定）
+                    </label>
+                    {/* 按出版社分组全量平铺（需求 3）：不再滚动，组级全选/清除与筛选面板一致 */}
+                    <div className="push-journal-groups">
+                      {pushJournalGroups.map((group) => {
+                        const names = group.items.map((j) => j.name);
+                        const selected = names.filter((n) => pushSelectedJournals.has(n)).length;
+                        const allSelected = names.length > 0 && selected === names.length;
+                        const toggleGroup = () => {
+                          const next = new Set(pushSelectedJournals);
+                          if (allSelected) names.forEach((n) => next.delete(n));
+                          else names.forEach((n) => next.add(n));
+                          setPushSelectedJournals(next);
+                          setPushJournalFilter([...next].join(", "));
+                        };
+                        return (
+                          <div className="push-journal-group" key={group.key}>
+                            <div className="push-journal-group-head">
+                              <span className={`journal-group-dot tone-${group.key}`} aria-hidden="true" />
+                              <span className="push-journal-group-label">{group.label}</span>
+                              <span className="push-journal-group-count">{selected}/{names.length}</span>
+                              <button type="button" className="link-button" onClick={toggleGroup}>
+                                {allSelected ? "清除" : "全选"}
+                              </button>
+                            </div>
+                            <div className="push-journal-chips">
+                              {group.items.map((j) => (
+                                <button
+                                  key={j.name}
+                                  type="button"
+                                  className={`push-journal-chip tone-${group.key} ${pushSelectedJournals.has(j.name) ? "active" : ""}`}
+                                  onClick={() => togglePushJournal(j.name)}
+                                  title={j.name}
+                                >
+                                  {j.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 

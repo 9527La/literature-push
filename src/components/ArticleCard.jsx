@@ -81,6 +81,42 @@ function ArticleCard({
             </span>
           )}
           <time dateTime={absoluteDate} title={absoluteDate}>{formatRelativeDate(dateValue)}</time>
+          {/* 动作按钮顶部横向 + 中文名（需求 5）：替代右侧竖排图标栏，标题占满整行 */}
+          <span className="article-actions-inline">
+            <button type="button" title="查看摘要" aria-label="查看摘要" onClick={() => onOpen(article)}>
+              <FileText size={12} /> 摘要
+            </button>
+            <button
+              type="button"
+              title={canPersonalize ? (article.is_read ? "取消已读" : "标记已读") : "登录个人账户后可标记已读"}
+              aria-label={canPersonalize ? (article.is_read ? "取消已读" : "标记已读") : "登录个人账户后可标记已读"}
+              aria-pressed={Boolean(article.is_read)}
+              className={article.is_read ? "action-done" : ""}
+              onClick={() => markRead(article.id)}
+              disabled={!canPersonalize}
+            >
+              <Check size={12} /> {article.is_read ? "已读" : "未读"}
+            </button>
+            <button
+              type="button"
+              title={canPersonalize ? (article.is_favorite ? "取消收藏" : "收藏") : "登录个人账户后可收藏"}
+              aria-label={canPersonalize ? (article.is_favorite ? "取消收藏" : "收藏") : "登录个人账户后可收藏"}
+              aria-pressed={Boolean(article.is_favorite)}
+              className={article.is_favorite ? "action-faved" : ""}
+              onClick={() => toggleFavorite(article.id)}
+              disabled={!canPersonalize}
+            >
+              {article.is_favorite
+                ? <Star size={12} fill="currentColor" />
+                : <Heart size={12} />}
+              {article.is_favorite ? "已藏" : "收藏"}
+            </button>
+            {article.url && (
+              <a title="打开原文网页" aria-label="打开原文网页" href={article.url} target="_blank" rel="noopener noreferrer">
+                <Globe size={12} /> 原文
+              </a>
+            )}
+          </span>
         </div>
         <button className="title-button" onClick={() => onOpen(article)}>
           <Highlight text={article.title} terms={highlightTerms} />
@@ -121,40 +157,6 @@ function ArticleCard({
         )}
         {showTranslatedAbstract && article.translated_abstract && (
           <div className="translated-abstract"><span>中文摘要</span><p>{article.translated_abstract}</p></div>
-        )}
-      </div>
-      <div className="article-actions">
-        <button type="button" title="查看摘要" aria-label="查看摘要" onClick={() => onOpen(article)}>
-          <FileText size={18} />
-        </button>
-        <button
-          type="button"
-          title={canPersonalize ? (article.is_read ? "取消已读" : "标记已读") : "登录个人账户后可标记已读"}
-          aria-label={canPersonalize ? (article.is_read ? "取消已读" : "标记已读") : "登录个人账户后可标记已读"}
-          aria-pressed={Boolean(article.is_read)}
-          className={`action-read ${article.is_read ? "action-done" : ""}`}
-          onClick={() => markRead(article.id)}
-          disabled={!canPersonalize}
-        >
-          <Check size={18} />
-        </button>
-        <button
-          type="button"
-          title={canPersonalize ? (article.is_favorite ? "取消收藏" : "收藏") : "登录个人账户后可收藏"}
-          aria-label={canPersonalize ? (article.is_favorite ? "取消收藏" : "收藏") : "登录个人账户后可收藏"}
-          aria-pressed={Boolean(article.is_favorite)}
-          className={`action-favorite ${article.is_favorite ? "selected" : ""}`}
-          onClick={() => toggleFavorite(article.id)}
-          disabled={!canPersonalize}
-        >
-          {article.is_favorite
-            ? <Star size={18} fill="currentColor" />
-            : <Heart size={18} />}
-        </button>
-        {article.url && (
-          <a title="打开原文网页" aria-label="打开原文网页" href={article.url} target="_blank" rel="noopener noreferrer">
-            <Globe size={18} />
-          </a>
         )}
       </div>
     </article>

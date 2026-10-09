@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, Cloud, Compass, Filter, Globe, Network, Search, X } from "lucide-react";
+import { BarChart3, Check, Cloud, Compass, Filter, Globe, Network, Search, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { articleDate, formatDate, isChineseJournalArticle } from "../../lib/format.js";
 import { directionVar } from "../../lib/directions.js";
@@ -229,6 +229,8 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                       <button type="button" className="keyword-article-open" onClick={() => openArticle(article)}>
                         <div className="keyword-article-meta">
                           <span>{article.journal}</span>
+                          {article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : null}
+                          {article.is_favorite ? <span className="article-status-badge fav-badge"><Star size={11} /> 收藏</span> : null}
                           <span>{formatDate(articleDate(article))}</span>
                         </div>
                         <div className="keyword-article-title">{article.title}</div>
