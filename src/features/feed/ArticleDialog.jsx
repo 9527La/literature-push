@@ -64,32 +64,44 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
     if (ok) setTimeout(() => setCopiedField((current) => (current === field ? "" : current)), 2000);
   }
 
-  // 弹窗内已读/收藏（需求 3）：速览/统计等页面的文献不在主列表里，直接调
-  // 交互接口（toggle 语义）并本地翻转，保证任何入口的弹窗都即时生效；
-  // onArticleUpdated 同步到各列表。收藏使用默认分组。
+  // 弹窗内已读/收藏：走主程序交互通道（列表同步 + 收藏分组选择框照常弹出），
+  // override 传入完整 detail 解决「文献不在主列表」的静默返回问题。
   async function handleMarkRead() {
     setActionError("");
+    const optimistic = detail.is_read ? 0 : 1;
+    setDetail((current) => ({ ...current, is_read: optimistic }));
     try {
-      const result = await api.post(`/api/articles/${detail.id}/read`);
-      const next = { ...detail, is_read: result.isRead ? 1 : 0 };
-      setDetail(next);
-      onArticleUpdated?.(next);
+      await markRead(detail.id, detail);
     } catch (error) {
       setActionError(error.message);
+      setDetail((current) => ({ ...current, is_read: detail.is_read }));
     }
   }
 
   async function handleToggleFavorite() {
     setActionError("");
+    // 未收藏 → main 打开分组选择框，确认后经 app:article-interaction 事件同步；
+    // 已收藏 → main 直接取消，本地乐观翻转
+    if (detail.is_favorite) setDetail((current) => ({ ...current, is_favorite: 0 }));
     try {
-      const result = await api.post(`/api/articles/${detail.id}/favorite`);
-      const next = { ...detail, is_favorite: result.is_favorite ? 1 : 0 };
-      setDetail(next);
-      onArticleUpdated?.(next);
+      await toggleFavorite(detail.id, detail);
     } catch (error) {
       setActionError(error.message);
+      setDetail((current) => ({ ...current, is_favorite: detail.is_favorite }));
     }
   }
+
+  // 收藏分组确认后（picker 通道）同步弹窗内收藏态
+  useEffect(() => {
+    const handler = (event) => {
+      const { id, is_favorite } = event.detail || {};
+      if (id === detail.id && typeof is_favorite === "number") {
+        setDetail((current) => ({ ...current, is_favorite }));
+      }
+    };
+    window.addEventListener("app:article-interaction", handler);
+    return () => window.removeEventListener("app:article-interaction", handler);
+  }, [detail.id]);
 
   /** 管理员改判：置 manual 后 apply 脚本永不覆盖（与 RUNBOOK 约定一致）。 */
   async function saveDirection() {

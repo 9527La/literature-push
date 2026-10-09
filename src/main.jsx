@@ -606,13 +606,14 @@ function App() {
     notify(`状态已保存，但列表刷新失败：${error.message}`, { type: "error" });
   }
 
-  async function markRead(id) {
+  async function markRead(id, articleOverride) {
     if (!account.authenticated) {
       notify("游客模式只能浏览，请先登录个人账户保存阅读状态。", { type: "info" });
       setActiveView("account");
       return;
     }
-    const article = articles.find((item) => item.id === id);
+    // 弹窗场景（速览/统计等）文献可能不在主列表：用调用方传入的完整对象兜底
+    const article = articles.find((item) => item.id === id) || articleOverride || null;
     const pendingKey = `${id}:read`;
     if (!article || interactionPendingRef.current.has(pendingKey)) return;
 
@@ -645,13 +646,14 @@ function App() {
     }
   }
 
-  async function toggleFavorite(id) {
+  async function toggleFavorite(id, articleOverride) {
     if (!account.authenticated) {
       notify("游客模式不能收藏文献，请先登录个人账户。", { type: "info" });
       setActiveView("account");
       return;
     }
-    const article = articles.find((item) => item.id === id);
+    // 同 markRead：弹窗场景用完整对象兜底，收藏分组选择框（picker）照常弹出
+    const article = articles.find((item) => item.id === id) || articleOverride || null;
     const pendingKey = `${id}:favorite`;
     if (!article || interactionPendingRef.current.has(pendingKey)) return;
 
@@ -699,6 +701,10 @@ function App() {
     try {
       const result = await api.post(`/api/articles/${article.id}/favorite`, { groupId: groupId === "ungrouped" ? null : Number(groupId), setDefault });
       updateLocalArticleInteraction(article.id, { is_favorite: Number(Boolean(result.is_favorite)) }, { favoriteCount: 1 });
+      // 广播给打开中的详情弹窗：收藏确认后立即同步心形/徽章（速览等页面的文献不在主列表）
+      window.dispatchEvent(new CustomEvent("app:article-interaction", {
+        detail: { id: article.id, is_favorite: Number(Boolean(result.is_favorite)) }
+      }));
       setFavoritePicker(null);
       notify(`已加入收藏${result.group_name ? `：${result.group_name}` : "（未分组）"}。`, { type: "success" });
       void reloadArticlesAndStatus().catch(reportInteractionRefreshError);
