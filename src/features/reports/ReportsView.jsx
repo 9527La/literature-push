@@ -128,7 +128,10 @@ function parseReportContent(markdown) {
       for (const line of section.body) {
         const h3 = line.match(/^###\s+(.+)$/);
         if (h3) {
-          cluster = { name: h3[1].trim(), reviews: [] };
+          // 组名剥掉 AI 写作时附带的「（N 篇）」规模尾巴（需求：与组内实际
+          // 速评条数不一致，造成"标题 15 篇、展开只有几个"的困惑）。速评
+          // 契约只覆盖部分文献，组内条数就是速评条数，展示用词改为「条」。
+          cluster = { name: h3[1].trim().replace(/[（(]\s*\d+\s*篇\s*[）)]\s*$/, "").trim(), reviews: [] };
           result.clusters.push(cluster);
           continue;
         }
@@ -1064,13 +1067,19 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                             className="reports-cluster-head"
                             onClick={() => toggleCluster(cluster.name)}
                             aria-expanded={open}
-                            title={open ? `收起「${cluster.name}」` : `展开「${cluster.name}」全部 ${cluster.reviews.length} 篇`}
+                            title={open ? `收起「${cluster.name}」` : `展开「${cluster.name}」全部 ${cluster.reviews.length} 条速评`}
                           >
                             <span className="reports-cluster-caret" aria-hidden="true">▶</span>
                             <span className="reports-cluster-name">{cluster.name}</span>
-                            <span className="reports-cluster-meta">{cluster.reviews.length} 篇 · {open ? "点击收起" : "点击展开"}</span>
+                            <span className="reports-cluster-meta">{cluster.reviews.length} 条速评 · {open ? "点击收起" : "点击展开"}</span>
                           </button>
                           <div className="reports-cluster-body">
+                            <div className="reports-cluster-toolbar">
+                              <span className="reports-cluster-toolbar-hint">本期该主题共精选 {cluster.reviews.length} 条速评</span>
+                              <button type="button" className="link-button" onClick={() => openTopic(cluster.name)}>
+                                检索「{cluster.name}」相关文献 ›
+                              </button>
+                            </div>
                             <div className="reports-brief-grid">
                               {cluster.reviews.map((review) => (
                                 <BriefCard
