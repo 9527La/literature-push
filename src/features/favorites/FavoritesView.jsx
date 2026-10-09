@@ -281,7 +281,7 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
           ) : <div className="empty favorites-empty"><Star size={22} /><strong>这个分组还没有收藏文献</strong><p>在文献库页面点击星标即可加入收藏。</p></div>}
         </section>
       </div>
-      {selectedArticle && <ArticleDialog article={selectedArticle} close={() => setSelectedArticle(null)} markRead={markFavoriteRead} toggleFavorite={toggleFavoriteFromDialog} onArticleUpdated={mergeUpdatedArticle} hideTranslatedAbstract={isChineseJournalArticle(selectedArticle, journals)} />}
+      {selectedArticle && <ArticleDialog article={selectedArticle} close={() => setSelectedArticle(null)} markRead={markFavoriteRead} toggleFavorite={toggleFavoriteFromDialog} onArticleUpdated={mergeUpdatedArticle} onOpenArticle={(nextArticle) => setSelectedArticle(nextArticle)} hideTranslatedAbstract={isChineseJournalArticle(selectedArticle, journals)} />}
     </section>
   );
 }
