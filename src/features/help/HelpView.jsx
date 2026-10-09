@@ -1,4 +1,4 @@
-import { BarChart3, HelpCircle, Keyboard, Library, Mail, Newspaper, RefreshCw, Sparkles, Star, UserRound } from "lucide-react";
+import { BarChart3, HelpCircle, Library, Mail, Newspaper, RefreshCw, Sparkles, Star, UserRound } from "lucide-react";
 import InternalUseNotice from "../../components/InternalUseNotice.jsx";
 
 
@@ -47,17 +47,6 @@ function HelpView() {
           <li><strong>分类筛选</strong>：正文顶部可按“政策文件 / 重点新闻”分类筛选，分类计数一目了然。</li>
           <li><strong>内容查找</strong>：查找框可匹配当日资讯的标题与正文，配合分类筛选即可锁定目标条目。</li>
           <li><strong>概览跳转</strong>：点击“今日导读”中的任意条目可滚动定位到对应详情。</li>
-        </ul>
-      </section>
-
-      <section className="help-section">
-        <h3><Keyboard size={18} /> 键盘快捷键</h3>
-        <p>“文献库”页支持纯键盘浏览：先按 J 或 ↓ 选中一篇文献，再执行阅读或收藏操作。焦点在输入框中时不会触发快捷键。</p>
-        <ul>
-          <li><strong>J / ↓</strong> 选中下一篇，<strong>K / ↑</strong> 选中上一篇，选中项左侧边框高亮。</li>
-          <li><strong>Enter</strong> 打开选中文献详情，<strong>Esc</strong> 取消选中（或关闭已打开的弹窗）。</li>
-          <li><strong>R</strong> 标记已读 / 取消已读，<strong>F</strong> 收藏 / 取消收藏。</li>
-          <li><strong>/</strong> 展开筛选面板并聚焦搜索框。</li>
         </ul>
       </section>
 

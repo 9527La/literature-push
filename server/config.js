@@ -104,7 +104,7 @@ export const config = {
   // 默认接口限频 5 次/秒，250ms 间隔留出余量。
   tencentRequestIntervalMs: Number(process.env.TENCENT_REQUEST_INTERVAL_MS || 250),
   tencentMonthlyCharBudget: Number(process.env.TENCENT_MONTHLY_CHAR_BUDGET ?? 4800000),
-  refreshCron: process.env.REFRESH_CRON || "0 8 * * *",
+  refreshCron: process.env.REFRESH_CRON || "0 5 * * *",
   collectionMaxRecords: Math.max(1, Math.min(10000, Number(process.env.COLLECTION_MAX_RECORDS || 1000))),
   lookbackDays: Number(process.env.LOOKBACK_DAYS || 45),
   

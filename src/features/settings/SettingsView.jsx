@@ -447,6 +447,35 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                     </div>
                     <p className="field-hint">AI 研究速览由智能体每周生成；当期未生成时自动附最近一期并标注期数。</p>
                   </div>
+
+                  {/* 研究方向偏好移到左列（需求 2）：与频率/时间/邮件内容同列，
+                      右列留给期刊范围大块，两侧高度与空间利用均衡 */}
+                  <div className="push-journal-filter">
+                    <span className="settings-label"><Compass size={13} aria-hidden="true" /> 推送研究方向</span>
+                    <p className="field-hint">选择推送的研究方向，不选择则推送全部方向；邮件正文按下方选择顺序分组展示（点选先后即顺序，「其他」默认不在推送范围，显式选择后仅推送其他）</p>
+                    <div className="keyword-filter-list direction-filter-list push-direction-list">
+                      {DIRECTIONS.map((direction) => {
+                        const active = pushSelectedDirections.includes(direction.key);
+                        const order = pushSelectedDirections.indexOf(direction.key);
+                        return (
+                          <button
+                            key={direction.key}
+                            type="button"
+                            className={`direction-filter-chip ${active ? "active" : ""}`}
+                            style={active ? { "--dir-key": directionVar(direction.key) } : undefined}
+                            onClick={() => togglePushDirection(direction.key)}
+                            title={direction.key === "other"
+                              ? "其他/交叉：默认不进入推送，选择此项可仅推送其他"
+                              : directionLabel(direction.key)}
+                          >
+                            <span className="direction-dot" style={{ "--dir-key": directionVar(direction.key) }} aria-hidden="true" />
+                            <span className="kw-name">{directionLabel(direction.key)}</span>
+                            {active && <span className="direction-order-badge" aria-hidden="true">{order + 1}</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                   </div>
                   <div className="push-edit-col">
                   <div className="push-journal-filter">
@@ -500,33 +529,6 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                               ))}
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="push-journal-filter">
-                    <span className="settings-label"><Compass size={13} aria-hidden="true" /> 推送研究方向</span>
-                    <p className="field-hint">选择推送的研究方向，不选择则推送全部方向；邮件正文按下方选择顺序分组展示（点选先后即顺序，「其他」默认不在推送范围，显式选择后仅推送其他）</p>
-                    <div className="keyword-filter-list direction-filter-list push-direction-list">
-                      {DIRECTIONS.map((direction) => {
-                        const active = pushSelectedDirections.includes(direction.key);
-                        const order = pushSelectedDirections.indexOf(direction.key);
-                        return (
-                          <button
-                            key={direction.key}
-                            type="button"
-                            className={`direction-filter-chip ${active ? "active" : ""}`}
-                            style={active ? { "--dir-key": directionVar(direction.key) } : undefined}
-                            onClick={() => togglePushDirection(direction.key)}
-                            title={direction.key === "other"
-                              ? "其他/交叉：默认不进入推送，选择此项可仅推送其他"
-                              : directionLabel(direction.key)}
-                          >
-                            <span className="direction-dot" style={{ "--dir-key": directionVar(direction.key) }} aria-hidden="true" />
-                            <span className="kw-name">{directionLabel(direction.key)}</span>
-                            {active && <span className="direction-order-badge" aria-hidden="true">{order + 1}</span>}
-                          </button>
                         );
                       })}
                     </div>

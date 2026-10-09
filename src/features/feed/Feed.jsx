@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownUp, BookOpen, CalendarDays, Check, ChevronDown, Compass, Download, Eye, EyeOff, Filter, Keyboard, RefreshCw, RotateCcw, Search, Star, Tag, X } from "lucide-react";
+import { ArrowDownUp, BookOpen, CalendarDays, Check, ChevronDown, Compass, Download, Eye, EyeOff, Filter, RefreshCw, RotateCcw, Search, Star, Tag, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { ARTICLE_PAGE_SIZE, DEFAULT_FILTERS } from "../../lib/constants.js";
 import { downloadTextFile, toBibtex, toRis } from "../../lib/export.js";
@@ -8,7 +8,6 @@ import { groupJournals, journalAbbr } from "../../lib/journal.js";
 import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 import ArticleCard from "../../components/ArticleCard.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
-import useListShortcuts from "../../hooks/useListShortcuts.js";
 import ArticleDialog from "./ArticleDialog.jsx";
 
 function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, canModerate = false, onLoadMore, hasMoreArticles, loadingMoreArticles, queryKey = "", notify, onRefresh = null, refreshing = false, onDataChanged = null }) {
@@ -27,8 +26,6 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
   const [topKeywords, setTopKeywords] = useState([]);
   const [directionCounts, setDirectionCounts] = useState(null);
   const [visibleCount, setVisibleCount] = useState(50);
-  const [cursorIndex, setCursorIndex] = useState(-1);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [batchBusy, setBatchBusy] = useState("");
   // 期刊小节折叠（需求 2）：出版社分组可展开/收起，默认全部展开。
@@ -232,34 +229,6 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
     observer.observe(node);
     return () => observer.disconnect();
   }, [hasMoreList, loadingMoreArticles, loadMore]);
-
-  const openByIndex = useCallback((index) => {
-    const article = visibleArticles[index];
-    if (article) setSelectedArticle(article);
-  }, [visibleArticles]);
-  const toggleReadByIndex = useCallback((index) => {
-    const article = visibleArticles[index];
-    if (article) markRead(article.id);
-  }, [markRead, visibleArticles]);
-  const toggleFavoriteByIndex = useCallback((index) => {
-    const article = visibleArticles[index];
-    if (article) toggleFavorite(article.id);
-  }, [toggleFavorite, visibleArticles]);
-  const focusSearchInput = useCallback(() => {
-    setFilterOpen(true);
-    searchInputRef.current?.focus();
-  }, []);
-
-  useListShortcuts({
-    enabled: !selectedArticle && visibleArticles.length > 0,
-    count: visibleArticles.length,
-    index: cursorIndex,
-    setIndex: setCursorIndex,
-    onOpen: openByIndex,
-    onToggleRead: toggleReadByIndex,
-    onToggleFavorite: toggleFavoriteByIndex,
-    onFocusSearch: focusSearchInput
-  });
 
   const selectedArticles = useMemo(
     () => sortedArticles.filter((article) => selectedIds.has(article.id)),
@@ -589,9 +558,6 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
               <Filter size={15} /> {filterOpen ? "收起筛选" : "打开筛选"}
               {activeFilterCount > 0 && <span className="filter-count-badge">{activeFilterCount}</span>}
             </button>
-            <button className="secondary shortcuts-toggle" type="button" aria-expanded={shortcutsOpen} aria-controls="feed-shortcuts" onClick={() => setShortcutsOpen((current) => !current)}>
-              <Keyboard size={15} /> 快捷键
-            </button>
           </div>
         <div className="display-toggles">
           <span className="display-toggles-label">显示内容</span>
@@ -620,25 +586,6 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
           </button>
         </div>
         </div>
-
-        {shortcutsOpen && (
-          <div className="shortcuts-panel" id="feed-shortcuts">
-            <div className="shortcuts-panel-head">
-              <strong>键盘快捷键</strong>
-              <button className="icon-button" type="button" aria-label="关闭快捷键说明" onClick={() => setShortcutsOpen(false)}><X size={16} /></button>
-            </div>
-            <dl className="shortcuts-list">
-              <div><dt><kbd>j</kbd> / <kbd>↓</kbd></dt><dd>移动到下一条</dd></div>
-              <div><dt><kbd>k</kbd> / <kbd>↑</kbd></dt><dd>移动到上一条</dd></div>
-              <div><dt><kbd>Enter</kbd></dt><dd>打开当前条摘要</dd></div>
-              <div><dt><kbd>r</kbd></dt><dd>切换已读</dd></div>
-              <div><dt><kbd>f</kbd></dt><dd>切换收藏</dd></div>
-              <div><dt><kbd>/</kbd></dt><dd>聚焦搜索框</dd></div>
-              <div><dt><kbd>Esc</kbd></dt><dd>取消当前选中</dd></div>
-            </dl>
-            <p className="shortcuts-note">在输入框内按上面的字母不会触发快捷键；带 Ctrl / Meta / Alt 的组合键也不会被拦截。</p>
-          </div>
-        )}
 
         <div className="article-count" role="status" aria-live="polite">
           共 <strong>{articlesTotal || sortedArticles.length}</strong> 篇文献
@@ -696,7 +643,6 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
                 displayPreferences={displayPreferences}
                 highlightTerms={highlightTerms}
                 canPersonalize={canPersonalize}
-                isCursor={index === cursorIndex}
                 enterDelay={Math.min(Math.max(index - enterStartRef.current, 0), 15) * 40}
                 onOpen={setSelectedArticle}
                 markRead={markRead}

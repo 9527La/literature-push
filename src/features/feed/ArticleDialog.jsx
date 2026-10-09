@@ -11,6 +11,7 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
   const [detail, setDetail] = useState(article);
   const [loadingDetail, setLoadingDetail] = useState(true);
   const [copiedField, setCopiedField] = useState("");
+  const [actionError, setActionError] = useState("");
   const [directionDraft, setDirectionDraft] = useState(article.research_direction || "");
   const [savingDirection, setSavingDirection] = useState(false);
   const [directionError, setDirectionError] = useState("");
@@ -61,6 +62,33 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
     const ok = await copyText(value);
     setCopiedField(ok ? field : "");
     if (ok) setTimeout(() => setCopiedField((current) => (current === field ? "" : current)), 2000);
+  }
+
+  // 弹窗内已读/收藏（需求 3）：速览/统计等页面的文献不在主列表里，直接调
+  // 交互接口（toggle 语义）并本地翻转，保证任何入口的弹窗都即时生效；
+  // onArticleUpdated 同步到各列表。收藏使用默认分组。
+  async function handleMarkRead() {
+    setActionError("");
+    try {
+      const result = await api.post(`/api/articles/${detail.id}/read`);
+      const next = { ...detail, is_read: result.isRead ? 1 : 0 };
+      setDetail(next);
+      onArticleUpdated?.(next);
+    } catch (error) {
+      setActionError(error.message);
+    }
+  }
+
+  async function handleToggleFavorite() {
+    setActionError("");
+    try {
+      const result = await api.post(`/api/articles/${detail.id}/favorite`);
+      const next = { ...detail, is_favorite: result.is_favorite ? 1 : 0 };
+      setDetail(next);
+      onArticleUpdated?.(next);
+    } catch (error) {
+      setActionError(error.message);
+    }
   }
 
   /** 管理员改判：置 manual 后 apply 脚本永不覆盖（与 RUNBOOK 约定一致）。 */
@@ -323,13 +351,14 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
           </section>
         )}
 
+        {actionError && <p className="crawl-note" role="alert">{actionError}</p>}
         {showActions && (
           <footer className="dialog-actions">
-            <button className="secondary" onClick={() => markRead(detail.id)}>
-              <Check size={18} /> 标记已读
+            <button className="secondary" onClick={() => handleMarkRead()}>
+              <Check size={18} /> {detail.is_read ? "取消已读" : "标记已读"}
             </button>
-            <button className="secondary" onClick={() => toggleFavorite(detail.id)}>
-              {detail.is_favorite ? <Star size={18} /> : <Heart size={18} />} 收藏
+            <button className="secondary" onClick={() => handleToggleFavorite()}>
+              {detail.is_favorite ? <Star size={18} fill="currentColor" /> : <Heart size={18} />} {detail.is_favorite ? "取消收藏" : "收藏"}
             </button>
             {/* 「打开原文」只保留顶部一处（需求 2）：底部与顶部重复，已合并。 */}
           </footer>
