@@ -5937,52 +5937,6 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
 }
 .favorite-card .article-head { border-bottom: none; }
 
-/* ══ 2026-10-09 · 第四批 UI 打磨（铁律：新规则一律追加在文件末尾）════════ */
-
-/* ── 需求1：设置页恢复全宽（上轮移除订阅期刊后限宽 860px 导致右侧大片空白） */
-.settings-columns { grid-template-columns: minmax(0, 1fr); justify-content: stretch; }
-.email-row input { max-width: 460px; }
-/* 摘要态信息项在全宽下自适应铺开（原来固定两列） */
-.push-summary-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-
-/* ── 需求2：资讯内容查找框与分类 chips 同风格 ───────────────────────────
-   全局 input 规则（input:not(...):not(...)，46px 高/12px 圆角/16px 字号）
-   特异性更高，压过了 .daily-content-search input；这里用同等特异性 + 靠后
-   顺序覆盖，做成与分类 chips 同高的紧凑灰底搜索框。 */
-.daily-tools .daily-content-search {
-  flex: 0 1 300px;
-  min-width: 200px;
-  max-width: 300px;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--surface-subtle);
-  box-shadow: none;
-}
-.daily-tools .daily-content-search input {
-  width: 100%;
-  min-height: 30px;
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: none;
-  box-shadow: none;
-  font-size: 13px;
-  line-height: 1.4;
-}
-.daily-tools .daily-content-search input:focus-visible { outline: none; box-shadow: none; }
-.daily-tools .daily-content-search:focus-within { border-color: var(--accent-primary); background: var(--surface); }
-
-/* ── 需求3：文献卡片头部信息条去色带，融入白底卡片 ─────────────────────
-   旧样式给 .article-head 铺了 tone-soft 色带并负 margin 顶到卡边，白底卡片
-   上像贴了一条覆盖层；改为透明背景 + 细分隔线，期刊色由实底徽章承担。 */
-.article-head {
-  background: transparent;
-  border-bottom: 1px solid color-mix(in srgb, var(--tone-line, var(--border-light)) 55%, transparent);
-}
-.favorite-card .article-head { border-bottom: none; }
-
 /* ── 2026-10-09 需求：使用说明铺满页面且左右对称 ─────────────────────────
    旧规则 width min(100%,1240px) 且不居中，宽屏下右侧留白；改为占满内容区，
    两列 grid 自然对称，窄屏回退单列。 */
@@ -6191,96 +6145,264 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
 .journal-article-meta .article-status-badge,
 .keyword-article-meta .article-status-badge { flex: 0 0 auto; }
 
-/* ══ 2026-10-09 午 · 第五批（设置页邮箱/期刊范围、卡片动作横排、色系微调）══ */
+/* ══ 2026-10-09 · 卡片动效批（铁律：新规则一律追加在文件末尾）════════════
+   参考 WorkBuddy 案例页（aihot-daily-briefing / aihot-weekly-papers）移植四个
+   原子动效，只模仿动画、零新增色相：
+   A1 悬停期刊色系光晕 ／ A2 顶部色条 scaleX 自左展开 ／ A3 悬停轻微上浮
+   （整卡 -2px、行内 -1px）／ A4 card-enter 入场级联（40ms 步进）。
+   光晕与色条全部由 --tone（速评卡回退 --tone-ink，行内档 --dir-key）经
+   color-mix 派生；悬停描边/底色变色沿用上方五色系既有规则，本段只叠加。
+   本段位于五色系段与收藏内环规则（5708–5710）之后，特异性对齐、按序覆盖。
+   规格细节与预览见 DESIGN-MOCKUP-CARD-ANIM.html、PLAN-CARD-ANIMATIONS.md。 */
 
-/* ── 需求1+2：邮箱输入 + 保存/修改 + 发送测试 一行；已保存态只读 ─────── */
-.settings-section .email-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+/* ── A3+A1 文献卡：上浮 + 色系光晕（叠加在既有描边/底色变色之上）─────────
+   光晕色取所属期刊色系；已读卡降档（16%→10%），已读/未读在动效下仍可辨。 */
+.article {
+  transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
 }
-.settings-section .email-row input { flex: 1 1 240px; min-width: 200px; }
-.settings-section .email-row input:disabled { color: var(--text-secondary); background: var(--surface-subtle); }
-.settings-section .email-row .primary,
-.settings-section .email-row .secondary { flex: 0 0 auto; white-space: nowrap; }
+.article:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--tone, var(--accent-primary)) 16%, transparent), var(--shadow-md);
+}
+.article.read:hover {
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--tone, var(--accent-primary)) 10%, transparent), var(--shadow-md);
+}
+.article.favorited:hover {
+  box-shadow: inset 0 0 0 2px var(--tone-ring, rgba(49, 87, 213, 0.34)),
+    0 6px 20px color-mix(in srgb, var(--tone, var(--accent-primary)) 16%, transparent), var(--shadow-md);
+}
 
-/* ── 需求3：推送期刊范围按出版社分组平铺（无滚动、组级全选/清除）──────── */
-.push-journal-groups { display: grid; gap: 12px; }
-.push-journal-group { display: grid; gap: 7px; }
-.push-journal-group-head { display: flex; align-items: center; gap: 7px; }
-.push-journal-group-label { font-size: 12.5px; font-weight: 700; color: var(--text-secondary); }
-.push-journal-group-count { font-size: 11.5px; color: var(--text-tertiary); }
-.push-journal-group-head .link-button { margin-left: auto; font-size: 12px; }
-.push-journal-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.push-journal-chip {
-  border: 0.5px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  padding: 4px 10px;
-  cursor: pointer;
-  transition: var(--t-colors);
-  max-width: 100%;
+/* ── A2 顶部色条：3px 色系渐变条，悬停自左向右展开 ───────────────────────
+   复活 3145 行废弃的 .article::before（彼时仅 display:none，无其他定义）；
+   卡片已有 overflow:hidden，色条随圆角裁切。 */
+.article::before {
+  display: block;
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg,
+    var(--tone, var(--accent-primary)),
+    color-mix(in srgb, var(--tone, var(--accent-primary)) 30%, transparent));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 280ms var(--ease-out);
+  pointer-events: none;
+}
+.article:hover::before { transform: scaleX(1); }
+
+/* ── S1 收藏卡：同套效果（期刊色系，悬停描边换色系环）────────────────── */
+.favorite-card {
+  position: relative;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  transition: border-color var(--transition), background var(--transition),
+    box-shadow var(--transition), transform var(--transition);
 }
-.push-journal-chip:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
-.push-journal-chip.active {
-  border-color: var(--accent-primary);
-  background: var(--accent-light);
-  color: var(--accent-primary);
-  font-weight: 600;
+.favorite-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--tone-ring, rgba(49, 87, 213, 0.28));
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--tone, var(--accent-primary)) 14%, transparent), var(--shadow-sm);
 }
-.push-journal-all { margin-bottom: 8px; }
+.favorite-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg,
+    var(--tone, var(--accent-primary)),
+    color-mix(in srgb, var(--tone, var(--accent-primary)) 30%, transparent));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 280ms var(--ease-out);
+  pointer-events: none;
+}
+.favorite-card:hover::before { transform: scaleX(1); }
 
-/* ── 需求4：爱思唯尔色系卡底色调浅（仅 elsevier，其余出版社不变）────────
-   旧 --tone-soft #f8f2e9 叠加整卡 46% 混白后仍偏深，长时间浏览易疲劳。 */
-.article.tone-elsevier,
-.tone-elsevier,
-.reports-brief-card.tone-elsevier,
-.journal-article-journal.tone-elsevier,
-.favorite-card.tone-elsevier {
-  --tone-soft: #fbf8f2;
-  --tone-line: #f0e9dc;
+/* ── S1 速评卡：同套效果（--tone 缺省回退 --tone-ink）──────────────────
+   is-fallback（旧格式无跳转）维持 5206 行豁免：不上浮、不出光晕、色条不展开。 */
+.reports-brief-card {
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.reports-brief-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--tone, var(--tone-ink, var(--accent-primary))) 14%, transparent), var(--shadow-sm);
+}
+.reports-brief-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg,
+    var(--tone, var(--tone-ink, var(--accent-primary))),
+    color-mix(in srgb, var(--tone, var(--tone-ink, var(--accent-primary))) 30%, transparent));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 280ms var(--ease-out);
+  pointer-events: none;
+}
+.reports-brief-card:hover::before { transform: scaleX(1); }
+.reports-brief-card.is-fallback:hover { transform: none; box-shadow: none; }
+.reports-brief-card.is-fallback:hover::before { transform: scaleX(0); }
+
+/* ── S1 公众号日报条目：同套效果（无期刊色系，用网站主题色担当身份）──────
+   flash 定位高亮（5348 行）与悬停叠加时保留定位环。 */
+.daily-item {
+  position: relative;
+  overflow: hidden;
+  transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+.daily-item:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent-primary) 30%, var(--border-light));
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent-primary) 10%, transparent), var(--shadow-sm);
+}
+.daily-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg,
+    var(--accent-primary),
+    color-mix(in srgb, var(--accent-primary) 30%, transparent));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 280ms var(--ease-out);
+  pointer-events: none;
+}
+.daily-item:hover::before { transform: scaleX(1); }
+.daily-item.flash:hover {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 18%, transparent),
+    0 6px 20px color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
-/* ── 需求5：文献卡动作按钮顶部横向 + 中文名（替代右侧竖排图标栏）──────── */
-.article-actions-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  margin-left: auto;
-  flex: 0 0 auto;
+/* ── S2 行内档：统计弹窗文献行 / 关键词文献卡 / 弹窗相关文献 ─────────────
+   仅 -1px 上浮 + 淡光晕，不加顶部色条；色源 --dir-key（缺省主题色）。 */
+.journal-article-row {
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
-.article-actions-inline button,
-.article-actions-inline a {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-size: 11px;
-  line-height: 1;
-  padding: 3px 6px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  text-decoration: none;
-  white-space: nowrap;
-  transition: var(--t-colors);
+.journal-article-row:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--dir-key, var(--accent-primary)) 12%, transparent), var(--shadow-sm);
 }
-.article-actions-inline button:hover:not(:disabled),
-.article-actions-inline a:hover { color: var(--accent-primary); background: var(--surface-subtle); }
-.article-actions-inline button:disabled { cursor: not-allowed; opacity: 0.55; }
-.article-actions-inline .action-done { color: var(--ok, #2e7d4f); }
-.article-actions-inline .action-faved { color: #b45309; }
-/* 右列移除后卡片主体占满整行 */
-.article > .article-main { flex: 1 1 auto; min-width: 0; }
+.keyword-article-card {
+  transition: var(--t-surface-colors), transform var(--transition);
+}
+.keyword-article-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent-primary) 10%, transparent), var(--shadow-sm);
+}
+.related-item {
+  transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out), transform 120ms var(--ease-out);
+}
+.related-item:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--accent-primary) 10%, transparent);
+}
 
-/* ── 需求6：速览速评卡/弹窗文献行/统计文献卡同步已读与收藏徽章 ────────── */
-.reports-brief-head .article-status-badge,
-.journal-article-meta .article-status-badge,
-.keyword-article-meta .article-status-badge { flex: 0 0 auto; }
+/* ── A4 入场级联：card-enter 统一幅度（10px/300ms），仅首次挂载播一次 ─────
+   Feed 卡片沿用 B3-2 的 --enter-delay 机制（Feed 按批次下标计算，40ms 步进），
+   此处仅替换动画定义（translateY 6→10px、240→300ms）；旧 article-enter 退役。
+   其余列表容器按 nth 定位步进延迟：2–12 项各 +40ms（上限 480ms），13 项起
+   无额外延迟；React 按 key 复用节点，筛选变更不重播、翻页/开弹窗正常入场。 */
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.article {
+  animation: card-enter 300ms var(--ease-out) backwards;
+  animation-delay: var(--enter-delay, 0ms);
+}
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > * {
+  animation: card-enter 300ms var(--ease-out) backwards;
+}
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(2) { animation-delay: 40ms; }
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(3) { animation-delay: 80ms; }
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(4) { animation-delay: 120ms; }
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(5) { animation-delay: 160ms; }
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(6) { animation-delay: 200ms; }
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(7) { animation-delay: 240ms; }
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(8) { animation-delay: 280ms; }
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(9) { animation-delay: 320ms; }
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(10) { animation-delay: 360ms; }
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(11) { animation-delay: 400ms; }
+:is(.favorites-list,
+    .reports-brief-grid,
+    .reports-group-cards,
+    .keyword-articles-list,
+    .journal-dialog-body,
+    .related-list,
+    .daily-content) > *:nth-child(12) { animation-delay: 440ms; }

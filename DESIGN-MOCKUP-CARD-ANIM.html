@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Mockup · 全站卡片动效（悬停光效 + 顶部色条 + 上浮 + 入场级联）</title>
+<style>
+/* ═══ 现有视觉基线（取自 src/styles.css :root 与卡片规则，未改动）═══ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-primary:#f2f4f7;
+  --surface:rgba(255,255,255,0.96);
+  --surface-subtle:#f4f5f7;
+  --font-serif:"Noto Serif SC","Source Han Serif SC","Songti SC","STSong","SimSun","PingFang SC","Microsoft YaHei",serif;
+  --text-primary:#171b24;
+  --text-secondary:#525a68;
+  --text-tertiary:#7d8592;
+  --accent-primary:#3157d5;
+  --accent-hover:#2848b8;
+  --accent-light:rgba(49,87,213,0.09);
+  --border-color:#d8dce3;
+  --border-light:rgba(23,27,36,0.09);
+  --shadow-sm:0 4px 12px rgba(23,27,36,0.055);
+  --shadow-md:0 10px 28px rgba(23,27,36,0.07);
+  --radius-lg:10px;
+  --radius-xl:14px;
+  --radius-full:999px;
+  --ease-out:cubic-bezier(0.22,1,0.36,1);
+  --transition:200ms var(--ease-out);
+  --t-colors:color var(--transition),background-color var(--transition),border-color var(--transition);
+  /* 期刊五色系（styles.css 4800–4803 + 6241 elsevier 调浅） */
+  --tone-ieee-soft:#edf1f8; --tone-ieee-line:#d5deec; --tone-ieee:#3f5d93; --tone-ieee-ring:rgba(63,93,147,0.34);
+  --tone-elsevier-soft:#fbf8f2; --tone-elsevier-line:#f0e9dc; --tone-elsevier:#8a6238; --tone-elsevier-ring:rgba(138,98,56,0.32);
+  --tone-cn-soft:#ecf4f2; --tone-cn-line:#cfe0dc; --tone-cn:#3d6e66; --tone-cn-ring:rgba(61,110,102,0.32);
+  --tone-other-soft:#f1f3f5; --tone-other-line:#dce0e5; --tone-other:#5f6773; --tone-other-ring:rgba(95,103,115,0.30);
+}
+body{font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg-primary);color:var(--text-primary);line-height:1.6;padding:32px 40px 80px}
+h1{font-family:var(--font-serif);font-size:22px;margin-bottom:6px}
+.sub{color:var(--text-tertiary);font-size:13px;margin-bottom:26px}
+h2{font-size:16px;margin:34px 0 12px;padding-left:10px;border-left:3px solid var(--accent-primary)}
+.note{font-size:12.5px;color:var(--text-tertiary);margin-bottom:14px}
+.replay{border:1px solid var(--border-color);background:var(--surface);color:var(--accent-primary);font-size:12.5px;padding:5px 14px;border-radius:999px;cursor:pointer}
+.replay:hover{border-color:var(--accent-primary)}
+
+/* ── 文献卡现有视觉（复刻 .article / .article-head / 五色系悬停）────── */
+.list{display:flex;flex-direction:column;gap:10px}
+.article{position:relative;display:flex;justify-content:space-between;gap:16px;padding:18px 20px;background:rgba(255,255,255,0.82);border:1px solid rgba(255,255,255,0.6);border-radius:var(--radius-xl);transition:border-color var(--transition),box-shadow var(--transition);box-shadow:var(--shadow-sm)}
+.article.tone-ieee{--tone:#3f5d93;--tone-soft:#edf1f8;--tone-line:#d5deec;--tone-ring:rgba(63,93,147,0.34)}
+.article.tone-elsevier{--tone:#8a6238;--tone-soft:#fbf8f2;--tone-line:#f0e9dc;--tone-ring:rgba(138,98,56,0.32)}
+.article.tone-cn{--tone:#3d6e66;--tone-soft:#ecf4f2;--tone-line:#cfe0dc;--tone-ring:rgba(61,110,102,0.32)}
+.article.tone-other{--tone:#5f6773;--tone-soft:#f1f3f5;--tone-line:#dce0e5;--tone-ring:rgba(95,103,115,0.30)}
+.article{background:color-mix(in srgb,var(--tone-soft,#fff) 46%,#fff);border-top-color:var(--tone-line);border-right-color:var(--tone-line);border-bottom-color:var(--tone-line);overflow:hidden}
+.article-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:-18px -20px 5px;padding:9px 20px;border-bottom:1px solid color-mix(in srgb,var(--tone-line) 55%,transparent)}
+.journal-mark{display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:2px 7px;border-radius:7px;background:var(--tone);color:#fff;font-size:11px;font-weight:700;letter-spacing:0.02em}
+.article-journal{font-size:12.5px;font-weight:600;color:var(--tone)}
+.spacer{flex:1 1 auto}
+.direction-chip{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:999px;font-size:11.5px;color:var(--dir-key,#525a68);background:color-mix(in srgb,var(--dir-key,#7d8592) 8%,transparent);border:1px solid color-mix(in srgb,var(--dir-key,#7d8592) 55%,transparent)}
+.direction-chip i{width:7px;height:7px;border-radius:50%;background:var(--dir-key,#7d8592)}
+.status-badge{font-size:11px;font-weight:700;padding:1px 8px;border-radius:999px}
+.unread-badge{background:rgba(13,148,136,0.12);color:var(--accent-primary)}
+.fav-badge{background:rgba(217,119,6,0.10);color:#b45309}
+.article time{color:var(--text-tertiary);font-size:12px}
+.article-main{flex:1;display:flex;flex-direction:column;gap:8px}
+.title-button{display:block;width:100%;text-align:left;background:none;border:0;padding:0;font-size:16px;font-weight:700;font-family:var(--font-serif);color:var(--text-primary);line-height:1.45;cursor:pointer}
+.authors{font-size:13.5px;color:var(--text-secondary)}
+.keyword-tag{display:inline-block;margin-right:6px;padding:1px 9px;border-radius:999px;font-size:11.5px;background:var(--tone-soft);color:var(--tone)}
+.article.unread{border-left:3px solid var(--tone)}
+.article.read{background:color-mix(in srgb,var(--tone-soft,#fff) 22%,#fff);border-left:3px solid var(--tone-line);box-shadow:none}
+.article.read .title-button{color:var(--text-secondary)}
+.article.favorited{box-shadow:inset 0 0 0 2px var(--tone-ring)}
+/* 悬停（现状）：描边换色系环 + 底色提亮 */
+.article:hover{border-top-color:var(--tone-ring);border-right-color:var(--tone-ring);border-bottom-color:var(--tone-ring);box-shadow:var(--shadow-md);background:color-mix(in srgb,var(--tone-soft,#fff) 30%,#fff)}
+.article.read:hover{background:color-mix(in srgb,var(--tone-soft,#fff) 10%,#fff);border-left-color:var(--tone)}
+.article.unread:hover{border-left-color:color-mix(in srgb,var(--tone) 78%,#000)}
+.article.favorited:hover{box-shadow:inset 0 0 0 2px var(--tone-ring),var(--shadow-md)}
+
+/* ═══ 新增动效（= 将追加到 src/styles.css 末尾的「卡片动效批」，mockup 同源）════ */
+
+/* A3+A1 悬停：-2px 上浮 + 期刊色系光晕（叠加在中性阴影上，不引入新色相） */
+.article{transition:border-color var(--transition),box-shadow var(--transition),transform var(--transition)}
+.article:hover{transform:translateY(-2px);box-shadow:0 6px 20px color-mix(in srgb,var(--tone,#3157d5) 16%,transparent),var(--shadow-md)}
+.article.read:hover{box-shadow:0 6px 20px color-mix(in srgb,var(--tone,#3157d5) 10%,transparent),var(--shadow-md)}
+.article.favorited:hover{box-shadow:inset 0 0 0 2px var(--tone-ring),0 6px 20px color-mix(in srgb,var(--tone,#3157d5) 16%,transparent),var(--shadow-md)}
+
+/* A2 顶部色条：3px 色系渐变条，悬停自左向右展开（复活 .article::before） */
+.article::before{display:block;content:"";position:absolute;top:0;left:0;right:0;height:3px;border-radius:0 0 2px 2px;background:linear-gradient(90deg,var(--tone,#3157d5),color-mix(in srgb,var(--tone,#3157d5) 30%,transparent));transform:scaleX(0);transform-origin:left;transition:transform 280ms var(--ease-out);pointer-events:none}
+.article:hover::before{transform:scaleX(1)}
+
+/* A4 入场级联：首次挂载播一次；--enter-delay 步进 40ms */
+@keyframes card-enter{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.list>.article{animation:card-enter 300ms var(--ease-out) backwards;animation-delay:var(--enter-delay,0ms)}
+
+/* S1 其他表面：速评卡 */
+.reports-brief-card{--tone-ink:var(--text-secondary);position:relative;display:flex;flex-direction:column;width:100%;text-align:left;border:1px solid var(--border-color);border-left:3px solid var(--tone-line,var(--border-color));border-radius:10px;background:var(--surface);padding:0;overflow:hidden;cursor:pointer;font-family:inherit;transition:border-color .15s,box-shadow .15s,transform .15s}
+.reports-brief-card.tone-ieee{--tone:#3f5d93;--tone-ink:#3f5d93;--tone-soft:#edf1f8;--tone-line:#d5deec}
+.reports-brief-card.tone-elsevier{--tone:#8a6238;--tone-ink:#8a6238;--tone-soft:#fbf8f2;--tone-line:#f0e9dc}
+.reports-brief-card.tone-cn{--tone:#3d6e66;--tone-ink:#3d6e66;--tone-soft:#ecf4f2;--tone-line:#cfe0dc}
+.reports-brief-card.tone-other{--tone:#5f6773;--tone-ink:#5f6773;--tone-soft:#f1f3f5;--tone-line:#dce0e5}
+.reports-brief-head{display:flex;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--tone-line);background:var(--tone-soft)}
+.reports-brief-mark{min-width:38px;text-align:center;background:var(--tone-ink);color:#fff;border-radius:6px;font-size:11px;padding:2px 6px;font-weight:600}
+.reports-brief-journal{flex:1;font-size:12.5px;color:var(--text-secondary)}
+.reports-brief-body{display:flex;flex-direction:column;gap:3px;padding:10px 14px 12px}
+.reports-brief-title{font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.5}
+.reports-brief-field{display:grid;grid-template-columns:62px 1fr;gap:8px;font-size:12.5px}
+.reports-brief-field .k{color:var(--tone-ink);font-weight:600;font-size:12px}
+.reports-brief-field .v{color:var(--text-secondary)}
+.reports-brief-card:hover{border-color:color-mix(in srgb,var(--tone-ink) 38%,var(--border-color));box-shadow:var(--shadow-sm)}
+/* 新增：速评卡上浮 + 光晕 + 顶部色条（--tone 缺省回退 --tone-ink）*/
+.reports-brief-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px color-mix(in srgb,var(--tone,var(--tone-ink,#3157d5)) 14%,transparent),var(--shadow-sm)}
+.reports-brief-card::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--tone,var(--tone-ink,#3157d5)),color-mix(in srgb,var(--tone,var(--tone-ink,#3157d5)) 30%,transparent));transform:scaleX(0);transform-origin:left;transition:transform 280ms var(--ease-out);pointer-events:none}
+.reports-brief-card:hover::before{transform:scaleX(1)}
+.reports-brief-card.is-fallback{cursor:default}
+.reports-brief-card.is-fallback:hover{transform:none;box-shadow:none;border-color:var(--border-color)}
+.reports-brief-card.is-fallback:hover::before{transform:scaleX(0)}
+.brief-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:10px}
+.brief-grid>.reports-brief-card{animation:card-enter 300ms var(--ease-out) backwards;animation-delay:var(--enter-delay,0ms)}
+
+/* S2 行内档：-1px 上浮 + 淡光晕，无顶部色条 */
+.journal-article-row{display:flex;flex-direction:column;gap:4px;text-align:left;border:1px solid var(--border-color);border-radius:10px;background:var(--surface);padding:10px 14px;cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .15s}
+.journal-article-row:hover{border-color:color-mix(in srgb,var(--accent-primary) 42%,var(--border-color));box-shadow:var(--shadow-sm)}
+/* 新增 */
+.journal-article-row:hover{transform:translateY(-1px);box-shadow:0 4px 14px color-mix(in srgb,var(--dir-key,var(--accent-primary)) 12%,transparent),var(--shadow-sm)}
+.keyword-article-card{padding:12px 14px;border:1px solid var(--border-color);border-radius:var(--radius-lg);background:var(--surface-raised);transition:border-color var(--transition),box-shadow var(--transition),transform var(--transition)}
+.keyword-article-card:hover{border-color:rgba(49,87,213,0.28);box-shadow:var(--shadow-sm)}
+/* 新增 */
+.keyword-article-card:hover{transform:translateY(-1px);box-shadow:0 4px 14px color-mix(in srgb,var(--accent-primary) 10%,transparent),var(--shadow-sm)}
+.related-item{display:block;width:100%;padding:10px 12px;border:0.5px solid var(--border-light);border-radius:10px;background:var(--surface-subtle);text-align:left;cursor:pointer;font-family:inherit;transition:background 120ms var(--ease-out),border-color 120ms var(--ease-out),transform 120ms var(--ease-out)}
+.related-item:hover{background:var(--surface-hover);border-color:var(--border-color)}
+/* 新增 */
+.related-item:hover{transform:translateY(-1px);box-shadow:0 3px 10px color-mix(in srgb,var(--accent-primary) 10%,transparent)}
+.row-title{font-size:13.5px;font-weight:600;line-height:1.5}
+.row-meta{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-tertiary)}
+.row-dot{width:8px;height:8px;border-radius:50%;background:var(--dir-key,#7d8592)}
+.kw-title{font-size:13.5px;font-weight:600}
+.kw-meta{font-size:12px;color:var(--text-tertiary);margin-top:2px}
+
+/* 演示辅助 */
+article.demo-enter{opacity:0;animation:card-enter 300ms var(--ease-out) backwards;animation-delay:var(--enter-delay,0ms)}
+body.no-anim article.demo-enter{animation:none;opacity:1}
+table{border-collapse:collapse;font-size:12.5px;width:100%;background:var(--surface);border-radius:10px;overflow:hidden}
+th,td{border:1px solid var(--border-light);padding:7px 12px;text-align:left}
+th{background:var(--surface-subtle);font-size:12px;color:var(--text-secondary)}
+code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;background:var(--surface-subtle);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+
+<h1>Mockup · 全站卡片动效</h1>
+<p class="sub">悬停 = 顶部色条展开 + 期刊色系光晕 + 上浮 -2px + 既有描边/底色变色；入场 = 卡片逐个浮现（40ms 步进）。色相零新增，全部由期刊五色系变量派生。<button class="replay" onclick="replay()">↻ 重播入场动画</button></p>
+
+<h2>① 文献卡 · 全套效果（4 期刊色系 × 未读 / 已读 / 收藏）</h2>
+<p class="note">把鼠标依次扫过卡片：顶部色条自左展开 → 光晕渐起 → 卡片轻微上浮。已读卡光晕自动降档；收藏卡保留色系内环。</p>
+<div class="list" id="demoList">
+
+  <article class="article tone-ieee unread demo-enter" style="--enter-delay:0ms;--dir-key:#34547A">
+    <div class="article-head">
+      <span class="journal-mark">IEEE</span><span class="article-journal">IEEE Transactions on Smart Grid</span>
+      <span class="spacer"></span>
+      <span class="direction-chip"><i></i>输电</span>
+      <span class="status-badge unread-badge">未读</span><time>3 天前</time>
+    </div>
+    <div class="article-main">
+      <button class="title-button">基于虚拟惯量自适应整定的直驱风机一次调频与阻尼协调控制策略</button>
+      <div class="authors">Zhang L, Wang Y, Chen H, et al.</div>
+      <div><span class="keyword-tag">虚拟惯量</span><span class="keyword-tag">一次调频</span><span class="keyword-tag">直驱风机</span></div>
+    </div>
+  </article>
+
+  <article class="article tone-ieee read favorited demo-enter" style="--enter-delay:40ms;--dir-key:#34547A">
+    <div class="article-head">
+      <span class="journal-mark">IEEE</span><span class="article-journal">IEEE Transactions on Smart Grid</span>
+      <span class="spacer"></span>
+      <span class="direction-chip"><i></i>输电</span>
+      <span class="status-badge fav-badge">收藏</span><time>5 天前</time>
+    </div>
+    <div class="article-main">
+      <button class="title-button">考虑灵活性资源不确定性的交直流配电系统时序生产模拟</button>
+      <div class="authors">Liu M, Zhao Q, Sun T</div>
+      <div><span class="keyword-tag">时序生产模拟</span><span class="keyword-tag">不确定性</span></div>
+    </div>
+  </article>
+
+  <article class="article tone-elsevier unread demo-enter" style="--enter-delay:80ms;--dir-key:#3D6E66">
+    <div class="article-head">
+      <span class="journal-mark">APEN</span><span class="article-journal">Applied Energy</span>
+      <span class="spacer"></span>
+      <span class="direction-chip"><i></i>储能</span>
+      <span class="status-badge unread-badge">未读</span><time>昨天</time>
+    </div>
+    <div class="article-main">
+      <button class="title-button">Optimal sizing of hybrid energy storage systems for distribution networks with high photovoltaic penetration</button>
+      <div class="authors">Kaur S, Singh R, Patel A</div>
+      <div><span class="keyword-tag">混合储能</span><span class="keyword-tag">容量配置</span></div>
+    </div>
+  </article>
+
+  <article class="article tone-cn read demo-enter" style="--enter-delay:120ms;--dir-key:#7E7A26">
+    <div class="article-head">
+      <span class="journal-mark">电自</span><span class="article-journal">电力系统自动化</span>
+      <span class="spacer"></span>
+      <span class="direction-chip"><i></i>综合能源</span>
+      <span class="status-badge read-badge">已读</span><time>2 天前</time>
+    </div>
+    <div class="article-main">
+      <button class="title-button">计及源荷双侧灵活性的综合能源系统日前优化调度方法</button>
+      <div class="authors">王强, 李明, 张伟</div>
+      <div><span class="keyword-tag">综合能源系统</span><span class="keyword-tag">优化调度</span></div>
+    </div>
+  </article>
+
+  <article class="article tone-other unread demo-enter" style="--enter-delay:160ms;--dir-key:#4E7D3B">
+    <div class="article-head">
+      <span class="journal-mark">IJPES</span><span class="article-journal">International Journal of Electrical Power &amp; Energy Systems</span>
+      <span class="spacer"></span>
+      <span class="direction-chip"><i></i>微电网</span>
+      <span class="status-badge unread-badge">未读</span><time>4 天前</time>
+    </div>
+    <div class="article-main">
+      <button class="title-button">Hierarchical control of islanded microgrids with coordinated droop compensation</button>
+      <div class="authors">Brown J, Davis K</div>
+      <div><span class="keyword-tag">微电网</span><span class="keyword-tag">下垂控制</span></div>
+    </div>
+  </article>
+
+</div>
+
+<h2>② 研究速览 · 速评卡（同套效果，色随期刊色系）</h2>
+<div class="brief-grid">
+  <button class="reports-brief-card tone-ieee demo-enter" style="--enter-delay:0ms">
+    <span class="reports-brief-head"><span class="reports-brief-mark">TSG</span><span class="reports-brief-journal">IEEE Transactions on Smart Grid</span><time class="status-badge" style="color:var(--text-tertiary);font-weight:400">10-06</time></span>
+    <span class="reports-brief-body">
+      <span class="reports-brief-title">基于虚拟惯量自适应整定的直驱风机一次调频与阻尼协调控制策略</span>
+      <span class="reports-brief-field"><span class="k">研究对象</span><span class="v">直驱风机参与系统一次调频的虚拟惯量控制环节</span></span>
+      <span class="reports-brief-field"><span class="k">研究方法</span><span class="v">自适应整定 + 阻尼通道协调，小信号建模验证</span></span>
+      <span class="reports-brief-field"><span class="k">核心结论</span><span class="v">频率偏差最低降低 23%，且不引发振荡失稳</span></span>
+    </span>
+  </button>
+  <button class="reports-brief-card tone-elsevier demo-enter" style="--enter-delay:40ms">
+    <span class="reports-brief-head"><span class="reports-brief-mark">APEN</span><span class="reports-brief-journal">Applied Energy</span><time class="status-badge" style="color:var(--text-tertiary);font-weight:400">10-05</time></span>
+    <span class="reports-brief-body">
+      <span class="reports-brief-title">Optimal sizing of hybrid energy storage systems for distribution networks</span>
+      <span class="reports-brief-field"><span class="k">研究对象</span><span class="v">高光伏渗透率配电网的混合储能容量配置</span></span>
+      <span class="reports-brief-field"><span class="k">研究方法</span><span class="v">双层优化：上层容量配置、下层时序调度</span></span>
+      <span class="reports-brief-field"><span class="k">核心结论</span><span class="v">混合配置较单一锂电方案年化成本降低 18%</span></span>
+    </span>
+  </button>
+  <div class="reports-brief-card is-fallback demo-enter" style="--enter-delay:80ms">
+    <span class="reports-brief-head"><span class="reports-brief-mark">ELSE</span><span class="reports-brief-journal">Electric Power Systems Research</span></span>
+    <span class="reports-brief-body"><span class="reports-brief-legacy">旧格式速评文本：该文提出了一种配电网灵活性评估指标……（无跳转目标，悬停不上浮、不出光晕）</span></span>
+  </div>
+</div>
+
+<h2>③ 行内档（统计弹窗文献行 / 关键词文献卡 / 弹窗相关文献）</h2>
+<p class="note">仅 -1px 上浮 + 淡光晕（取方向色 --dir-key），不加顶部色条。</p>
+<div style="display:grid;gap:8px;max-width:760px">
+  <button class="journal-article-row demo-enter" style="--enter-delay:0ms;--dir-key:#34547A">
+    <span class="row-title">基于虚拟惯量自适应整定的直驱风机一次调频与阻尼协调控制策略</span>
+    <span class="row-meta"><i class="row-dot"></i>IEEE Trans. Smart Grid · 输电 · 2026-10-06</span>
+  </button>
+  <button class="journal-article-row demo-enter" style="--enter-delay:40ms;--dir-key:#3D6E66">
+    <span class="row-title">Optimal sizing of hybrid energy storage systems for distribution networks</span>
+    <span class="row-meta"><i class="row-dot"></i>Applied Energy · 储能 · 2026-10-05</span>
+  </button>
+  <div class="keyword-article-card demo-enter" style="--enter-delay:80ms">
+    <div class="kw-title">计及源荷双侧灵活性的综合能源系统日前优化调度方法</div>
+    <div class="kw-meta">电力系统自动化 · 2026-10-04</div>
+  </div>
+  <button class="related-item demo-enter" style="--enter-delay:120ms">
+    <span class="row-meta" style="margin-bottom:4px"><i class="row-dot" style="--dir-key:#34547A"></i>IEEE Trans. Smart Grid · 输电</span>
+    <span class="row-title" style="font-size:13px">考虑灵活性资源不确定性的交直流配电系统时序生产模拟</span>
+  </button>
+</div>
+
+<h2>④ 动效参数（与实现一致）</h2>
+<table>
+  <tr><th>效果</th><th>规格</th><th>色源</th></tr>
+  <tr><td>顶部色条</td><td><code>::before</code> 3px，<code>scaleX(0→1)</code>，280ms <code>ease-out</code>，origin left</td><td><code>--tone</code> 渐变至 30% 透明</td></tr>
+  <tr><td>光晕</td><td><code>0 6px 20px color-mix(--tone 16%)</code> + 原中性阴影；已读 10%；行内档 -1px / 12%·10%</td><td><code>--tone</code>（速评卡回退 <code>--tone-ink</code>，行内档 <code>--dir-key</code>）</td></tr>
+  <tr><td>上浮</td><td>整卡 <code>translateY(-2px)</code>，行内 <code>-1px</code>，transform 合成层</td><td>—</td></tr>
+  <tr><td>入场级联</td><td><code>card-enter</code> 300ms，<code>translateY(10px)</code>→0，40ms 步进，仅首次挂载播一次</td><td>—</td></tr>
+  <tr><td>豁免</td><td>速评卡 <code>is-fallback</code>：不上浮、不出光晕、色条不展开</td><td>—</td></tr>
+  <tr><td>降级</td><td><code>prefers-reduced-motion</code> 全局兜底（既有 3241 行）自动压平全部动画</td><td>—</td></tr>
+</table>
+
+<script>
+function replay(){
+  document.body.classList.add('no-anim');
+  void document.body.offsetHeight;
+  document.body.classList.remove('no-anim');
+  document.querySelectorAll('.demo-enter').forEach(el=>{
+    el.style.animation='none'; void el.offsetHeight; el.style.animation='';
+  });
+}
+</script>
+</body>
+</html>

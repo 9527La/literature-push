@@ -89,6 +89,20 @@ try {
   steps.push(`翻页请求已起飞：${JSON.stringify(await buttonState())}`);
 
   // 2. 趁它还在飞，切排序 —— 这会让前端发出一次「替换式」列表请求。
+  //    筛选面板默认收起（2026.10.09.7）：先「打开筛选」+ 点开「排序」组，
+  //    否则 select 不可见。
+  await page.evaluate(() => {
+    for (const btn of document.querySelectorAll("button")) {
+      if ((btn.textContent || "").includes("打开筛选")) { btn.click(); break; }
+    }
+  });
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    for (const head of document.querySelectorAll(".filter-group-toggle")) {
+      if ((head.textContent || "").includes("排序")) head.click();
+    }
+  });
+  await page.waitForTimeout(250);
   await page.selectOption(".sort-select select", "asc");
   steps.push("已切换排序为「最早优先」，制造请求抢占");
 
