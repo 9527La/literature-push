@@ -6034,3 +6034,19 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
 }
 .reports-cluster-toolbar-hint { font-size: 12px; color: var(--text-tertiary); }
 .reports-cluster-toolbar .link-button { font-size: 12.5px; }
+
+/* ── 2026-10-09 需求：聚类组内速评卡「默认一行 + 继续加载全部」──────────── */
+.reports-cluster-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+.reports-cluster-more .secondary { color: var(--text-secondary); }
+
+/* ── 2026-10-09 需求：聚类组内速评卡「默认一行 + 继续加载全部」──────────── */
+.reports-cluster-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+.reports-cluster-more .secondary { color: var(--text-secondary); }

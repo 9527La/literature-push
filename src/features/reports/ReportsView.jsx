@@ -468,6 +468,9 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
   const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
   // 主题聚类手风琴（月度/方向专报）：默认全部展开
   const [collapsedClusters, setCollapsedClusters] = useState(() => new Set());
+  // 聚类组内速评卡「默认一行、按需加载全部」（需求）：记录用户点了
+  // 「继续加载全部」的组名；未点过的组只渲染前 3 条（宽屏一行）。
+  const [expandedClusterReviews, setExpandedClusterReviews] = useState(() => new Set());
   // 方向 chips 个性化：拖拽排序 + 隐藏不关心的方向（localStorage 持久化）
   const [chipPrefs, setChipPrefs] = useState(loadChipPrefs);
   const [chipPanelOpen, setChipPanelOpen] = useState(false);
@@ -681,9 +684,11 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
     setCollapsedGroups(() => (anyGroupOpen ? new Set(groups.map((group) => group.key)) : new Set()));
   }
 
-  // 主题聚类（方向/月度专报）：同一套全部折叠/展开交互，切换报告时重置为全展开。
+  // 主题聚类（方向/月度专报）：同一套全部折叠/展开交互，切换报告时重置为全展开；
+  // 组内速评卡的「继续加载」状态同步重置（新报告重新从一行开始）。
   useEffect(() => {
     setCollapsedClusters(new Set());
+    setExpandedClusterReviews(new Set());
   }, [current?.id]);
   const anyClusterOpen = parsed.clusters.some((cluster) => !collapsedClusters.has(cluster.name));
   function toggleCluster(name) {
@@ -1060,6 +1065,10 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                   <div className="reports-clusters">
                     {parsedWithJournals.clusters.map((cluster) => {
                       const open = !collapsedClusters.has(cluster.name);
+                      // 组内速评卡默认只渲染一行（前 3 条），点「继续加载」看全部。
+                      const reviewsExpanded = expandedClusterReviews.has(cluster.name);
+                      const visibleReviews = reviewsExpanded ? cluster.reviews : cluster.reviews.slice(0, 3);
+                      const hiddenReviewCount = cluster.reviews.length - visibleReviews.length;
                       return (
                         <div className={`reports-cluster${open ? " is-open" : ""}`} key={cluster.name}>
                           <button
@@ -1074,14 +1083,8 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                             <span className="reports-cluster-meta">{cluster.reviews.length} 条速评 · {open ? "点击收起" : "点击展开"}</span>
                           </button>
                           <div className="reports-cluster-body">
-                            <div className="reports-cluster-toolbar">
-                              <span className="reports-cluster-toolbar-hint">本期该主题共精选 {cluster.reviews.length} 条速评</span>
-                              <button type="button" className="link-button" onClick={() => openTopic(cluster.name)}>
-                                检索「{cluster.name}」相关文献 ›
-                              </button>
-                            </div>
                             <div className="reports-brief-grid">
-                              {cluster.reviews.map((review) => (
+                              {visibleReviews.map((review) => (
                                 <BriefCard
                                   key={review.id}
                                   id={review.id}
@@ -1092,6 +1095,21 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                                 />
                               ))}
                             </div>
+                            {hiddenReviewCount > 0 && (
+                              <div className="reports-cluster-more">
+                                <button
+                                  type="button"
+                                  className="secondary compact"
+                                  onClick={() => setExpandedClusterReviews((current) => {
+                                    const next = new Set(current);
+                                    next.add(cluster.name);
+                                    return next;
+                                  })}
+                                >
+                                  继续加载全部 {cluster.reviews.length} 条速评（还有 {hiddenReviewCount} 条）
+                                </button>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
