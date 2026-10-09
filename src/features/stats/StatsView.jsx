@@ -338,6 +338,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
           close={() => setSelectedArticle(null)}
           markRead={markRead}
           toggleFavorite={toggleFavorite}
+          onOpenArticle={setSelectedArticle}
           hideTranslatedAbstract={isChineseJournalArticle(selectedArticle, journals)}
         />
       )}

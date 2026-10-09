@@ -1199,6 +1199,7 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
           markRead={markRead}
           toggleFavorite={toggleFavorite}
           onArticleUpdated={onArticleUpdated}
+          onOpenArticle={setDialogArticle}
           canModerate={canModerate}
         />
       )}

@@ -617,6 +617,7 @@ function AdminView({ onDataChanged }) {
           article={selectedCoverageArticle}
           close={() => setSelectedCoverageArticle(null)}
           showActions={false}
+          onOpenArticle={setSelectedCoverageArticle}
         />
       )}
     </section>
