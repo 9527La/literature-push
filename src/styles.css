@@ -6050,3 +6050,49 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
   margin-top: 12px;
 }
 .reports-cluster-more .secondary { color: var(--text-secondary); }
+
+/* ── 2026-10-09 需求：期刊出版社小节「全选」控件 ────────────────────────
+   组头行改为 flex：组头占满，右侧常驻全选复选框（部分选中为半选态）；
+   复选框在组头 button 外，避免嵌套交互元素与折叠点击冲突。 */
+.journal-group-row { display: flex; align-items: center; gap: 6px; }
+.journal-group-row .journal-group-head { flex: 1 1 auto; min-width: 0; }
+.journal-group-selectall {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 7px;
+  border-radius: var(--radius-sm);
+  transition: var(--t-colors);
+}
+.journal-group-selectall:hover { color: var(--accent-primary); background: var(--surface-subtle); }
+.journal-group-selectall.is-all { color: var(--accent-primary); }
+.journal-group-selectall input { accent-color: var(--accent-primary); cursor: pointer; }
+
+/* ── 2026-10-09 需求：期刊出版社小节「全选」控件 ────────────────────────
+   组头行改为 flex：组头占满，右侧常驻全选复选框（部分选中为半选态）；
+   复选框在组头 button 外，避免嵌套交互元素与折叠点击冲突。 */
+.journal-group-row { display: flex; align-items: center; gap: 6px; }
+.journal-group-row .journal-group-head { flex: 1 1 auto; min-width: 0; }
+.journal-group-selectall {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 7px;
+  border-radius: var(--radius-sm);
+  transition: var(--t-colors);
+}
+.journal-group-selectall:hover { color: var(--accent-primary); background: var(--surface-subtle); }
+.journal-group-selectall.is-all { color: var(--accent-primary); }
+.journal-group-selectall input { accent-color: var(--accent-primary); cursor: pointer; }

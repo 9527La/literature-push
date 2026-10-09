@@ -393,20 +393,45 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
                 Each block is collapsible (需求 2): the head toggles its list. */}
             {journalGroups.map((group) => {
               const groupCollapsed = collapsedJournalGroups.has(group.key);
+              const names = group.items.map((j) => j.name);
+              const selectedInGroup = names.filter((n) => filters.journal.includes(n)).length;
+              const allSelected = names.length > 0 && selectedInGroup === names.length;
+              const toggleAllInGroup = () => {
+                const next = allSelected
+                  ? filters.journal.filter((n) => !names.includes(n))
+                  : [...new Set([...filters.journal, ...names])];
+                setFilters({ ...filters, journal: next });
+              };
               return (
                 <div className="journal-group" key={group.key}>
-                  <button
-                    type="button"
-                    className={`journal-group-head${groupCollapsed ? " is-collapsed" : ""}`}
-                    aria-expanded={!groupCollapsed}
-                    aria-controls={`feed-journal-group-${group.key}`}
-                    onClick={() => toggleJournalGroup(group.key)}
-                  >
-                    <span className={`journal-group-dot tone-${group.key}`} aria-hidden="true" />
-                    <span className="journal-group-label">{group.label}</span>
-                    <span className="journal-group-count">{group.items.length} 本</span>
-                    <ChevronDown size={14} className="journal-group-chevron" aria-hidden="true" />
-                  </button>
+                  <div className="journal-group-row">
+                    <button
+                      type="button"
+                      className={`journal-group-head${groupCollapsed ? " is-collapsed" : ""}`}
+                      aria-expanded={!groupCollapsed}
+                      aria-controls={`feed-journal-group-${group.key}`}
+                      onClick={() => toggleJournalGroup(group.key)}
+                    >
+                      <span className={`journal-group-dot tone-${group.key}`} aria-hidden="true" />
+                      <span className="journal-group-label">{group.label}</span>
+                      <span className="journal-group-count">{group.items.length} 本</span>
+                      <ChevronDown size={14} className="journal-group-chevron" aria-hidden="true" />
+                    </button>
+                    {/* 出版社级全选（需求）：勾选一键选中小节全部期刊，部分选中为半选态；
+                        放在组头 button 外，避免嵌套交互元素与折叠点击冲突。 */}
+                    <label
+                      className={`journal-group-selectall${allSelected ? " is-all" : ""}`}
+                      title={`全选/取消「${group.label}」全部期刊`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        ref={(el) => { if (el) el.indeterminate = selectedInGroup > 0 && !allSelected; }}
+                        onChange={toggleAllInGroup}
+                      />
+                      全选
+                    </label>
+                  </div>
                   <div className="keyword-filter-list journal-filter-list" id={`feed-journal-group-${group.key}`} hidden={groupCollapsed}>
                     {group.items.map((j) => (
                       <button
