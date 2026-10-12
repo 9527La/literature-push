@@ -44,7 +44,9 @@ try {
     await page.waitForTimeout(400);
   }
 
-  await page.getByRole("button", { name: "每日资讯" }).first().click();
+  // 导航改版（资讯汇总下拉组）后：先悬停展开「资讯汇总」组，再点菜单项
+  await page.locator(".nav-group").filter({ hasText: "资讯汇总" }).first().hover();
+  await page.getByRole("menuitem", { name: "每日资讯" }).first().click();
   await page.waitForSelector(".daily-overview", { timeout: 20000 });
   await page.waitForTimeout(800);
 
@@ -52,12 +54,12 @@ try {
     dates: document.querySelectorAll(".daily-date").length,
     activeDate: document.querySelector(".daily-date.active .daily-date-value")?.textContent.trim() || "",
     groups: [...document.querySelectorAll(".daily-overview-group h3")].map((h) => h.textContent.trim()),
-    overviewButtons: document.querySelectorAll(".daily-overview-group li button").length,
+    overviewButtons: [...document.querySelectorAll(".daily-overview-group li button")].filter((b) => (b.querySelector(".daily-no")?.textContent || "").trim().startsWith("#")).length,
     items: document.querySelectorAll(".daily-item").length,
     footer: document.querySelector(".daily-footer")?.textContent.trim() || "",
-    navActive: document.querySelector(".nav button.active")?.textContent.trim() || ""
+    navActive: document.querySelector(".nav-group.active .nav-label")?.textContent.trim() || document.querySelector(".nav button.active")?.textContent.trim() || ""
   }));
-  check(state.navActive.includes("每日资讯"), `导航「每日资讯」处于激活态（实际：${state.navActive}）`);
+  check(state.navActive.includes("资讯汇总"), `导航「资讯汇总」组处于激活态（实际：${state.navActive}）`);
   check(state.dates >= 1, `日期列表渲染（${state.dates} 天）`);
   check(state.activeDate.length > 0, `默认选中最新日期（${state.activeDate}）`);
   check(state.groups.length >= 1, `概览分组渲染（${state.groups.join(" / ")}）`);
@@ -65,7 +67,7 @@ try {
   check(state.items >= 1 && state.items === state.overviewButtons, `详情条目数与概览一一对应（${state.items}/${state.overviewButtons}）`);
   check(state.footer.includes("AI 辅助创作"), "文末 AI 免责声明渲染");
 
-  const firstAnchor = page.locator(".daily-overview-group li button").nth(3);
+  const firstAnchor = page.locator(".daily-overview-group li button").filter({ hasText: "#" }).nth(2);
   await firstAnchor.click();
   await page.waitForTimeout(900);
   const flashed = await page.evaluate(() => Boolean(document.querySelector(".daily-item.flash")));

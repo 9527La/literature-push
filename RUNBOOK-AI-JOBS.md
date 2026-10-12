@@ -385,8 +385,8 @@ Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\export-wecha
   > IEEE Transactions on Power Systems（TPS）> IEEE Transactions on Sustainable Energy（TSE）
   > 电力系统自动化（电自）> 中国电机工程学报（电机）> Applied Energy（AE）> Energy；
   同级多篇时按方向分散选取；高优先级刊不足 5 篇时按下一位顺序顺延补足；
-- 资讯精选：政策 ≤3 条、新闻 ≤5 条，概览式短句改写并 `**加粗**` 关键数字；
-  来源与数字必须与每日资讯原文一致，不得编造；政策文件优先全收录。
+- 资讯精选：政策标准 ≤3 条、新闻 ≤5 条，概览式短句改写并 `**加粗**` 关键数字；
+  来源与数字必须与每日资讯原文一致，不得编造；政策标准优先全收录。
 
 **步骤 4 — 写 issue JSON**：Write `data\wechat-drafts\<期号日>.json`（期号日 = 今天，
 报道窗口 = 昨日）。结构契约：`{version, date, digest≤60字, intro, news{policy≤3,
@@ -413,7 +413,7 @@ node scripts/publish-wechat-draft.mjs --in data/wechat-drafts/<期号日>.json
 ```
 
 成功输出草稿 media_id（封面由脚本**按期号日自动生成（含日期）并上传永久素材**，按日缓存
-`data\wechat-drafts\cover-thumb.json`，同日重跑复用）；失败（48001 无权限 / 40164 白名单 /
+`data\wechat-drafts\cover-thumb.json`，同日重跑复用；**同名草稿已存在时改为 draft/update 原地更新，不产生重复草稿**）；失败（48001 无权限 / 40164 白名单 /
 40001 密钥）按脚本提示如实汇报，**不回滚产物**，L0 路径不受影响；
 未配置凭据时跳过本步（L0 档）。
 
@@ -425,7 +425,7 @@ node scripts/publish-wechat-draft.mjs --in data/wechat-drafts/<期号日>.json
 ```
 【公众号日报】<期号日>
 - 素材：昨日（<日期>）新入库 N 篇，精选 k 篇写速评（复用 priorBrief R 篇）
-- 资讯：政策 P 条 / 新闻 M 条（来源 data\daily-news\<昨日>.md）
+- 资讯：政策标准 P 条 / 新闻 M 条（来源 data\daily-news\<昨日>.md）
 - 产物：data\wechat-drafts\<期号日>.{json,html}，探针 0 违规
 - 草稿：media_id=<id> / 未配置凭据跳过（L0） / 失败原因
 - 异常与处理：无 / 描述
@@ -456,7 +456,7 @@ node scripts/publish-wechat-draft.mjs --in data/wechat-drafts/<期号日>.json
 **公众号日报提示词（原文粘贴，与定时任务「每日 06:30」逐字一致）：**
 
 ```
-执行 literature-ai-jobs skill（若未加载，通读项目根目录 RUNBOOK-AI-JOBS.md），运行「job: wechat-daily」（第 8.5 节）：⓪ 先按第 4 节执行 classify 增量一轮（export-direction-batch.mjs --limit 400 只导未分类 → 会话按 4.2/4.3 分类 → apply-directions.mjs 写回，invalid 必须=0；exported=0 空跑属正常）——必须在导出日报素材之前完成，使素材带方向；① sc_run 远端跑 scripts\export-wechat-daily.mjs 导出昨日新入库文献素材（空窗口≠失败，如实写「今日无新入库文献」），sc_download 到 _ai-jobs-work\wechat-daily\ 并 Read 完整读完；② Read 本地 data\daily-news\<昨日>.md（不存在则资讯板块如实留空）；③ 精选 5-8 篇写三字段速评（契约同第 5.5 节：对象≤30/方法≤40/结论≤50 字，priorBrief 逐字复用禁止改写；精选优先级（期刊从高到低）：TSG > TPS > TSE > 电力系统自动化 > 中国电机工程学报 > Applied Energy > Energy，同级多篇按方向分散，高优先级不足 5 篇按序顺延），资讯精选政策≤3 条、新闻≤5 条概览式改写、**加粗**关键数字、不得编造；④ Write data\wechat-drafts\<期号日>.json（期号日=今天，报道窗口=昨日）；④.5 交稿自评：对照自查——每篇速评三段齐全且逐条满足 5.5 字数上限、导读与正文条目一致、所有数字与素材/资讯原文一致不得编造、无「首次/重大突破/国际领先/填补空白」等夸大措辞，发现不符先改 JSON 再进 ⑤；⑤ 本地跑 scripts\wechat-render.mjs 渲染 + scripts\probe-wechat-html.mjs 探针，0 违规才算完成，校验失败修正 JSON 重跑、禁止手改 HTML；⑤.5 若 .env 已配置 WECHAT_APPID/WECHAT_SECRET，本地跑 scripts\publish-wechat-draft.mjs --in data\wechat-drafts\<期号日>.json 自动写入公众号草稿箱（失败按脚本提示如实汇报、不影响产物已完成，未配置凭据则跳过）；⑥ 清理临时文件并按第 8.5.2 节模板汇报。本 job 不写数据库、不做最后群发（草稿写入见⑤.5，人工按 scripts\sop-wechat-publish.md 点发表）。全程遵守第 2 节红线。sc-remote 不可用或脚本缺失时汇报终止，不做变通。
+执行 literature-ai-jobs skill（若未加载，通读项目根目录 RUNBOOK-AI-JOBS.md），运行「job: wechat-daily」（第 8.5 节）：⓪ 先按第 4 节执行 classify 增量一轮（export-direction-batch.mjs --limit 400 只导未分类 → 会话按 4.2/4.3 分类 → apply-directions.mjs 写回，invalid 必须=0；exported=0 空跑属正常）——必须在导出日报素材之前完成，使素材带方向；① sc_run 远端跑 scripts\export-wechat-daily.mjs 导出昨日新入库文献素材（空窗口≠失败，如实写「今日无新入库文献」），sc_download 到 _ai-jobs-work\wechat-daily\ 并 Read 完整读完；② Read 本地 data\daily-news\<昨日>.md（不存在则资讯板块如实留空）；③ 精选 5-8 篇写三字段速评（契约同第 5.5 节：对象≤30/方法≤40/结论≤50 字，priorBrief 逐字复用禁止改写；精选优先级（期刊从高到低）：TSG > TPS > TSE > 电力系统自动化 > 中国电机工程学报 > Applied Energy > Energy，同级多篇按方向分散，高优先级不足 5 篇按序顺延），资讯精选政策标准≤3 条、新闻≤5 条概览式改写、**加粗**关键数字、不得编造；④ Write data\wechat-drafts\<期号日>.json（期号日=今天，报道窗口=昨日）；④.5 交稿自评：对照自查——每篇速评三段齐全且逐条满足 5.5 字数上限、导读与正文条目一致、所有数字与素材/资讯原文一致不得编造、无「首次/重大突破/国际领先/填补空白」等夸大措辞，发现不符先改 JSON 再进 ⑤；⑤ 本地跑 scripts\wechat-render.mjs 渲染 + scripts\probe-wechat-html.mjs 探针，0 违规才算完成，校验失败修正 JSON 重跑、禁止手改 HTML；⑤.5 若 .env 已配置 WECHAT_APPID/WECHAT_SECRET，本地跑 scripts\publish-wechat-draft.mjs --in data\wechat-drafts\<期号日>.json 自动写入公众号草稿箱（失败按脚本提示如实汇报、不影响产物已完成，未配置凭据则跳过）；⑥ 清理临时文件并按第 8.5.2 节模板汇报。本 job 不写数据库、不做最后群发（草稿写入见⑤.5，人工按 scripts\sop-wechat-publish.md 点发表）。全程遵守第 2 节红线。sc-remote 不可用或脚本缺失时汇报终止，不做变通。
 ```
 
 ## 10. 附录 B · 常见问题

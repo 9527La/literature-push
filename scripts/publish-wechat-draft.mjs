@@ -3,7 +3,8 @@
  * Push a rendered daily issue into the WeChat Official Account draft box
  * (DESIGN-WECHAT-MP-DAILY.md L1 tier, M4 acceptance).
  *
- * Chain: stable_token → (cover cached as permanent material) → draft/add.
+ * Chain: stable_token → (cover cached as permanent material) → draft/add；
+ * 同名草稿已存在（同日重跑 / 重新生成）时改为 draft/update 原地更新，避免草稿箱出现重复条目。
  * Publishing (freepublish) is NOT attempted — personal-subscription accounts
  * lost that permission in 2025-07; a human taps "publish" in the assistant app.
  *
@@ -122,6 +123,30 @@ async function ensureThumb(token, coverPath, issueDate) {
   return data.media_id;
 }
 
+/** 查最近 20 条草稿中的同名草稿（同日重跑原地更新用）；查询失败按“未找到”处理（回退新增，不阻断发布）。 */
+async function findDraftByTitle(token, title) {
+  try {
+    const data = await postJson(`${API}/cgi-bin/draft/batchget?access_token=${encodeURIComponent(token)}`, {
+      offset: 0,
+      count: 20,
+      no_content: 1
+    });
+    if (data.errcode || !Array.isArray(data.item)) return null;
+    const matches = [];
+    for (const entry of data.item) {
+      for (const article of entry.content?.news_item || []) {
+        if (article.title === title) {
+          matches.push({ mediaId: entry.media_id, updateTime: Number(entry.update_time) || 0 });
+        }
+      }
+    }
+    matches.sort((a, b) => b.updateTime - a.updateTime);
+    return matches[0]?.mediaId || null;
+  } catch {
+    return null;
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const env = readEnv();
@@ -152,18 +177,34 @@ async function main() {
 
   const token = await getAccessToken(appid, secret);
   const thumbMediaId = await ensureThumb(token, args.cover, issue.date);
+  const article = {
+    title,
+    author: "电研新视界",
+    digest,
+    content,
+    thumb_media_id: thumbMediaId,
+    content_source_url: String(issue.siteUrl || "https://lhmktz.top"),
+    need_open_comment: 0,
+    only_fans_can_comment: 0
+  };
+
+  const existingMediaId = await findDraftByTitle(token, title);
+  if (existingMediaId) {
+    const updated = await postJson(`${API}/cgi-bin/draft/update?access_token=${encodeURIComponent(token)}`, {
+      media_id: existingMediaId,
+      index: 0,
+      articles: article
+    });
+    if (!updated.errcode) {
+      console.log(`[publish-wechat-draft] ✓ 已原地更新同名草稿 media_id=${existingMediaId}（同日重跑，未新增重复草稿）`);
+      console.log("[publish-wechat-draft] 下一步：手机「订阅号助手」App 或公众平台后台「草稿箱」→ 预览到手机确认 → 点发表（每天 1 次额度）。");
+      return;
+    }
+    console.error(`[publish-wechat-draft] 同名草稿更新失败（errcode=${updated.errcode} ${updated.errmsg || "unknown"}），回退为新增草稿`);
+  }
 
   const draft = await postJson(`${API}/cgi-bin/draft/add?access_token=${encodeURIComponent(token)}`, {
-    articles: [{
-      title,
-      author: "电研新视界",
-      digest,
-      content,
-      thumb_media_id: thumbMediaId,
-      content_source_url: String(issue.siteUrl || "https://lhmktz.top"),
-      need_open_comment: 0,
-      only_fans_can_comment: 0
-    }]
+    articles: [article]
   });
   if (!draft.media_id) fail(draft.errcode || "?", `写入草稿箱失败：${draft.errmsg || "unknown"}`);
   console.log(`[publish-wechat-draft] ✓ 草稿已写入 media_id=${draft.media_id}`);
