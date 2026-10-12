@@ -1,0 +1,1181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>前端优化建议预览 · 电气前沿速递</title>
+<style>
+/* ═══════════════════ Design Tokens（与项目 styles.css 同源） ═══════════════════ */
+:root {
+  --bg: #f2f4f7;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --ink: #171b24;
+  --ink-2: #525a68;
+  --ink-3: #6b7280;            /* A1：由 #7d8592 加深至 WCAG AA */
+  --accent: #3157d5;
+  --accent-hover: #2848b8;
+  --accent-light: rgba(49, 87, 213, 0.09);
+  --line: #d8dce3;
+  --line-soft: rgba(23, 27, 36, 0.09);
+  --ok: #15803d;
+  --warn: #b45309;
+  --err: #b91c1c;
+  --r-sm: 6px; --r-md: 8px; --r-lg: 10px; --r-xl: 14px; --r-2xl: 18px;
+  --sh-sm: 0 1px 2px rgba(23,27,36,.04), 0 4px 12px rgba(23,27,36,.055);
+  --sh-md: 0 10px 28px rgba(23,27,36,.08);
+  --sh-lg: 0 18px 44px rgba(23,27,36,.12);
+  --ease: cubic-bezier(.16,1,.3,1);
+  --tone-ieee-ink: #3f5d93; --tone-ieee-soft: #edf1f8; --tone-ieee-line: #d5deec;
+  --tone-elsevier-ink: #8a6238; --tone-elsevier-soft: #f8f2e9; --tone-elsevier-line: #e8dbc6;
+  --tone-cn-ink: #3d6e66; --tone-cn-soft: #ecf4f2; --tone-cn-line: #cfe0dc;
+  --dir-storage: #3D6E66;
+  --font-serif: "Noto Serif SC","Source Han Serif SC","Songti SC","STSong","SimSun",serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  min-height: 100dvh;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  background: linear-gradient(180deg, #f8f9fb 0, var(--bg) 260px) fixed;
+  color: var(--ink); line-height: 1.6; font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+:focus-visible { outline: 3px solid rgba(49,87,213,.45); outline-offset: 2px; border-radius: 4px; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); }
+
+/* ═══════════════════ 页面骨架 ═══════════════════ */
+.pagetop {
+  position: sticky; top: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  height: 60px; padding: 0 24px;
+  background: rgba(255,255,255,.86); backdrop-filter: blur(20px) saturate(1.2);
+  border-bottom: 1px solid rgba(255,255,255,.7); box-shadow: 0 1px 3px rgba(26,26,46,.05);
+}
+.pagetop .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; letter-spacing: -.01em; }
+.pagetop .brand small { font-weight: 500; color: var(--ink-2); font-size: 12.5px; margin-left: 2px; }
+.pagetop-actions { display: flex; gap: 8px; align-items: center; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  min-height: 34px; padding: 6px 13px; border-radius: var(--r-md);
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  font-size: 13.5px; font-weight: 600;
+  transition: background-color .18s var(--ease), border-color .18s var(--ease), box-shadow .18s var(--ease), transform .18s var(--ease);
+}
+.btn:hover { background: var(--surface-2); border-color: #c3cad4; }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--accent); border-color: transparent; color: #fff; }
+.btn.primary:hover { background: var(--accent-hover); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--accent); }
+.btn.ghost:hover { background: var(--accent-light); }
+.btn[aria-pressed="true"] { background: var(--accent-light); border-color: var(--accent); color: var(--accent-hover); }
+
+.layout { display: grid; grid-template-columns: 264px minmax(0,1fr); gap: 28px; max-width: 1560px; margin: 0 auto; padding: 24px; align-items: start; }
+
+/* ═══════════════════ 侧栏索引 ═══════════════════ */
+.index { position: sticky; top: 84px; max-height: calc(100dvh - 108px); overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--sh-sm); padding: 16px 14px; }
+.index h2 { font-family: var(--font-serif); font-size: 15px; padding: 2px 6px 10px; border-bottom: 1px solid var(--line-soft); margin-bottom: 8px; }
+.index-group { margin-bottom: 12px; }
+.index-group > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--ink); padding: 6px; border-radius: var(--r-sm); }
+.index-group > summary::-webkit-details-marker { display: none; }
+.index-group > summary:hover { background: var(--surface-2); }
+.index-group > summary .num { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--ink-3); background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 99px; padding: 1px 8px; }
+.index-group .dot { width: 8px; height: 8px; border-radius: 3px; flex: 0 0 auto; }
+.index-item { display: flex; gap: 8px; align-items: baseline; padding: 5px 6px 5px 22px; border-radius: var(--r-sm); font-size: 12.5px; color: var(--ink-2); line-height: 1.45; }
+.index-item:hover { background: var(--accent-light); color: var(--accent-hover); }
+.index-item code { font-size: 11px; color: var(--ink-3); flex: 0 0 auto; font-family: ui-monospace,SFMono-Regular,Consolas,monospace; }
+.index-item .live { margin-left: auto; flex: 0 0 auto; font-size: 10px; color: var(--ok); border: 1px solid rgba(21,128,61,.3); background: rgba(21,128,61,.08); border-radius: 99px; padding: 0 6px; line-height: 16px; }
+
+/* ═══════════════════ 主区 ═══════════════════ */
+.content { min-width: 0; display: flex; flex-direction: column; gap: 26px; }
+.hero { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-2xl); box-shadow: var(--sh-sm); padding: 28px 30px 24px; }
+.hero .eyebrow { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--accent); background: var(--accent-light); border-radius: 99px; padding: 3px 11px; margin-bottom: 12px; }
+.hero h1 { font-family: var(--font-serif); font-size: 27px; line-height: 1.3; letter-spacing: -.01em; }
+.hero .lede { color: var(--ink-2); font-size: 14.5px; max-width: 860px; margin-top: 10px; }
+.hero .lede strong { color: var(--ink); }
+.stat-row { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin-top: 20px; }
+.stat { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--r-lg); padding: 12px 14px; }
+.stat b { display: block; font-size: 22px; font-family: var(--font-serif); }
+.stat span { font-size: 12px; color: var(--ink-2); }
+.verdict { margin-top: 18px; border-left: 3px solid var(--accent); background: var(--accent-light); border-radius: 0 var(--r-md) var(--r-md) 0; padding: 12px 16px; font-size: 13.5px; color: var(--ink); }
+.verdict b { color: var(--accent-hover); }
+
+/* ═══════════════════ 演示区块 ═══════════════════ */
+.demo { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-2xl); box-shadow: var(--sh-sm); overflow: hidden; scroll-margin-top: 84px; }
+.demo-head { display: flex; align-items: flex-start; gap: 12px; padding: 18px 22px 14px; border-bottom: 1px solid var(--line-soft); flex-wrap: wrap; }
+.demo-id { flex: 0 0 auto; font-family: ui-monospace,SFMono-Regular,Consolas,monospace; font-size: 12px; font-weight: 700; color: #fff; background: var(--accent); border-radius: var(--r-sm); padding: 3px 8px; margin-top: 2px; }
+.demo-head h3 { font-family: var(--font-serif); font-size: 18px; line-height: 1.35; }
+.demo-head .where { font-size: 12px; color: var(--ink-3); margin-top: 3px; font-family: ui-monospace,SFMono-Regular,Consolas,monospace; }
+.demo-head .tags { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font-size: 11px; font-weight: 700; border-radius: 99px; padding: 2px 9px; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface-2); }
+.tag.perf { color: #1d4ed8; border-color: rgba(29,78,216,.3); background: rgba(29,78,216,.07); }
+.tag.struct { color: #7c3aed; border-color: rgba(124,58,237,.3); background: rgba(124,58,237,.07); }
+.tag.reuse { color: #0e7490; border-color: rgba(14,116,144,.3); background: rgba(14,116,144,.07); }
+.tag.ux { color: #b45309; border-color: rgba(180,83,9,.3); background: rgba(180,83,9,.08); }
+.tag.resp { color: #15803d; border-color: rgba(21,128,61,.3); background: rgba(21,128,61,.08); }
+.tag.a11y { color: #be185d; border-color: rgba(190,24,93,.3); background: rgba(190,24,93,.08); }
+.demo-body { padding: 20px 22px; display: flex; flex-direction: column; gap: 16px; }
+.demo-foot { padding: 14px 22px 18px; border-top: 1px solid var(--line-soft); background: var(--surface-2); }
+.demo-foot h4 { font-size: 12px; color: var(--ink-2); letter-spacing: .06em; margin-bottom: 8px; }
+.effects { display: grid; gap: 6px; }
+.effects li { list-style: none; display: flex; gap: 8px; font-size: 13px; color: var(--ink); }
+.effects li::before { content: "▸"; color: var(--accent); flex: 0 0 auto; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.panel { border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; background: var(--surface); }
+.panel-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); }
+.panel-head .pill { font-size: 10px; font-weight: 700; border-radius: 99px; padding: 1px 8px; }
+.pill.bad { color: var(--err); background: rgba(185,28,28,.08); border: 1px solid rgba(185,28,28,.25); }
+.pill.good { color: var(--ok); background: rgba(21,128,61,.08); border: 1px solid rgba(21,128,61,.25); }
+.panel-body { padding: 14px; }
+.note { font-size: 12.5px; color: var(--ink-2); background: var(--surface-2); border: 1px dashed var(--line); border-radius: var(--r-md); padding: 10px 12px; }
+.note code { font-family: ui-monospace,SFMono-Regular,Consolas,monospace; font-size: 11.5px; background: rgba(23,27,36,.06); border-radius: 4px; padding: 1px 5px; }
+.hint { font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+kbd { font-family: ui-monospace,SFMono-Regular,Consolas,monospace; font-size: 11px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--surface); padding: 1px 6px; color: var(--ink); box-shadow: 0 1px 0 rgba(23,27,36,.04); }
+kbd.pulse { animation: kbdPulse 1s var(--ease) 2; border-color: var(--accent); color: var(--accent); }
+@keyframes kbdPulse { 30% { background: var(--accent-light); transform: scale(1.12); } }
+
+/* ── 演示 1：优化后的文献卡片 ── */
+.article {
+  position: relative; background: var(--surface); border: 1px solid var(--line);
+  border-left: 3px solid var(--accent); border-radius: var(--r-xl); box-shadow: var(--sh-sm);
+  padding: 0 0 16px; overflow: hidden;
+}
+.article-head {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin: 0 0 10px; padding: 9px 18px;
+  background: color-mix(in srgb, var(--tone-soft) 55%, #ffffff);
+  border-bottom: 1px solid var(--tone-line);
+}
+.journal-mark { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; height: 24px; padding: 0 8px; border-radius: 7px; background: var(--tone-ink); color: #fff; font-size: 12px; font-weight: 700; }
+.article-journal { color: var(--tone-ink); font-weight: 600; font-size: 13.5px; }
+.status-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; border-radius: 99px; padding: 1px 8px; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface); }
+.head-spacer { flex: 1 1 auto; }
+.direction-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: #fff; background: var(--dir-storage); border-radius: 99px; padding: 2px 10px; }
+.article time { font-size: 12.5px; color: var(--ink-3); }
+.actions-inline { display: flex; gap: 2px; margin-left: 4px; }
+.act { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--ink-2); border-radius: var(--r-sm); padding: 4px 8px; border: 1px solid transparent; transition: background-color .15s var(--ease), color .15s var(--ease); }
+.act:hover { background: var(--surface-2); color: var(--ink); }
+.act[aria-pressed="true"] { color: var(--accent-hover); background: var(--accent-light); }
+.act:focus-visible { outline: 3px solid rgba(49,87,213,.45); outline-offset: 1px; }
+.article-main { padding: 0 18px; }
+.title-btn { display: block; text-align: left; font-family: var(--font-serif); font-size: 19px; font-weight: 700; line-height: 1.45; color: var(--ink); border-radius: var(--r-sm); }
+.title-btn:hover { color: var(--tone-ink); }
+.title-btn:focus-visible { outline: 3px solid rgba(49,87,213,.45); outline-offset: 2px; }
+.title-btn mark, .abstract mark { background: rgba(49,87,213,.16); color: inherit; border-radius: 3px; padding: 0 2px; }
+.authors { font-size: 13px; color: var(--ink-2); margin-top: 6px; }
+.keywords { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.kw { font-size: 12px; font-weight: 600; color: var(--tone-ink); background: var(--tone-soft); border: 1px solid var(--tone-line); border-radius: 99px; padding: 2px 10px; transition: background-color .15s var(--ease); }
+.kw:hover { background: #fff; }
+.kw-more { font-size: 12px; font-weight: 700; color: var(--ink-3); border: 1px dashed var(--line); border-radius: 99px; padding: 2px 10px; }
+.kw-more:hover { color: var(--accent); border-color: var(--accent); }
+.abstract { font-size: 13.5px; color: var(--ink-2); margin-top: 10px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+/* 标注气泡 */
+.pin { position: absolute; width: 20px; height: 20px; border-radius: 99px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; cursor: help; box-shadow: 0 2px 8px rgba(49,87,213,.4); z-index: 5; border: 2px solid #fff; }
+.pin:hover { transform: scale(1.15); }
+.pin::after { content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: 240px; background: var(--ink); color: #fff; font-size: 11.5px; font-weight: 500; line-height: 1.5; border-radius: var(--r-md); padding: 8px 10px; opacity: 0; pointer-events: none; transition: opacity .15s var(--ease); z-index: 20; text-align: left; }
+.pin:hover::after { opacity: 1; }
+
+/* ── 演示 2：导航菜单键盘可达 ── */
+.nav-demo { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-2); padding: 14px; }
+.navbar { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: 6px 10px; width: max-content; max-width: 100%; }
+.nav-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); padding: 7px 11px; border-radius: var(--r-sm); }
+.nav-btn:hover { background: var(--surface-2); color: var(--ink); }
+.nav-btn.active { color: var(--accent-hover); background: var(--accent-light); }
+.nav-group { position: relative; }
+.group-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 600; color: var(--ink-2); padding: 7px 11px; border-radius: var(--r-sm); }
+.group-btn:hover { background: var(--surface-2); color: var(--ink); }
+.group-btn[aria-expanded="true"] { color: var(--accent-hover); background: var(--accent-light); }
+.group-btn .chev { transition: transform .18s var(--ease); }
+.group-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.nav-menu { position: absolute; top: calc(100% + 8px); left: 8px; min-width: 190px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--sh-lg); padding: 6px; z-index: 30; }
+.nav-menu[hidden] { display: none; }
+.menu-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; font-size: 13.5px; font-weight: 600; color: var(--ink-2); padding: 8px 10px; border-radius: var(--r-sm); }
+.menu-item:hover, .menu-item:focus-visible { background: var(--accent-light); color: var(--accent-hover); outline: none; }
+.menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.menu-item .sub { margin-left: auto; font-size: 11px; color: var(--ink-3); font-weight: 500; }
+.menu-sep { height: 1px; background: var(--line-soft); margin: 5px 4px; }
+
+/* ── 演示 3：搜索 stale-while-revalidate ── */
+.searchbox { display: flex; align-items: center; gap: 8px; border: 1px solid #cbd0d8; border-radius: var(--r-md); background: #fff; padding: 0 12px; min-height: 44px; box-shadow: inset 0 1px 0 rgba(23,27,36,.02); }
+.searchbox:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(49,87,213,.15); }
+.searchbox input { flex: 1; border: none; outline: none; font-size: 14px; background: transparent; min-width: 0; }
+.progress-track { height: 3px; background: var(--line-soft); border-radius: 99px; overflow: hidden; }
+.progress-track .bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), #6d8ff0); border-radius: 99px; transition: width .2s linear; }
+.stale-pill { display: none; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--warn); background: rgba(180,83,9,.1); border: 1px solid rgba(180,83,9,.3); border-radius: 99px; padding: 2px 10px; }
+.stale-pill.show { display: inline-flex; }
+.result-strip { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-2); background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--r-md); padding: 9px 12px; }
+.result-strip strong { color: var(--ink); font-size: 15px; }
+
+/* ── 演示 4：撤销 toast ── */
+.batchbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--ink); color: #fff; border-radius: var(--r-lg); padding: 10px 14px; }
+.batchbar .count b { color: #fff; }
+.batchbar .count { font-size: 13px; color: rgba(255,255,255,.75); margin-right: auto; }
+.batchbar .b-btn { font-size: 12.5px; font-weight: 600; color: #fff; border: 1px solid rgba(255,255,255,.28); border-radius: var(--r-sm); padding: 5px 10px; }
+.batchbar .b-btn:hover { background: rgba(255,255,255,.12); }
+.toast-region { position: fixed; right: 20px; bottom: 20px; z-index: 100; display: flex; flex-direction: column; gap: 10px; }
+.toast { display: flex; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--ok); border-radius: var(--r-lg); box-shadow: var(--sh-lg); padding: 12px 14px; min-width: 320px; animation: toastIn .28s var(--ease); }
+.toast.warn { border-left-color: var(--warn); }
+@keyframes toastIn { from { opacity: 0; transform: translateY(12px) scale(.97); } }
+.toast .t-text { font-size: 13px; flex: 1; }
+.toast .t-undo { font-size: 12.5px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent); border-radius: var(--r-sm); padding: 4px 10px; }
+.toast .t-undo:hover { background: var(--accent-light); }
+.toast .t-close { color: var(--ink-3); padding: 4px; border-radius: var(--r-sm); }
+.toast .t-close:hover { background: var(--surface-2); color: var(--ink); }
+
+/* ── 演示 5：视图状态保持 ── */
+.keepalive { border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; background: var(--surface-2); }
+.ka-tabs { display: flex; gap: 4px; padding: 8px 10px 0; background: var(--surface); border-bottom: 1px solid var(--line-soft); }
+.ka-tab { font-size: 13px; font-weight: 600; color: var(--ink-2); padding: 8px 13px; border-radius: var(--r-sm) var(--r-sm) 0 0; border: 1px solid transparent; border-bottom: none; }
+.ka-tab[aria-selected="true"] { color: var(--accent-hover); background: var(--surface-2); border-color: var(--line-soft); }
+.ka-body { padding: 14px; }
+.ka-scroll { max-height: 210px; overflow: auto; border: 1px solid var(--line-soft); border-radius: var(--r-md); background: var(--surface); padding: 10px; }
+.ka-row { display: flex; gap: 10px; align-items: center; padding: 8px 6px; border-bottom: 1px dashed var(--line-soft); font-size: 13px; }
+.ka-row:last-child { border-bottom: none; }
+.ka-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.ka-row .d { font-size: 11.5px; color: var(--ink-3); flex: 0 0 auto; }
+.ka-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; font-size: 12.5px; color: var(--ink-2); }
+.ka-meta .chipok { color: var(--ok); font-weight: 700; background: rgba(21,128,61,.08); border: 1px solid rgba(21,128,61,.25); border-radius: 99px; padding: 2px 10px; font-size: 11.5px; }
+
+/* ── 演示 6：响应式 ── */
+.vp-frame { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-2); padding: 14px; }
+.vp-controls { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.vp-controls .lbl { font-size: 12.5px; font-weight: 700; color: var(--ink-2); margin-right: 2px; }
+.vp { margin: 0 auto; border: 1px solid var(--line); border-radius: var(--r-md); background: #fff; overflow: hidden; transition: max-width .35s var(--ease); max-width: 100%; box-shadow: var(--sh-sm); }
+.vp-topbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: rgba(255,255,255,.9); border-bottom: 1px solid var(--line-soft); }
+.vp-brand { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 12.5px; }
+.vp-nav { display: flex; gap: 3px; overflow: hidden; }
+.vp-nav span { font-size: 11px; font-weight: 600; color: var(--ink-2); padding: 4px 7px; border-radius: 5px; white-space: nowrap; }
+.vp-nav span.on { color: var(--accent-hover); background: var(--accent-light); }
+.vp-actions { margin-left: auto; display: flex; gap: 5px; }
+.vp-actions i { display: block; width: 26px; height: 18px; border-radius: 5px; background: var(--accent); opacity: .85; }
+.vp-actions i.ghost { background: var(--line); }
+.vp-main { display: grid; grid-template-columns: 300px minmax(0,1fr); gap: 12px; padding: 12px; position: relative; min-height: 170px; }
+.vp-filter { border: 1px solid var(--line-soft); border-radius: var(--r-md); background: var(--surface-2); padding: 10px; font-size: 11.5px; color: var(--ink-2); }
+.vp-filter b { display: block; color: var(--ink); font-size: 12.5px; margin-bottom: 6px; }
+.vp-filter .frow { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+.vp-filter .fchip { font-size: 10.5px; border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 1px 8px; }
+.vp-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.vp-card { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--r-md); background: #fff; padding: 8px 10px; }
+.vp-card .l { height: 8px; border-radius: 3px; background: var(--line-soft); }
+.vp-card .l.w60 { width: 60%; } .vp-card .l.w40 { width: 40%; margin-top: 6px; }
+.vp.narrow .vp-main { grid-template-columns: minmax(0,1fr); }
+.vp.narrow .vp-filter { position: absolute; inset: 8px auto 8px 8px; width: 240px; z-index: 5; background: #fff; box-shadow: var(--sh-lg); border-color: var(--line); }
+.vp-scrim { display: none; position: absolute; inset: 0; background: rgba(23,27,36,.28); z-index: 4; border-radius: var(--r-md); }
+.vp.narrow .vp-scrim { display: block; }
+.vp-badge { position: absolute; top: 10px; right: 12px; font-size: 10.5px; font-weight: 700; border-radius: 99px; padding: 2px 9px; z-index: 6; }
+.vp-badge.side { color: #1d4ed8; background: rgba(29,78,216,.1); border: 1px solid rgba(29,78,216,.3); }
+.vp-badge.over { color: var(--warn); background: rgba(180,83,9,.12); border: 1px solid rgba(180,83,9,.35); }
+
+/* ── 演示 7：打印样式 ── */
+.print-demo { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-2); padding: 14px; }
+.print-sheet { background: #fff; border: 1px solid var(--line); border-radius: var(--r-md); padding: 26px 30px; box-shadow: var(--sh-sm); transition: padding .3s var(--ease); }
+.print-sheet h5 { font-family: var(--font-serif); font-size: 15px; border-bottom: 2px solid var(--ink); padding-bottom: 8px; margin-bottom: 12px; }
+.print-item { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; }
+.print-item .n { color: var(--ink-3); flex: 0 0 auto; }
+.print-item .ti { flex: 1; }
+.print-item .jr { color: var(--ink-2); flex: 0 0 auto; }
+.print-chrome { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+.print-chrome .fakebar { flex: 1; height: 34px; border-radius: var(--r-md); background: repeating-linear-gradient(45deg, var(--surface-2), var(--surface-2) 10px, #eef0f4 10px, #eef0f4 20px); border: 1px dashed var(--line); display: grid; place-items: center; font-size: 11px; color: var(--ink-3); }
+body.print-mode .print-chrome .fakebar { opacity: .35; }
+body.print-mode .print-sheet { padding: 0; border: none; box-shadow: none; }
+body.print-mode .print-sheet h5 { border-bottom-width: 1px; }
+
+/* ── 演示 8：词云 + 数据表 ── */
+.wc-demo { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-2); padding: 16px; }
+.wordcloud { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; background: #fff; border: 1px solid var(--line-soft); border-radius: var(--r-md); padding: 16px; }
+.wc-word { font-weight: 700; color: var(--tone-ieee-ink); border-radius: var(--r-sm); padding: 1px 4px; }
+.wc-word:hover { background: var(--accent-light); color: var(--accent-hover); }
+.wc-word.w1 { font-size: 30px; } .wc-word.w2 { font-size: 23px; } .wc-word.w3 { font-size: 18px; } .wc-word.w4 { font-size: 14px; color: var(--ink-2); }
+details.datatable { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: #fff; }
+details.datatable > summary { cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--accent); padding: 9px 12px; list-style: none; }
+details.datatable > summary::-webkit-details-marker { display: none; }
+details.datatable > summary::before { content: "▸ "; }
+details.datatable[open] > summary::before { content: "▾ "; }
+table.mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.mini th, table.mini td { text-align: left; padding: 6px 12px; border-top: 1px solid var(--line-soft); }
+table.mini th { color: var(--ink-2); font-size: 11.5px; letter-spacing: .04em; background: var(--surface-2); }
+table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+
+/* ── 演示 9：对比度 ── */
+.contrast-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.cswatch { border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; background: #fff; }
+.cswatch .cbody { padding: 16px 18px; }
+.cswatch .cbody p { font-size: 14px; margin-bottom: 4px; }
+.cswatch .cbody small { font-size: 12px; }
+.cswatch .cfoot { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-top: 1px solid var(--line-soft); font-size: 12px; font-weight: 700; }
+.ratio { font-family: ui-monospace,SFMono-Regular,Consolas,monospace; border-radius: 99px; padding: 1px 9px; font-size: 11.5px; }
+.ratio.fail { color: var(--err); background: rgba(185,28,28,.09); border: 1px solid rgba(185,28,28,.3); }
+.ratio.pass { color: var(--ok); background: rgba(21,128,61,.09); border: 1px solid rgba(21,128,61,.3); }
+
+/* ── 演示 10：AsyncState ── */
+.async-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.async-cell { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-2); padding: 12px; }
+.async-cell .cap { font-size: 11.5px; font-weight: 700; color: var(--ink-2); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.skel { border-radius: var(--r-md); background: linear-gradient(100deg, #eceef2 40%, #f6f7f9 50%, #eceef2 60%); background-size: 200% 100%; animation: shimmer 1.3s linear infinite; }
+@keyframes shimmer { to { background-position: -200% 0; } }
+.skel.l { height: 12px; margin-bottom: 7px; } .skel.l.w70 { width: 70%; } .skel.l.w50 { width: 50%; }
+.empty-box { display: grid; place-items: center; gap: 6px; text-align: center; padding: 14px 8px; background: #fff; border: 1px dashed var(--line); border-radius: var(--r-md); font-size: 12px; color: var(--ink-2); }
+.empty-box b { color: var(--ink); font-size: 13px; }
+.err-box { background: rgba(185,28,28,.06); border: 1px solid rgba(185,28,28,.3); border-radius: var(--r-md); padding: 12px; font-size: 12px; color: var(--err); }
+.err-box .retry { margin-top: 8px; font-size: 12px; font-weight: 700; color: #fff; background: var(--err); border-radius: var(--r-sm); padding: 4px 12px; }
+code.block { display: block; font-family: ui-monospace,SFMono-Regular,Consolas,monospace; font-size: 11.5px; line-height: 1.65; background: #101623; color: #d6e2f5; border-radius: var(--r-md); padding: 13px 15px; overflow: auto; white-space: pre; }
+code.block .k { color: #8fb8ff; } code.block .s { color: #9fe6a0; } code.block .c { color: #7d8aa5; }
+
+/* ── 总表 ── */
+.sumtable-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: #fff; }
+table.sum { width: 100%; border-collapse: collapse; font-size: 12.8px; min-width: 900px; }
+table.sum th { position: sticky; top: 0; background: var(--surface-2); text-align: left; font-size: 11.5px; letter-spacing: .05em; color: var(--ink-2); padding: 9px 12px; border-bottom: 1px solid var(--line); z-index: 2; }
+table.sum td { padding: 8px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: top; line-height: 1.5; }
+table.sum tr:last-child td { border-bottom: none; }
+table.sum td.id { font-family: ui-monospace,SFMono-Regular,Consolas,monospace; font-weight: 700; color: var(--accent); white-space: nowrap; }
+table.sum td.eff { color: var(--ink-2); }
+table.sum tr:hover td { background: var(--accent-light); }
+
+.footer-note { text-align: center; font-size: 12px; color: var(--ink-3); padding: 10px 0 30px; }
+
+/* ═══════════════════ 打印样式（V3 本体） ═══════════════════ */
+@media print {
+  .pagetop, .index, .demo-foot, .vp-controls, .print-chrome, .pin, .toast-region { display: none !important; }
+  body { background: #fff; font-size: 12px; }
+  .layout { display: block; padding: 0; }
+  .demo { break-inside: avoid; box-shadow: none; border-color: #999; margin-bottom: 14px; }
+  .hero { box-shadow: none; }
+  a { color: var(--ink); }
+}
+
+/* ═══════════════════ 响应式兜底（本页自演示） ═══════════════════ */
+@media (max-width: 1180px) {
+  .layout { grid-template-columns: minmax(0,1fr); }
+  .index { position: static; max-height: none; }
+  .cols, .contrast-grid, .async-grid, .stat-row { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  html { scroll-behavior: auto; }
+}
+</style>
+</head>
+<body>
+
+<header class="pagetop">
+  <div class="brand">
+    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#3157d5"/><path d="M16 6l2.6 7.4L26 16l-7.4 2.6L16 26l-2.6-7.4L6 16l7.4-2.6z" fill="#fff"/></svg>
+    电气前沿速递 <small>前端优化建议 · 交互预览</small>
+  </div>
+  <div class="pagetop-actions">
+    <button class="btn ghost" id="print-toggle" aria-pressed="false">进入打印预览（V3）</button>
+    <button class="btn primary" onclick="document.getElementById('summary').scrollIntoView()">查看建议总表</button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ═══════════ 侧栏索引 ═══════════ -->
+  <aside class="index" aria-label="优化建议索引">
+    <h2>建议索引 · 30 条</h2>
+
+    <details class="index-group" open>
+      <summary><span class="dot" style="background:#1d4ed8"></span>性能优化<span class="num">8</span></summary>
+      <a class="index-item" href="#p1"><code>P1</code>全视图懒加载 + 悬停预取<span class="live">演示</span></a>
+      <a class="index-item" href="#p2"><code>P2</code>交互局部 patch 替代整页 reload</a>
+      <a class="index-item" href="#p3"><code>P3</code>搜索 stale-while-revalidate<span class="live">演示</span></a>
+      <a class="index-item" href="#p4"><code>P4</code>列表计算 memo 化</a>
+      <a class="index-item" href="#p5"><code>P5</code>视图状态保持（keep-alive）<span class="live">演示</span></a>
+      <a class="index-item" href="#p6"><code>P6</code>CSS 分区治理与体积清理</a>
+      <a class="index-item" href="#p7"><code>P7</code>字体子集精确化</a>
+      <a class="index-item" href="#p8"><code>P8</code>详情 / 相关请求缓存</a>
+    </details>
+
+    <details class="index-group">
+      <summary><span class="dot" style="background:#7c3aed"></span>代码结构<span class="num">4</span></summary>
+      <a class="index-item" href="#s1"><code>S1</code>App 容器拆分（hooks 化）</a>
+      <a class="index-item" href="#s2"><code>S2</code>样式就近维护 + 层叠校验</a>
+      <a class="index-item" href="#s3"><code>S3</code>useAsync 三态统一<span class="live">演示</span></a>
+      <a class="index-item" href="#s4"><code>S4</code>业务组件沉淀</a>
+    </details>
+
+    <details class="index-group">
+      <summary><span class="dot" style="background:#0e7490"></span>组件复用<span class="num">3</span></summary>
+      <a class="index-item" href="#r1"><code>R1</code>key 稳定性治理<span class="live">演示</span></a>
+      <a class="index-item" href="#r2"><code>R2</code>Modal / ConfirmDialog 体系</a>
+      <a class="index-item" href="#r3"><code>R3</code>日期工具收敛</a>
+    </details>
+
+    <details class="index-group">
+      <summary><span class="dot" style="background:#b45309"></span>用户体验<span class="num">6</span></summary>
+      <a class="index-item" href="#u1"><code>U1</code>补「/」快捷键实现<span class="live">演示</span></a>
+      <a class="index-item" href="#u2"><code>U2</code>下拉菜单键盘可达<span class="live">演示</span></a>
+      <a class="index-item" href="#u3"><code>U3</code>浏览不断线</a>
+      <a class="index-item" href="#u4"><code>U4</code>批量操作撤销<span class="live">演示</span></a>
+      <a class="index-item" href="#u5"><code>U5</code>请求过程可视反馈</a>
+      <a class="index-item" href="#u6"><code>U6</code>空 / 错状态全站一致</a>
+    </details>
+
+    <details class="index-group">
+      <summary><span class="dot" style="background:#15803d"></span>响应式布局<span class="num">3</span></summary>
+      <a class="index-item" href="#v1"><code>V1</code>≤1180 筛选浮层化<span class="live">演示</span></a>
+      <a class="index-item" href="#v2"><code>V2</code>顶栏空间竞争治理</a>
+      <a class="index-item" href="#v3"><code>V3</code>打印 / PDF 样式<span class="live">演示</span></a>
+    </details>
+
+    <details class="index-group">
+      <summary><span class="dot" style="background:#be185d"></span>可访问性<span class="num">6</span></summary>
+      <a class="index-item" href="#a1"><code>A1</code>对比度修复（AA）<span class="live">演示</span></a>
+      <a class="index-item" href="#a2"><code>A2</code>图表无障碍（数据表）<span class="live">演示</span></a>
+      <a class="index-item" href="#a3"><code>A3</code>标题层级治理</a>
+      <a class="index-item" href="#a4"><code>A4</code>aria-pressed 一致化<span class="live">演示</span></a>
+      <a class="index-item" href="#a5"><code>A5</code>焦点管理增强</a>
+      <a class="index-item" href="#a6"><code>A6</code>aria 语义与行为一致</a>
+    </details>
+  </aside>
+
+  <!-- ═══════════ 主区 ═══════════ -->
+  <main class="content">
+
+    <!-- 概览 -->
+    <section class="hero">
+      <span class="eyebrow">FRONTEND REVIEW · 2026-10-12</span>
+      <h1>前端代码评估与优化建议预览</h1>
+      <p class="lede">评估对象为 <strong>电气前沿速递</strong> 网页端（React 19 + Vite 7，hash 路由，PC 桌面端）。结论先行：<strong>整体架构健康，问题不在「能不能跑」，而在「规模上来之后」</strong>——14,389 行前端源码中，main.jsx（1,155 行）与 styles.css（6,408 行）两个单文件已成为维护瓶颈；交互反馈、键盘可达性与无障碍细节存在系统性欠账。以下 30 条建议均可独立实施、互不阻塞。</p>
+      <div class="stat-row">
+        <div class="stat"><b>30</b><span>条具体建议（6 大维度）</span></div>
+        <div class="stat"><b>10</b><span>个可交互演示（本页）</span></div>
+        <div class="stat"><b>14</b><span>涉及源文件（14,389 行）</span></div>
+        <div class="stat"><b>3</b><span>个真实缺陷（含 1 个假承诺）</span></div>
+      </div>
+      <div class="verdict"><b>先说三个「现在就值得修」的：</b>① Feed 界面渲染了「按 / 键聚焦搜索框」的提示，但全代码没有任何 <code>/</code> 键监听——UI 对用户做了一个不存在的承诺（U1）；② 顶栏下拉菜单声明了 <code>role="menu"</code> 却不实现方向键导航与焦点移入，键盘用户打开后焦点「困」在触发按钮上（U2/A6）；③ 次要文字色 <code>#7d8592</code> 白底对比度约 3.7:1，未达 WCAG AA 的 4.5:1（A1）。</div>
+    </section>
+
+    <!-- ═══════════ 演示 1：优化后的文献卡片 ═══════════ -->
+    <section class="demo" id="card">
+      <div class="demo-head">
+        <span class="demo-id">卡片</span>
+        <div>
+          <h3>优化后的文献卡片（信息流主视觉）</h3>
+          <div class="where">ArticleCard.jsx · Feed.jsx · styles.css</div>
+        </div>
+        <div class="tags"><span class="tag a11y">A1 对比度</span><span class="tag a11y">A4 aria-pressed</span><span class="tag reuse">R1 稳定 key</span><span class="tag perf">P4 memo</span></div>
+      </div>
+      <div class="demo-body">
+        <p class="hint">悬停卡片上的 <span style="color:#3157d5;font-weight:700">编号气泡</span> 查看该改进点的说明；按 <kbd>Tab</kbd> 键可查看统一焦点环（A5）。</p>
+        <div style="position:relative; --tone-ink: var(--tone-ieee-ink); --tone-soft: var(--tone-ieee-soft); --tone-line: var(--tone-ieee-line);">
+          <span class="pin" data-tip="A1：次要文字 #7d8592（≈3.7:1）加深为 #6b7280（≈4.8:1），全站达 WCAG AA；日期/计数等 12px 小字同样覆盖。" style="top:34px; right:10px;">1</span>
+          <span class="pin" data-tip="A4：所有开关类按钮统一 aria-pressed + 动态 aria-label，屏幕阅读器可播报「已按下/未按下」。" style="top:64px; right:10px;">2</span>
+          <span class="pin" data-tip="R1：关键词胶囊改用关键词文本作 key（非数组下标），列表重排/插入不再错位。" style="bottom:64px; right:10px;">3</span>
+          <span class="pin" data-tip="P4：filteredArticles 与相关性计分 memo 化；500 篇列表单次渲染主线程计算 ≈15ms → ≈2ms。" style="bottom:34px; right:10px;">4</span>
+          <article class="article">
+            <div class="article-head">
+              <span class="journal-mark">TSG</span>
+              <span class="article-journal">IEEE Trans. on Smart Grid</span>
+              <span class="status-badge">已读</span>
+              <span class="head-spacer"></span>
+              <span class="direction-chip">储能</span>
+              <time datetime="2026-10-09" title="2026-10-09">3 天前</time>
+              <span class="actions-inline">
+                <button class="act" type="button">摘要</button>
+                <button class="act" type="button" aria-pressed="true" aria-label="取消已读">已读</button>
+                <button class="act" type="button" aria-pressed="false" aria-label="收藏">收藏</button>
+                <a class="act" href="#" onclick="return false" aria-label="打开原文网页（新窗口）">原文</a>
+              </span>
+            </div>
+            <div class="article-main">
+              <button class="title-btn" type="button">Spatiotemporal Flexibility Assessment of <mark>Distribution Networks</mark> with High Photovoltaic Penetration</button>
+              <p class="authors">Zhang W., Li H., Ouyang S., 等</p>
+              <div class="keywords">
+                <button class="kw" type="button">distribution network</button>
+                <button class="kw" type="button">flexibility</button>
+                <button class="kw" type="button">PV penetration</button>
+                <button class="kw-more" type="button" title="还有 4 个关键词，打开详情查看">+4</button>
+              </div>
+              <p class="abstract">This paper proposes a spatiotemporal flexibility assessment framework for active distribution networks with high photovoltaic penetration. A hierarchical evaluation index system covering source-grid-load-storage dimensions is established…</p>
+            </div>
+          </article>
+        </div>
+        <div class="note">卡片本体结构不变（期刊身份条 + 方向 chip + 内联动作），改进全部在<strong>细节层</strong>：对比度、aria 状态、key 稳定性与渲染计算。视觉差异细微，但每一项都直接对应可量化的验收标准。</div>
+      </div>
+      <div class="demo-foot">
+        <h4>预期效果</h4>
+        <ul class="effects">
+          <li>全站文字对比度 ≥ 4.5:1（WCAG AA），12px 小字可读性显著提升，投影/低亮度屏幕下尤其明显</li>
+          <li>屏幕阅读器用户可感知每个开关按钮的按下态（aria-pressed），不再只能读出按钮名</li>
+          <li>500 篇文献 + 相关性排序时，主线程单次渲染计算从约 15ms 降至约 2ms，翻页/筛选更跟手</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ 演示 2：键盘可达菜单 ═══════════ -->
+    <section class="demo" id="u2">
+      <div class="demo-head">
+        <span class="demo-id">U2 / A6</span>
+        <div>
+          <h3>导航下拉组：完整 WAI-ARIA 菜单键盘模式</h3>
+          <div class="where">main.jsx:958-1025 · NavGroupPanel</div>
+        </div>
+        <div class="tags"><span class="tag ux">键盘可达</span><span class="tag a11y">ARIA menu</span><span class="live">可交互</span></div>
+      </div>
+      <div class="demo-body">
+        <div class="nav-demo">
+          <div class="navbar" role="presentation">
+            <button class="nav-btn active" type="button">文献库</button>
+            <div class="nav-group" id="menu-demo">
+              <button class="group-btn" type="button" id="menu-trigger" aria-haspopup="true" aria-expanded="false" aria-controls="menu-popup">
+                资讯汇总
+                <svg class="chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              <div class="nav-menu" id="menu-popup" role="menu" aria-labelledby="menu-trigger" hidden>
+                <button class="menu-item" role="menuitem" tabindex="-1" type="button">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3l1.9 5.8L20 10l-5.5 2.4L12 19l-2.5-6.6L4 10l6.1-1.2z"/></svg>
+                  研究速览
+                </button>
+                <button class="menu-item" role="menuitem" tabindex="-1" type="button">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h5"/></svg>
+                  每日资讯
+                </button>
+                <button class="menu-item" role="menuitem" tabindex="-1" type="button">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
+                  关键词统计
+                </button>
+              </div>
+            </div>
+            <button class="nav-btn" type="button">公共讨论</button>
+            <button class="nav-btn" type="button">使用说明</button>
+          </div>
+        </div>
+        <p class="hint">试一试：<kbd>Tab</kbd> 聚焦「资讯汇总」→ <kbd>↓</kbd> 打开并聚焦第一项 → <kbd>↑</kbd><kbd>↓</kbd> 循环选择 → <kbd>Home</kbd>/<kbd>End</kbd> 首尾跳转 → <kbd>Esc</kbd> 关闭并把焦点还给触发按钮。鼠标悬停同样可开（保留现有 hover 体验）。</p>
+        <div class="cols">
+          <div class="panel">
+            <div class="panel-head">现状 <span class="pill bad">焦点困死</span></div>
+            <div class="panel-body" style="font-size:13px;color:var(--ink-2);line-height:1.7">
+              <code>role="menu"</code> 已声明，但：打开时焦点不移入菜单；<code>↑↓</code> 无响应；<kbd>Tab</kbd> 会直接跑出菜单进入页面其他元素；<code>Esc</code> 关闭后焦点丢失。屏幕阅读器播报「菜单」后用户却无法用键盘进入——语义与行为互相矛盾。
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">建议 <span class="pill good">完整模式</span></div>
+            <div class="panel-body" style="font-size:13px;color:var(--ink-2);line-height:1.7">
+              打开即聚焦第一项；<code>↑↓</code> 在项间循环；<code>Home</code>/<code>End</code> 跳首尾；<code>Esc</code> 关闭并焦点回触发按钮；<code>aria-activedescendant</code> 备选。若不愿承担完整 menu 模式成本，可降级为 disclosure（<code>aria-expanded</code> + 普通列表）——<strong>关键是语义与行为必须一致</strong>。
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="demo-foot">
+        <h4>预期效果</h4>
+        <ul class="effects">
+          <li>键盘用户可完成「打开菜单 → 选择 → 进入视图」全流程，无需鼠标</li>
+          <li>通过 WAI-ARIA Authoring Practices 的 menu button 模式验收，屏幕阅读器不再被矛盾语义误导</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ 演示 3：搜索 stale-while-revalidate ═══════════ -->
+    <section class="demo" id="p3">
+      <div class="demo-head">
+        <span class="demo-id">P3 / U5</span>
+        <div>
+          <h3>搜索与筛选：旧结果驻留 + 过程可视反馈</h3>
+          <div class="where">main.jsx:257-272, 540-545 · Feed.jsx</div>
+        </div>
+        <div class="tags"><span class="tag perf">SWR</span><span class="tag ux">过程反馈</span><span class="live">可交互</span></div>
+      </div>
+      <div class="demo-body">
+        <div class="searchbox">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7d8592" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="demo-search" type="search" placeholder="搜索标题、摘要、作者或关键词" aria-label="搜索文献（演示）" />
+          <kbd id="search-kbd" title="按 / 键聚焦搜索框">/</kbd>
+        </div>
+        <div class="progress-track"><div class="bar" id="progress-bar"></div></div>
+        <div class="result-strip">
+          <span id="result-count">共 <strong>3977</strong> 篇文献</span>
+          <span class="stale-pill" id="stale-pill">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/></svg>
+            正在更新，显示的是上次结果
+          </span>
+          <button class="btn ghost" id="slow-btn" type="button" style="margin-left:auto">模拟慢请求（2 秒）</button>
+        </div>
+        <p class="hint">按 <kbd>/</kbd>（页面任意位置，输入框聚焦时除外）即可聚焦搜索框——这正是 Feed.jsx:349 向用户承诺、但全代码未曾实现的功能（U1）。点击「模拟慢请求」观察：<strong>旧结果不消失、列表不闪空</strong>，仅顶部 2px 进度条 + 「正在更新」胶囊提示（P3/U5）。</p>
+        <div class="note">实现要点：debounce 与 URL 序列化合为一步计算（现状是两段 effect 链）；请求期间保留旧 <code>articles</code>；进度条只在请求超过约 800ms 后出现（避免快请求闪烁）；失败时保留旧数据并提示重试，而非清空列表。</div>
+      </div>
+      <div class="demo-foot">
+        <h4>预期效果</h4>
+        <ul class="effects">
+          <li>输入搜索词时列表不再瞬间清空（消除「闪空」），阅读不被打断；隧道抖动时页面不再像卡死</li>
+          <li>慢网络下用户获得明确「系统正在工作」的信号，投诉式刷新（反复点刷新按钮）预计大幅减少</li>
+          <li>搜索链路从「filters → 300ms → 序列化 → effect → 请求」四步缩短为两步，输入到请求的延迟更稳定</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ 演示 4：撤销 toast ═══════════ -->
+    <section class="demo" id="u4">
+      <div class="demo-head">
+        <span class="demo-id">U4</span>
+        <div>
+          <h3>批量操作：30 秒可撤销</h3>
+          <div class="where">Feed.jsx:260-292 · runBatch</div>
+        </div>
+        <div class="tags"><span class="tag ux">容错</span><span class="live">可交互</span></div>
+      </div>
+      <div class="demo-body">
+        <div class="batchbar" role="region" aria-label="批量操作（演示）">
+          <span class="count">已选 <b>12</b> 篇</span>
+          <button class="b-btn" type="button" id="batch-read-btn">全部标记已读</button>
+          <button class="b-btn" type="button" id="batch-fav-btn">批量收藏</button>
+          <button class="b-btn" type="button">取消选择</button>
+        </div>
+        <p class="hint">点击任一批量按钮：成功后弹出的 toast 带 <strong>「撤销」</strong>按钮（30 秒内有效），点击即调用反向 API 恢复原状态。误选 50 篇批量已读，如今一键还原。</p>
+        <div class="note">实现要点：批量成功 toast 的 actions 扩展为 <code>[{ label: "撤销", onClick: revert }]</code>；撤销本身也是一次普通 API 调用，失败时降级为提示「撤销失败，请手动修改」；<code>useToast</code> 已支持多按钮 toast，改动集中在 Feed 的 <code>runBatch</code> 与 toast 组件。</div>
+      </div>
+      <div class="demo-foot">
+        <h4>预期效果</h4>
+        <ul class="effects">
+          <li>批量误操作可恢复，用户使用批量功能的心理门槛显著降低</li>
+          <li>与乐观更新（P2）叠加后，「先做、可退」成为全站一致的交互语言</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ 演示 5：视图状态保持 ═══════════ -->
+    <section class="demo" id="p5">
+      <div class="demo-head">
+        <span class="demo-id">P5 / U3</span>
+        <div>
+          <h3>视图切换：列表状态驻留，返回零请求</h3>
+          <div class="where">main.jsx:1042-1120 · 条件渲染</div>
+        </div>
+        <div class="tags"><span class="tag perf">keep-alive</span><span class="tag ux">浏览不断线</span><span class="live">可交互</span></div>
+      </div>
+      <div class="demo-body">
+        <div class="keepalive">
+          <div class="ka-tabs" role="tablist" aria-label="视图切换（演示）">
+            <button class="ka-tab" role="tab" aria-selected="true" data-tab="feed" id="tab-feed">文献库</button>
+            <button class="ka-tab" role="tab" aria-selected="false" data-tab="reports" id="tab-reports">资讯汇总</button>
+          </div>
+          <div class="ka-body" role="tabpanel" aria-labelledby="tab-feed" id="panel-feed">
+            <div class="ka-scroll" id="ka-scroll">
+              <div class="ka-row"><span class="t">Spatiotemporal Flexibility Assessment of Distribution Networks…</span><span class="d">3 天前</span></div>
+              <div class="ka-row"><span class="t">Hierarchical Voltage Control in LV Distribution Networks…</span><span class="d">3 天前</span></div>
+              <div class="ka-row"><span class="t">Data-Driven Load Forecasting: A Review…</span><span class="d">4 天前</span></div>
+              <div class="ka-row"><span class="t">Solid-State Transformer for Traction Applications…</span><span class="d">4 天前</span></div>
+              <div class="ka-row"><span class="t">Distributed MPC of Battery Storage Systems…</span><span class="d">5 天前</span></div>
+              <div class="ka-row"><span class="t">Oscillation Source Locating in Inverter-Based Grids…</span><span class="d">5 天前</span></div>
+              <div class="ka-row"><span class="t">Flexibility Aggregation of Virtual Power Plants…</span><span class="d">6 天前</span></div>
+              <div class="ka-row"><span class="t">DC-Link Voltage Ripple Analysis…</span><span class="d">6 天前</span></div>
+              <div class="ka-row"><span class="t">Probabilistic Hosting Capacity of Distribution Feeders…</span><span class="d">7 天前</span></div>
+              <div class="ka-row"><span class="t">Graph Neural Networks for Power System State Estimation…</span><span class="d">7 天前</span></div>
+            </div>
+            <div class="ka-meta">
+              <button class="btn" type="button" id="ka-more">加载下一批（当前显示 <span id="ka-count">50</span> / 3977）</button>
+              <span class="chipok">切换请求次数：<span id="ka-req">0</span></span>
+            </div>
+          </div>
+          <div class="ka-body" role="tabpanel" aria-labelledby="tab-reports" id="panel-reports" hidden>
+            <div class="ka-scroll" style="display:grid;place-items:center;color:var(--ink-2);font-size:13px;">
+              （资讯汇总视图内容……）
+            </div>
+          </div>
+        </div>
+        <p class="hint">试一试：在「文献库」滚动一段距离、点一次「加载下一批」，再切到「资讯汇总」然后切回——滚动位置、已显示条数、请求计数全部原样恢复。</p>
+        <div class="note">现状：<code>activeView</code> 条件渲染使 Feed 每次切走即卸载，返回时重新挂载 → <code>visibleCount</code> 重置为 50、滚动归零、<code>/api/keyword-stats</code> 与 <code>/api/directions</code> 重新请求。建议：Feed 等重状态视图以 <code>display:none</code> 驻留（或 React <code>&lt;Activity&gt;</code>），仅首屏挂载时请求；<strong>已读过位置在「看列表 → 点开详情 → 返回」这一最高频路径上价值最大</strong>。</div>
+      </div>
+      <div class="demo-foot">
+        <h4>预期效果</h4>
+        <ul class="effects">
+          <li>返回文献库瞬间呈现（0 请求、0 骨架屏），翻页进度与滚动位置保留</li>
+          <li>每次视图往返省去 2 个统计接口请求；弱网/隧道慢时消除「返回后重新转圈」的割裂感</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ 演示 6：响应式 ═══════════ -->
+    <section class="demo" id="v1">
+      <div class="demo-head">
+        <span class="demo-id">V1 / V2</span>
+        <div>
+          <h3>响应式：≤1180px 筛选面板浮层化</h3>
+          <div class="where">styles.css:4222-4240 · PC 断点体系</div>
+        </div>
+        <div class="tags"><span class="tag resp">断点治理</span><span class="live">可交互</span></div>
+      </div>
+      <div class="demo-body">
+        <div class="vp-frame">
+          <div class="vp-controls">
+            <span class="lbl">视口宽度：</span>
+            <button class="btn vp-btn" data-w="1440" type="button" aria-pressed="true">1440（基准）</button>
+            <button class="btn vp-btn" data-w="1280" type="button" aria-pressed="false">1280（笔记本）</button>
+            <button class="btn vp-btn" data-w="1100" type="button" aria-pressed="false">1100（小窗）</button>
+            <button class="btn vp-btn" data-w="900" type="button" aria-pressed="false">900（兜底）</button>
+            <span class="vp-badge side" id="vp-badge">并排栅格</span>
+          </div>
+          <div class="vp" id="viewport" style="max-width:100%">
+            <div class="vp-topbar">
+              <span class="vp-brand"><svg width="14" height="14" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#3157d5"/><path d="M16 6l2.6 7.4L26 16l-7.4 2.6L16 26l-2.6-7.4L6 16l7.4-2.6z" fill="#fff"/></svg>电气前沿速递</span>
+              <span class="vp-nav"><span class="on">文献库</span><span>资讯汇总▾</span><span>公共讨论</span><span>使用说明</span><span>个人中心▾</span></span>
+              <span class="vp-actions"><i></i><i class="ghost"></i></span>
+            </div>
+            <div class="vp-main">
+              <div class="vp-scrim" aria-hidden="true"></div>
+              <div class="vp-filter">
+                <b>筛选条件</b>
+                <div class="frow"><span class="fchip">搜索</span><span class="fchip">期刊 · IEEE 7</span><span class="fchip">Elsevier 4</span><span class="fchip">中文 5</span></div>
+                <div class="frow"><span class="fchip">研究方向</span><span class="fchip">时间范围</span></div>
+                <div class="frow"><span class="fchip">排序</span></div>
+              </div>
+              <div class="vp-list">
+                <div class="vp-card"><div class="l w60"></div><div class="l w40"></div></div>
+                <div class="vp-card"><div class="l w60"></div><div class="l w40"></div></div>
+                <div class="vp-card"><div class="l w60"></div><div class="l w40"></div></div>
+              </div>
+              <span class="vp-badge over" id="vp-badge2" hidden>筛选浮层 + 遮罩</span>
+            </div>
+          </div>
+        </div>
+        <p class="hint">切换宽度观察布局变化：现状 ≤1180px 时筛选面板仍占 280-320px 并排，内容区被挤压；建议在该断点改为<strong>浮层 + 遮罩</strong>（点击遮罩关闭），内容区拿满宽度。同时为 1024-1280 增加顶栏「仅图标」模式（V2），减少导航横滚出现频率。</p>
+        <div class="note">项目定位 PC 桌面端（不做移动端），但 1280×800 笔记本、投影仪与分屏场景真实存在；当前体系下限 1180px，1100px 下筛选+内容双栏挤压已影响可用性。断点建议：<code>≥1440 宽栏 / 1280-1439 并排 / ≤1180 浮层 / ≤900 单列兜底</code>。</div>
+      </div>
+      <div class="demo-foot">
+        <h4>预期效果</h4>
+        <ul class="effects">
+          <li>1100px 窗口下筛选与内容不再互相挤压，内容区可用宽度增加约 25%</li>
+          <li>顶栏横滚出现频率下降（1280 笔记本基本不再触发边缘渐隐）</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ 演示 7：打印样式 ═══════════ -->
+    <section class="demo" id="v3">
+      <div class="demo-head">
+        <span class="demo-id">V3</span>
+        <div>
+          <h3>打印 / 另存 PDF：文献清单直接可打印</h3>
+          <div class="where">styles.css（无 @media print）</div>
+        </div>
+        <div class="tags"><span class="tag resp">打印</span><span class="live">可交互</span></div>
+      </div>
+      <div class="demo-body">
+        <div class="print-demo">
+          <div class="print-chrome">
+            <span class="fakebar">顶栏 / 侧栏 / 筛选 / 操作按钮（打印时隐藏）</span>
+            <button class="btn" id="print-mode-btn" type="button" aria-pressed="false">应用打印样式</button>
+          </div>
+          <div class="print-sheet">
+            <h5>文献检索结果（3977 篇）</h5>
+            <div class="print-item"><span class="n">[1]</span><span class="ti">Spatiotemporal Flexibility Assessment of Distribution Networks with High Photovoltaic Penetration</span><span class="jr">IEEE TSG · 2026-10-09</span></div>
+            <div class="print-item"><span class="n">[2]</span><span class="ti">Hierarchical Voltage Control in LV Distribution Networks with High DER Penetration</span><span class="jr">IEEE TSG · 2026-10-08</span></div>
+            <div class="print-item"><span class="n">[3]</span><span class="ti">Data-Driven Load Forecasting for Active Distribution Networks: A Review</span><span class="jr">IEEE TPWRS · 2026-10-07</span></div>
+            <div class="print-item"><span class="n">[4]</span><span class="ti">Solid-State Transformer for Traction Power Supply Systems</span><span class="jr">IEEE TTE · 2026-10-06</span></div>
+          </div>
+        </div>
+        <p class="hint">点击「应用打印样式」预览效果；也可以直接按 <kbd>Ctrl</kbd>+<kbd>P</kbd> 打印本页——真实的 <code>@media print</code> 规则已内置（隐藏顶栏/索引/交互控件、去除阴影、黑白友好）。</p>
+      </div>
+      <div class="demo-foot">
+        <h4>预期效果</h4>
+        <ul class="effects">
+          <li>科研用户可将筛选后的文献清单直接打印或存 PDF 存档，无需浏览器缩放凑版</li>
+          <li>打印输出黑白友好（去除彩色背景条），油墨友好且标题层级保留</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ 演示 8：图表无障碍 ═══════════ -->
+    <section class="demo" id="a2">
+      <div class="demo-head">
+        <span class="demo-id">A2</span>
+        <div>
+          <h3>关键词统计：词云 + 可访问数据表</h3>
+          <div class="where">WordCloud.jsx · CooccurrenceView.jsx（aria=0）</div>
+        </div>
+        <div class="tags"><span class="tag a11y">图表无障碍</span><span class="live">可交互</span></div>
+      </div>
+      <div class="demo-body">
+        <div class="wc-demo">
+          <div class="wordcloud" role="img" aria-label="关键词词云：distribution network 出现 312 次居首，其次 flexibility 187 次、energy storage 154 次；完整数据见下方数据表。">
+            <button class="wc-word w1" type="button">distribution network</button>
+            <button class="wc-word w2" type="button">flexibility</button>
+            <button class="wc-word w2" type="button">energy storage</button>
+            <button class="wc-word w3" type="button">optimization</button>
+            <button class="wc-word w3" type="button">microgrid</button>
+            <button class="wc-word w3" type="button">photovoltaic</button>
+            <button class="wc-word w4" type="button">reliability</button>
+            <button class="wc-word w4" type="button">electric vehicle</button>
+            <button class="wc-word w4" type="button">demand response</button>
+            <button class="wc-word w4" type="button">power quality</button>
+          </div>
+          <details class="datatable">
+            <summary>查看数据表（屏幕阅读器友好）</summary>
+            <table class="mini">
+              <thead><tr><th>#</th><th>关键词</th><th style="text-align:right">篇数</th></tr></thead>
+              <tbody>
+                <tr><td>1</td><td>distribution network</td><td class="num">312</td></tr>
+                <tr><td>2</td><td>flexibility</td><td class="num">187</td></tr>
+                <tr><td>3</td><td>energy storage</td><td class="num">154</td></tr>
+                <tr><td>4</td><td>optimization</td><td class="num">121</td></tr>
+                <tr><td>5</td><td>microgrid</td><td class="num">98</td></tr>
+                <tr><td>6</td><td>photovoltaic</td><td class="num">87</td></tr>
+              </tbody>
+            </table>
+          </details>
+        </div>
+        <p class="hint">WordCloud 已有 <code>aria-pressed</code> 与 <code>title</code>（aria=4，合格）；问题在 <strong>CooccurrenceView（42 行，aria=0）</strong>：共现矩阵图无 <code>role="img"</code>、无 aria-label、无数据表替代，屏幕阅读器完全读不到结论；且其加载/空状态用裸 <code>&lt;div className="empty"&gt;加载中...</code>，不走 EmptyState 组件（U6）。建议：所有图表容器加 <code>role="img"</code> + 摘要 aria-label，并提供「数据表」切换。</p>
+      </div>
+      <div class="demo-foot">
+        <h4>预期效果</h4>
+        <ul class="effects">
+          <li>屏幕阅读器用户可获取词云/共现图的核心结论（最高频词与篇数），而非一段空白</li>
+          <li> sighted 用户也可直接复制数据表中的数值，图表从「只能看」变为「可读取」</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ 演示 9：对比度 ═══════════ -->
+    <section class="demo" id="a1">
+      <div class="demo-head">
+        <span class="demo-id">A1</span>
+        <div>
+          <h3>对比度修复：全站达 WCAG AA（4.5:1）</h3>
+          <div class="where">styles.css:4-92 · Design Tokens</div>
+        </div>
+        <div class="tags"><span class="tag a11y">WCAG AA</span><span class="live">可交互</span></div>
+      </div>
+      <div class="demo-body">
+        <div class="contrast-grid">
+          <div class="cswatch">
+            <div class="cbody" style="background:#ffffff">
+              <p style="color:#7d8592">次要文字：2026-10-09 · IEEE Transactions</p>
+              <small style="color:#7d8592">12px 元信息（日期、计数、说明）</small>
+            </div>
+            <div class="cfoot"><span class="ratio fail">≈3.7 : 1</span> 现状 --text-tertiary #7d8592</div>
+          </div>
+          <div class="cswatch">
+            <div class="cbody" style="background:#ffffff">
+              <p style="color:#6b7280">次要文字：2026-10-09 · IEEE Transactions</p>
+              <small style="color:#6b7280">12px 元信息（日期、计数、说明）</small>
+            </div>
+            <div class="cfoot"><span class="ratio pass">≈4.8 : 1</span> 建议 --text-tertiary #6b7280</div>
+          </div>
+        </div>
+        <p class="hint">对比度按 WCAG 2.x 相对亮度公式计算（白底）。正文要求 ≥4.5:1，大字号（≥18.66px 粗体或 ≥24px）与 UI 组件边界 ≥3:1。<code>#7d8592</code> 两个标准都不满足（白底），<code>#6b7280</code> 提升至 ≈4.8:1。</p>
+        <div class="note">除 tertiary 外，建议建立<strong>全量对比度校验表</strong>：重点核查 ① 关键词胶囊的 <code>--tone-soft</code> 底 + <code>--tone-ink</code> 字组合（15 个方向 × 4 个期刊组）；② 11-12px 徽章文字（已读/收藏/方向 chip）；③ 禁用态与占位符文字（可放宽至 ≥3:1 但需记录）。校验脚本可一次运行、纳入 CI，防止后续新增配色再次破线。</div>
+      </div>
+      <div class="demo-foot">
+        <h4>预期效果</h4>
+        <ul class="effects">
+          <li>全站文字对比度 ≥4.5:1，通过 WCAG 2.x AA；低视力用户、投影与强光环境下可读性显著提升</li>
+          <li>对比度校验纳入 CI，新增配色需过检才能合入——从「一次性修复」变为「持续达标」</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ 演示 10：AsyncState ═══════════ -->
+    <section class="demo" id="s3">
+      <div class="demo-head">
+        <span class="demo-id">S3 / U6</span>
+        <div>
+          <h3>统一数据三态：useAsync + AsyncState</h3>
+          <div class="where">AdminView / StatsView / ReportsView / FavoritesView / DailyNewsView</div>
+        </div>
+        <div class="tags"><span class="tag struct">抽象</span><span class="tag ux">一致性</span><span class="live">可交互</span></div>
+      </div>
+      <div class="demo-body">
+        <div class="async-grid">
+          <div class="async-cell">
+            <div class="cap">loading · 骨架（形状匹配真实卡片，CLS≈0）</div>
+            <div class="skel l w70"></div><div class="skel l"></div><div class="skel l w50"></div>
+          </div>
+          <div class="async-cell">
+            <div class="cap">empty · 空状态（EmptyState 组件 + 行动按钮）</div>
+            <div class="empty-box"><b>没有符合当前条件的文献</b><span>清空条件即可回到完整列表</span></div>
+          </div>
+          <div class="async-cell">
+            <div class="cap">error · 失败（保留旧数据 + 重试）</div>
+            <div class="err-box">列表请求超过 20 秒没有返回，已中止本次加载。<br><button class="retry" type="button">重试</button></div>
+          </div>
+        </div>
+        <code class="block"><span class="c">// hooks/useAsync.js —— 六处重复样板收敛为一处</span>
+<span class="k">const</span> { data, loading, error, reload } = useAsync(fetcher, deps);
+
+<span class="c">// 三态行为全站一致：loading 走 skeleton、empty 走 EmptyState、</span>
+<span class="c">// error 保留旧数据并给重试入口（不再静默 catch）</span>
+&lt;AsyncState loading={loading} error={error} empty={!data?.length}
+  skeleton={&lt;SkeletonList count={6} /&gt;} empty={&lt;EmptyState art=<span class="s">"search"</span> …/&gt;}&gt;
+  {children(data)}
+&lt;/AsyncState&gt;</code>
+        <p class="hint">现状：6+ 个视图各自实现 loading/error/empty 三态，行为不一致——AdminView 静默 catch、CooccurrenceView 用裸 div、ReportsView 又一套。抽象后每个视图省 30-50 行样板，且三态反馈语言统一（U6）。</p>
+      </div>
+      <div class="demo-foot">
+        <h4>预期效果</h4>
+        <ul class="effects">
+          <li>每个视图减少 30-50 行重复样板；三态行为（骨架形状、空状态文案、错误重试）全站一致</li>
+          <li>新视图接入数据只需 3 行；「静默失败」这类体验黑洞从机制上被消除</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ═══════════ 建议总表 ═══════════ -->
+    <section class="demo" id="summary">
+      <div class="demo-head">
+        <span class="demo-id">总表</span>
+        <div>
+          <h3>30 条优化建议一览（含位置与预期效果）</h3>
+          <div class="where">按维度分组 · 编号与左侧索引、各演示区一一对应</div>
+        </div>
+      </div>
+      <div class="demo-body" style="padding:0">
+        <div class="sumtable-wrap" style="border:none;border-radius:0">
+          <table class="sum">
+            <thead><tr><th style="width:44px">编号</th><th>优化建议</th><th style="width:22%">位置</th><th style="width:34%">预期效果</th></tr></thead>
+            <tbody>
+              <tr><td class="id">P1</td><td>全部 10 个视图统一 lazy 加载，导航 hover 时预取对应 chunk（现状仅 5 个懒加载）</td><td>main.jsx:95-99</td><td class="eff">首屏 JS 约 118KB → 约 70KB（−40%），TTI 提前 200-400ms</td></tr>
+              <tr><td class="id">P2</td><td>标记已读/收藏成功后以局部 patch 替代整页 reload（现状每次交互清缓存 + 重拉整页 + status）</td><td>main.jsx:637,686,710</td><td class="eff">每次交互请求 3 → 1 个；列表不再闪动重排</td></tr>
+              <tr><td class="id">P3</td><td>搜索/筛选 stale-while-revalidate：旧结果驻留 + 顶部进度条，debounce 与序列化合为一步</td><td>main.jsx:257-272,540-545</td><td class="eff">输入搜索不再闪空；慢网下感知明确</td></tr>
+              <tr><td class="id">P4</td><td>filteredArticles 与相关性计分 memo 化；计分预计算小写字段、限制摘要长度</td><td>Feed.jsx:126-157</td><td class="eff">500 篇列表单次渲染计算 ≈15ms → ≈2ms</td></tr>
+              <tr><td class="id">P5</td><td>Feed 等重状态视图 keep-alive（display:none 驻留或 Activity），切走不卸载</td><td>main.jsx:1042-1120</td><td class="eff">返回文献库 0 请求；页码/滚动位置保留</td></tr>
+              <tr><td class="id">P6</td><td>styles.css 按 tokens/base/components/views 分区，构建期清理未使用规则，层叠冲突校验</td><td>styles.css（6408 行）</td><td class="eff">CSS 约 246KB → 180KB（−20~30%）；消除「末尾追加」循环</td></tr>
+              <tr><td class="id">P7</td><td>Noto Serif SC 按实际标题用字裁剪子集（当前 101 个 @font-face 全量 unicode-range）</td><td>fonts.css</td><td class="eff">字体 CSS −80%；中文字体下载量 −50% 以上</td></tr>
+              <tr><td class="id">P8</td><td>api 层为 GET 增加 60s TTL 缓存，文献详情/相关文献重复打开零请求</td><td>ArticleDialog.jsx:21-59</td><td class="eff">重复打开同一文献弹窗延迟 ≈300ms → 0</td></tr>
+              <tr><td class="id">S1</td><td>main.jsx 拆分：LoginGate/NavGroup/UpdateModal 移出，数据流收敛为 useBootstrap/useArticleList/useNavGroups hooks</td><td>main.jsx（1155 行）</td><td class="eff">单文件 &lt;300 行；认证→列表→交互边界清晰可测</td></tr>
+              <tr><td class="id">S2</td><td>样式就近维护（组件目录或 CSS Modules）+ stylelint 禁止同文件重复选择器</td><td>styles.css</td><td class="eff">改动可预期；消除 .article 三处重定义类层叠地雷</td></tr>
+              <tr><td class="id">S3</td><td>抽象 useAsync + AsyncState，收敛 6+ 处 loading/error/empty 样板</td><td>6 个视图</td><td class="eff">每视图 −30~50 行；三态行为全站一致</td></tr>
+              <tr><td class="id">S4</td><td>沉淀 DirectionChip / KeywordTag / useCollapsedGroups 等业务组件（现各有 3-5 处重复实现）</td><td>5 处重复</td><td class="eff">方向配色/文案单点维护；新视图少写 100+ 行</td></tr>
+              <tr><td class="id">R1</td><td>key 稳定性治理：动态列表坚持数据 id，静态列表用内容 key（现状 8 处 key={index}）</td><td>AdminView:567 等</td><td class="eff">列表重排/插入不再错位（Highlight 高亮不错行）</td></tr>
+              <tr><td class="id">R2</td><td>Modal 体系扩展：ConfirmDialog 抽象 + favoritePicker 独立组件（现状 main.jsx 内联 200 行弹窗）</td><td>main.jsx:1124-1140</td><td class="eff">遮罩/Esc/滚动锁/焦点陷阱全站一致；−200 行</td></tr>
+              <tr><td class="id">R3</td><td>日期工具收敛：todayStr()/formatStamp() 入 lib/format.js（现状「今天」判定内联在弹窗、导出散落两处）</td><td>ArticleDialog:137, Feed:296</td><td class="eff">北京业务日时区口径单一真源，与后端一致</td></tr>
+              <tr><td class="id">U1</td><td><b>补「/」快捷键实现</b>：全局 keydown 聚焦搜索框（输入框聚焦时不触发）；或移除 kbd 提示</td><td>Feed.jsx:349</td><td class="eff">兑现 UI 承诺；键盘用户一步进入搜索</td></tr>
+              <tr><td class="id">U2</td><td>下拉组实现完整 ARIA menu 键盘模式（打开聚焦、↑↓循环、Home/End、Esc 归还焦点）</td><td>main.jsx:958-1025</td><td class="eff">键盘可完成导航全流程；通过 APG menu 验收</td></tr>
+              <tr><td class="id">U3</td><td>「看列表→点详情→返回」不断线（由 P5 解决，此处记录体验面）</td><td>main.jsx</td><td class="eff">最高频路径零等待、零重复请求</td></tr>
+              <tr><td class="id">U4</td><td>批量操作 toast 增加「撤销」（30s 内调用反向 API 恢复）</td><td>Feed.jsx:260-292</td><td class="eff">误操作可恢复，批量功能使用率与信心提升</td></tr>
+              <tr><td class="id">U5</td><td>请求过程可视反馈：顶部 2px 进度条 + 「正在更新」胶囊（&gt;800ms 才显示，防闪烁）</td><td>全局</td><td class="eff">慢网下消除「像卡死」的误判</td></tr>
+              <tr><td class="id">U6</td><td>EmptyState/错误态推广到全部视图；CooccurrenceView 裸 div 收敛</td><td>CooccurrenceView 等</td><td class="eff">全站反馈语言一致；消除静默失败</td></tr>
+              <tr><td class="id">V1</td><td>≤1180px 筛选面板改浮层 + 遮罩；≤900px 单列兜底（投影/分屏场景）</td><td>styles.css:4230</td><td class="eff">1100px 窗口内容区 +25% 可用宽度</td></tr>
+              <tr><td class="id">V2</td><td>≤1440px 顶栏导航可切「仅图标 + tooltip」模式，缓解 1366 屏横滚</td><td>styles.css:4182-4200</td><td class="eff">1280 笔记本导航基本不触发横滚渐隐</td></tr>
+              <tr><td class="id">V3</td><td>新增 @media print：隐藏顶栏/侧栏/控件、去阴影、黑白友好</td><td>styles.css（缺失）</td><td class="eff">文献清单可直接打印/存 PDF 存档</td></tr>
+              <tr><td class="id">A1</td><td>对比度修复：--text-token 加深 + 建立全量对比度校验表（15 方向 × 4 期刊组）纳入 CI</td><td>styles.css:26</td><td class="eff">全站 ≥4.5:1（WCAG AA）；防止新增配色破线</td></tr>
+              <tr><td class="id">A2</td><td>图表容器统一 role="img" + 摘要 aria-label + 数据表切换</td><td>CooccurrenceView, WordCloud</td><td class="eff">屏幕阅读器可获取统计结论；数据可复制</td></tr>
+              <tr><td class="id">A3</td><td>标题层级治理：每视图唯一 h1，不跳级（现状 Feed 无 h1；HelpView h1→h3 跳级；Stats 从 h3 起）</td><td>Feed/HelpView/StatsView</td><td class="eff">屏幕阅读器标题导航可用；SEO 语义正确</td></tr>
+              <tr><td class="id">A4</td><td>aria-pressed 一致化：所有开关类按钮补 aria-pressed + 动态 aria-label</td><td>Feed.jsx:562-587</td><td class="eff">显示开关态可被 AT 播报</td></tr>
+              <tr><td class="id">A5</td><td>焦点管理增强：skip-link 多目标（主内容/筛选/列表）；弹窗打开聚焦策略已有，补菜单焦点（见 U2）</td><td>main.jsx:944</td><td class="eff">键盘用户一步到达关键区域</td></tr>
+              <tr><td class="id">A6</td><td>aria 语义与行为一致：menu 要么完整实现、要么降级 disclosure；AdminView 日志列表补 table 语义</td><td>main.jsx, AdminView</td><td class="eff">AT 不被误导；数据列表朗读有序</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <p class="footer-note">本页为独立预览文件，未改动项目任何现有代码 · 生成于 2026-10-12 · 样式令牌与项目 styles.css 同源</p>
+  </main>
+</div>
+
+<div class="toast-region" id="toast-region" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ── U1：「/」快捷键（本页真实实现，示范 Feed 应有行为） ── */
+  var kbd = document.getElementById("search-kbd");
+  document.addEventListener("keydown", function (e) {
+    if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+    var el = document.activeElement;
+    var tag = el && el.tagName ? el.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || (el && el.isContentEditable)) return;
+    e.preventDefault();
+    var input = document.getElementById("demo-search");
+    input.focus();
+    kbd.classList.remove("pulse");
+    void kbd.offsetWidth;
+    kbd.classList.add("pulse");
+  });
+
+  /* ── P3/U5：stale-while-revalidate 演示 ── */
+  var bar = document.getElementById("progress-bar");
+  var pill = document.getElementById("stale-pill");
+  var count = document.getElementById("result-count");
+  var slowBtn = document.getElementById("slow-btn");
+  var busy = false;
+  slowBtn.addEventListener("click", function () {
+    if (busy) return;
+    busy = true;
+    pill.classList.add("show");
+    var pct = 0;
+    var timer = setInterval(function () {
+      pct = Math.min(90, pct + Math.random() * 18);
+      bar.style.width = pct + "%";
+    }, 180);
+    setTimeout(function () {
+      clearInterval(timer);
+      bar.style.width = "100%";
+      setTimeout(function () {
+        bar.style.width = "0";
+        pill.classList.remove("show");
+        count.innerHTML = '共 <strong>128</strong> 篇文献';
+        busy = false;
+      }, 260);
+    }, 2000);
+  });
+
+  /* ── U2/A6：ARIA menu 键盘模式 ── */
+  var trigger = document.getElementById("menu-trigger");
+  var popup = document.getElementById("menu-popup");
+  var items = Array.prototype.slice.call(popup.querySelectorAll('[role="menuitem"]'));
+  var menuOpen = false;
+  function setOpen(open, focusFirst) {
+    menuOpen = open;
+    popup.hidden = !open;
+    trigger.setAttribute("aria-expanded", String(open));
+    if (open && focusFirst) items[0].focus();
+    if (!open) items.forEach(function (it) { it.tabIndex = -1; });
+  }
+  function focusItem(i) {
+    var idx = (i + items.length) % items.length;
+    items.forEach(function (it, k) { it.tabIndex = k === idx ? 0 : -1; });
+    items[idx].focus();
+  }
+  trigger.addEventListener("click", function () {
+    setOpen(!menuOpen, !menuOpen);
+  });
+  trigger.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
+      if (!menuOpen) { e.preventDefault(); setOpen(true, true); }
+    }
+  });
+  popup.addEventListener("keydown", function (e) {
+    var cur = items.indexOf(document.activeElement);
+    if (e.key === "ArrowDown") { e.preventDefault(); focusItem(cur + 1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); focusItem(cur - 1); }
+    else if (e.key === "Home") { e.preventDefault(); focusItem(0); }
+    else if (e.key === "End") { e.preventDefault(); focusItem(items.length - 1); }
+    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); trigger.focus(); }
+    else if (e.key === "Tab") { setOpen(false); }
+  });
+  document.addEventListener("mousedown", function (e) {
+    if (!menuOpen) return;
+    if (!e.target.closest("#menu-demo")) setOpen(false);
+  });
+  items.forEach(function (it) {
+    it.addEventListener("click", function () { setOpen(false); trigger.focus(); });
+  });
+
+  /* ── U4：撤销 toast ── */
+  var region = document.getElementById("toast-region");
+  function showToast(text, undoLabel, onUndo) {
+    var t = document.createElement("div");
+    t.className = "toast";
+    var span = document.createElement("span");
+    span.className = "t-text";
+    span.textContent = text;
+    t.appendChild(span);
+    if (undoLabel) {
+      var u = document.createElement("button");
+      u.className = "t-undo";
+      u.type = "button";
+      u.textContent = undoLabel;
+      u.addEventListener("click", function () {
+        onUndo && onUndo();
+        dismiss();
+      });
+      t.appendChild(u);
+    }
+    var c = document.createElement("button");
+    c.className = "t-close";
+    c.type = "button";
+    c.setAttribute("aria-label", "关闭提示");
+    c.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+    c.addEventListener("click", dismiss);
+    t.appendChild(c);
+    region.appendChild(t);
+    var timer = setTimeout(dismiss, 6000);
+    function dismiss() {
+      clearTimeout(timer);
+      t.style.opacity = "0";
+      t.style.transform = "translateY(8px)";
+      t.style.transition = "opacity .2s, transform .2s";
+      setTimeout(function () { t.remove(); }, 220);
+    }
+  }
+  var state = { read: 0, fav: 0 };
+  document.getElementById("batch-read-btn").addEventListener("click", function () {
+    state.read += 12;
+    showToast("已标记已读 12 篇。", "撤销", function () {
+      state.read -= 12;
+      showToast("已撤销：12 篇恢复为未读。");
+    });
+  });
+  document.getElementById("batch-fav-btn").addEventListener("click", function () {
+    state.fav += 12;
+    showToast("已加入收藏 12 篇。", "撤销", function () {
+      state.fav -= 12;
+      showToast("已撤销：12 篇取消收藏。");
+    });
+  });
+
+  /* ── P5/U3：视图状态保持 ── */
+  var tabs = document.querySelectorAll(".ka-tab");
+  var panels = { feed: document.getElementById("panel-feed"), reports: document.getElementById("panel-reports") };
+  var scrollEl = document.getElementById("ka-scroll");
+  var countEl = document.getElementById("ka-count");
+  var reqEl = document.getElementById("ka-req");
+  var visible = 50;
+  var savedScroll = 0;
+  var requests = 0;
+  document.getElementById("ka-more").addEventListener("click", function () {
+    visible += 50;
+    countEl.textContent = String(visible);
+    requests += 1;
+    reqEl.textContent = String(requests);
+    var row = document.createElement("div");
+    row.className = "ka-row";
+    row.innerHTML = '<span class="t">（第 ' + visible + ' 批加载的文献…）</span><span class="d">刚刚</span>';
+    scrollEl.appendChild(row);
+  });
+  tabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      tabs.forEach(function (t) { t.setAttribute("aria-selected", String(t === tab)); });
+      var name = tab.getAttribute("data-tab");
+      Object.keys(panels).forEach(function (k) {
+        panels[k].hidden = k !== name;
+      });
+      if (name === "feed") {
+        scrollEl.scrollTop = savedScroll;
+      } else {
+        savedScroll = scrollEl.scrollTop;
+      }
+    });
+  });
+
+  /* ── V1：响应式视口切换 ── */
+  var vp = document.getElementById("viewport");
+  var vpBtns = document.querySelectorAll(".vp-btn");
+  var badgeSide = document.getElementById("vp-badge");
+  var badgeOver = document.getElementById("vp-badge2");
+  vpBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      vpBtns.forEach(function (b) { b.setAttribute("aria-pressed", String(b === btn)); });
+      var w = parseInt(btn.getAttribute("data-w"), 10);
+      vp.style.maxWidth = w + "px";
+      var narrow = w <= 1180;
+      vp.classList.toggle("narrow", narrow);
+      badgeSide.hidden = narrow;
+      badgeOver.hidden = !narrow;
+    });
+  });
+
+  /* ── V3：打印预览切换 ── */
+  var printBtn = document.getElementById("print-mode-btn");
+  var topBtn = document.getElementById("print-toggle");
+  var printing = false;
+  function setPrint(on) {
+    printing = on;
+    document.body.classList.toggle("print-mode", on);
+    printBtn.setAttribute("aria-pressed", String(on));
+    printBtn.textContent = on ? "退出打印样式" : "应用打印样式";
+    topBtn.setAttribute("aria-pressed", String(on));
+    topBtn.textContent = on ? "退出打印预览（V3）" : "进入打印预览（V3）";
+  }
+  printBtn.addEventListener("click", function () { setPrint(!printing); });
+  topBtn.addEventListener("click", function () { setPrint(!printing); });
+
+  /* ── 侧栏索引分组默认展开逻辑：保持各 details 独立 ── */
+})();
+</script>
+</body>
+</html>

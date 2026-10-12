@@ -10,7 +10,8 @@
  * mockup (DESIGN-MOCKUP-WECHAT-DAILY.html) converted 1:1.
  *
  * Hard validation (fails with a non-zero exit listing every violation):
- *   - briefs: 1-8 items, object ≤30 / method ≤40 / finding ≤50 chars (paperBriefs v2)
+ *   - briefs: 0-8 items（0 仅限空窗口日报，RUNBOOK-AI-JOBS.md §8.5：只有导读与资讯的日报合法）,
+ *     object ≤30 / method ≤40 / finding ≤50 chars (paperBriefs v2)
  *   - news: policy ≤3, general ≤5; every card needs title/summary/source
  *   - listing: count must equal items.length; direction keys whitelisted
  *   - digest ≤60 chars (forwarding-card summary, used by draft/add / L0 SOP)
@@ -88,8 +89,8 @@ function validate(raw) {
 
   // ── briefs（今日文献速评）──
   const briefs = Array.isArray(issue.briefs) ? issue.briefs : [];
-  if (briefs.length < 1 || briefs.length > 8) {
-    violations.push(`briefs 数量必须为 1-8，got: ${briefs.length}`);
+  if (briefs.length > 8) {
+    violations.push(`briefs 数量必须为 0-8（0 仅限空窗口日报），got: ${briefs.length}`);
   }
   issue.briefs = briefs.map((brief, index) => {
     const tag = `briefs[${index}]`;
