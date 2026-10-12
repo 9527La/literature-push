@@ -125,7 +125,7 @@ try {
       journals: [...new Set([...document.querySelectorAll(".reports-brief-card .reports-brief-journal")]
         .map((node) => node.textContent)
         .filter((name) => name && !name.startsWith("文献 #")))],
-      clusterBadges: document.querySelectorAll(".reports-cluster-hidden").length
+      hiddenMarkers: document.querySelectorAll(".reports-cluster-hidden, .reports-sect-hint.is-warn").length
     };
   });
   check(afterHide.off.length === 1 && afterHide.off[0] === expanded.targetName, `chip「${expanded.targetName}」进入已隐藏态`);
@@ -135,7 +135,7 @@ try {
     `${expanded.total} → ${afterHide.cards}`
   );
   check(!afterHide.journals.includes(expanded.targetName), "剩余卡片不再出现被隐藏期刊");
-  check(afterHide.clusterBadges >= 1, "聚类头同步标注「已隐藏 N 条」", `${afterHide.clusterBadges} 处`);
+  check(afterHide.hiddenMarkers >= 1, "区块同步标注「已隐藏 N 条/篇」（聚类头或板块标题）", `${afterHide.hiddenMarkers} 处`);
   check(/已隐藏\s*1\s*种\s*·\s*\d+\s*篇/.test(afterHide.status), "状态栏实时计数", afterHide.status);
   await page.locator(".reports-meta").screenshot({ path: `${shotDir}/2-hidden-meta.png` });
   await page.screenshot({ path: `${shotDir}/2-hidden-view.png` });
