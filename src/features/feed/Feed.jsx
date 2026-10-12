@@ -9,12 +9,14 @@ import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.j
 import ArticleCard from "../../components/ArticleCard.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
 import ArticleDialog from "./ArticleDialog.jsx";
+import useCollapsedGroups from "../../hooks/useCollapsedGroups.js";
 
-function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, canModerate = false, onLoadMore, hasMoreArticles, loadingMoreArticles, queryKey = "", notify, onRefresh = null, refreshing = false, onDataChanged = null }) {
+function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, canModerate = false, onLoadMore, hasMoreArticles, loadingMoreArticles, listUpdating = false, queryKey = "", notify, onRefresh = null, refreshing = false, onDataChanged = null }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
   // 筛选面板默认收起（需求 2）：文献库首屏让位给文献列表，需要时点「打开筛选」。
   const [filterOpen, setFilterOpen] = useState(false);
-  const [collapsedFilterGroups, setCollapsedFilterGroups] = useState({
+  // 折叠分组状态（S4：与期刊小节、研究速览分组共用同一 hook）
+  const { isCollapsed: isFilterGroupCollapsed, toggle: toggleFilterGroup } = useCollapsedGroups({
     search: true,
     journal: true,
     direction: true,
@@ -23,13 +25,13 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
     keyword: true,
     sort: true
   });
+  const { isCollapsed: isJournalGroupCollapsed, toggle: toggleJournalGroup } = useCollapsedGroups();
   const [topKeywords, setTopKeywords] = useState([]);
   const [directionCounts, setDirectionCounts] = useState(null);
   const [visibleCount, setVisibleCount] = useState(50);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [batchBusy, setBatchBusy] = useState("");
   // 期刊小节折叠（需求 2）：出版社分组可展开/收起，默认全部展开。
-  const [collapsedJournalGroups, setCollapsedJournalGroups] = useState(() => new Set());
   const searchInputRef = useRef(null);
   const sentinelRef = useRef(null);
 
@@ -71,13 +73,9 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
     onDisplayPreferencesChange({ ...displayPreferences, [field]: !displayPreferences[field] });
   }
 
-  function toggleFilterGroup(group) {
-    setCollapsedFilterGroups((current) => ({ ...current, [group]: !current[group] }));
-  }
-
   function filterGroupHeader(group, label, icon = null, clear = null) {
     const contentId = `feed-filter-group-${group}`;
-    const collapsed = Boolean(collapsedFilterGroups[group]);
+    const collapsed = isFilterGroupCollapsed(group);
     return (
       <div className="filter-group-head-row">
         <button
@@ -104,14 +102,6 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
     );
   }
 
-  function toggleJournalGroup(key) {
-    setCollapsedJournalGroups((current) => {
-      const next = new Set(current);
-      next.has(key) ? next.delete(key) : next.add(key);
-      return next;
-    });
-  }
-
   function handleArticleUpdated(nextArticles) {
     const updates = (Array.isArray(nextArticles) ? nextArticles : [nextArticles]).filter((article) => article?.id);
     onArticleUpdated(updates);
@@ -122,10 +112,11 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
     });
   }
 
-  // Only show articles from subscribed journals
-  const filteredArticles = articles.filter((article) =>
+  // Only show articles from subscribed journals（P4：memo 化，父组件每次
+  // 渲染不再触发全量 filter；subscribedJournals 由 App 侧 useMemo 保证引用稳定）
+  const filteredArticles = useMemo(() => articles.filter((article) =>
     subscribedJournals.length === 0 || subscribedJournals.includes(article.journal)
-  );
+  ), [articles, subscribedJournals]);
 
   const highlightTerms = useMemo(() => {
     const terms = [];
@@ -136,23 +127,30 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
 
   const sortedArticles = useMemo(() => {
     if (filters.sort !== "relevance" || !highlightTerms.length) return filteredArticles;
-    const countMatches = (text, terms) => {
-      if (!text) return 0;
-      const lower = text.toLowerCase();
+    // P4：每篇只做一次小写化；超长摘要截断到前 2000 字符计分（命中密度
+    // 在开头已经足够区分，尾部扫描纯属浪费主线程时间）。
+    const terms = highlightTerms.map((term) => String(term).toLowerCase()).filter(Boolean);
+    if (!terms.length) return filteredArticles;
+    const countIn = (hay, needle) => {
       let count = 0;
-      for (const t of terms) {
-        const tl = t.toLowerCase();
-        let pos = 0;
-        while ((pos = lower.indexOf(tl, pos)) !== -1) { count++; pos += tl.length; }
-      }
+      let pos = 0;
+      while ((pos = hay.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
       return count;
     };
     return [...filteredArticles].map((a) => {
-      const titleCount = countMatches(a.title, highlightTerms);
-      const keywordCount = countMatches(a.keywords, highlightTerms);
-      const abstractCount = countMatches(a.abstract, highlightTerms);
-      const score = titleCount * 3 + keywordCount * 2 + abstractCount;
-      return { ...a, _score: score, _total: titleCount + keywordCount + abstractCount };
+      const title = String(a.title || "").toLowerCase();
+      const keywords = String(a.keywords || "").toLowerCase();
+      const abstract = String(a.abstract || "").toLowerCase().slice(0, 2000);
+      let score = 0;
+      let total = 0;
+      for (const term of terms) {
+        const titleCount = countIn(title, term);
+        const keywordCount = countIn(keywords, term);
+        const abstractCount = countIn(abstract, term);
+        score += titleCount * 3 + keywordCount * 2 + abstractCount;
+        total += titleCount + keywordCount + abstractCount;
+      }
+      return { ...a, _score: score, _total: total };
     }).sort((a, b) => b._score - a._score || b._total - a._total);
   }, [filteredArticles, filters.sort, highlightTerms]);
 
@@ -284,9 +282,32 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
     setBatchBusy("");
     setSelectedIds(new Set());
     const label = action === "read" ? "标记已读" : "加入收藏";
+    // U4：成功后给 8 秒撤销窗口——误选 50 篇批量已读，如今一键还原。
     notify?.(
       failed ? `已完成 ${patches.length} 篇${label}，${failed} 篇失败。` : `已${label} ${patches.length} 篇。`,
-      { type: failed ? "warning" : "success" }
+      { type: failed ? "warning" : "success", action: patches.length ? { label: "撤销", onClick: () => undoBatch(action, patches) } : null }
+    );
+    await onDataChanged?.();
+  }
+
+  /** U4：撤销批量操作。同一 toggle 接口再次调用即回原状态；失败的篇数如实告知。 */
+  async function undoBatch(action, patches) {
+    if (!patches.length) return;
+    let failed = 0;
+    for (const patch of patches) {
+      try {
+        await api.post(`/api/articles/${patch.id}/${action === "read" ? "read" : "favorite"}`);
+      } catch {
+        failed += 1;
+      }
+    }
+    const revert = patches.map((patch) => (
+      action === "read" ? { id: patch.id, is_read: 0 } : { id: patch.id, is_favorite: 0 }
+    ));
+    onArticleUpdated(revert);
+    notify?.(
+      failed ? `已撤销，但 ${failed} 篇恢复失败，请手动修改。` : `已撤销：${patches.length} 篇恢复原状态。`,
+      { type: failed ? "warning" : "info" }
     );
     await onDataChanged?.();
   }
@@ -325,12 +346,12 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
             <RotateCcw size={13} /> 清除全部筛选（{activeFilterCount}）
           </button>
         )}
-        <div className={`filter-group ${collapsedFilterGroups.search ? "is-collapsed" : ""}`}>
+        <div className={`filter-group ${isFilterGroupCollapsed("search") ? "is-collapsed" : ""}`}>
           {filterGroupHeader("search", "搜索", <Search size={14} aria-hidden="true" />, {
             active: Boolean(filters.q),
             onClear: () => setFilters({ ...filters, q: "" })
           })}
-          <div className="filter-group-content" id="feed-filter-group-search" hidden={collapsedFilterGroups.search}>
+          <div className="filter-group-content" id="feed-filter-group-search" hidden={isFilterGroupCollapsed("search")}>
             <div className="search-field">
               <Search size={14} className="search-field-icon" aria-hidden="true" />
               <input
@@ -341,27 +362,28 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
                 onChange={(event) => setFilters({ ...filters, q: event.target.value })}
                 placeholder="搜索标题、摘要、作者或关键词"
               />
-              {filters.q ? (
+              {/* U1：原「按 / 键聚焦搜索框」kbd 提示已移除——快捷键功能
+                  于 2026-10-09 整体移除（见 706af2e），提示成了永不兑现的
+                  承诺；如后续重做快捷键，请与提示同步上线。 */}
+              {filters.q && (
                 <button className="search-clear" type="button" aria-label="清除搜索" onClick={() => setFilters({ ...filters, q: "" })}>
                   <X size={14} />
                 </button>
-              ) : (
-                <kbd className="search-kbd" title="按 / 键聚焦搜索框">/</kbd>
               )}
             </div>
           </div>
         </div>
-        <div className={`filter-group ${collapsedFilterGroups.journal ? "is-collapsed" : ""}`}>
+        <div className={`filter-group ${isFilterGroupCollapsed("journal") ? "is-collapsed" : ""}`}>
           {filterGroupHeader("journal", "期刊", <BookOpen size={14} aria-hidden="true" />, {
             active: filters.journal.length > 0,
             onClear: () => setFilters({ ...filters, journal: [] })
           })}
-          <div className="filter-group-content" id="feed-filter-group-journal" hidden={collapsedFilterGroups.journal}>
+          <div className="filter-group-content" id="feed-filter-group-journal" hidden={isFilterGroupCollapsed("journal")}>
             {/* Grouped by publisher so a 15-journal catalogue reads as four
                 blocks instead of one long list. Empty groups never render.
                 Each block is collapsible (需求 2): the head toggles its list. */}
             {journalGroups.map((group) => {
-              const groupCollapsed = collapsedJournalGroups.has(group.key);
+              const groupCollapsed = isJournalGroupCollapsed(group.key);
               const names = group.items.map((j) => j.name);
               const selectedInGroup = names.filter((n) => filters.journal.includes(n)).length;
               const allSelected = names.length > 0 && selectedInGroup === names.length;
@@ -423,12 +445,12 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
             })}
           </div>
         </div>
-        <div className={`filter-group ${collapsedFilterGroups.direction ? "is-collapsed" : ""}`}>
+        <div className={`filter-group ${isFilterGroupCollapsed("direction") ? "is-collapsed" : ""}`}>
           {filterGroupHeader("direction", "研究方向", <Compass size={14} aria-hidden="true" />, {
             active: filters.direction.length > 0,
             onClear: () => setFilters({ ...filters, direction: [] })
           })}
-          <div className="filter-group-content" id="feed-filter-group-direction" hidden={collapsedFilterGroups.direction}>
+          <div className="filter-group-content" id="feed-filter-group-direction" hidden={isFilterGroupCollapsed("direction")}>
             <div className="keyword-filter-list direction-filter-list">
               {/* 「其他」不进入文献库展示与筛选入口（需求 3）：后端默认排除
                   research_direction='other'，这里不再提供豁免入口；数据保留，
@@ -458,12 +480,12 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
             </div>
           </div>
         </div>
-        <div className={`filter-group ${collapsedFilterGroups.date ? "is-collapsed" : ""}`}>
+        <div className={`filter-group ${isFilterGroupCollapsed("date") ? "is-collapsed" : ""}`}>
           {filterGroupHeader("date", "时间范围", <CalendarDays size={14} aria-hidden="true" />, {
             active: Boolean(filters.from || filters.to),
             onClear: () => setFilters({ ...filters, from: "", to: "" })
           })}
-          <div className="filter-group-content" id="feed-filter-group-date" hidden={collapsedFilterGroups.date}>
+          <div className="filter-group-content" id="feed-filter-group-date" hidden={isFilterGroupCollapsed("date")}>
             <input
               type="date"
               value={filters.from}
@@ -478,12 +500,12 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
             />
           </div>
         </div>
-        <div className={`filter-group ${collapsedFilterGroups.flags ? "is-collapsed" : ""}`}>
+        <div className={`filter-group ${isFilterGroupCollapsed("flags") ? "is-collapsed" : ""}`}>
           {filterGroupHeader("flags", "筛选", <Filter size={14} aria-hidden="true" />, {
             active: Boolean(filters.unread || filters.favorite),
             onClear: () => setFilters({ ...filters, unread: false, favorite: false })
           })}
-          <div className="filter-group-content" id="feed-filter-group-flags" hidden={collapsedFilterGroups.flags}>
+          <div className="filter-group-content" id="feed-filter-group-flags" hidden={isFilterGroupCollapsed("flags")}>
             <div className="filter-row">
               <label className="checkline">
                 <input
@@ -504,12 +526,12 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
             </div>
           </div>
         </div>
-        <div className={`filter-group ${collapsedFilterGroups.keyword ? "is-collapsed" : ""}`}>
+        <div className={`filter-group ${isFilterGroupCollapsed("keyword") ? "is-collapsed" : ""}`}>
           {filterGroupHeader("keyword", "关键词", <Tag size={14} aria-hidden="true" />, {
             active: filters.keyword.length > 0,
             onClear: () => setFilters({ ...filters, keyword: [] })
           })}
-          <div className="filter-group-content" id="feed-filter-group-keyword" hidden={collapsedFilterGroups.keyword}>
+          <div className="filter-group-content" id="feed-filter-group-keyword" hidden={isFilterGroupCollapsed("keyword")}>
             <div className="keyword-filter-list">
               {topKeywords.map((item) => (
                 <button
@@ -531,9 +553,9 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
             </div>
           </div>
         </div>
-        <div className={`filter-group ${collapsedFilterGroups.sort ? "is-collapsed" : ""}`}>
+        <div className={`filter-group ${isFilterGroupCollapsed("sort") ? "is-collapsed" : ""}`}>
           {filterGroupHeader("sort", "排序", <ArrowDownUp size={14} aria-hidden="true" />)}
-          <div className="filter-group-content" id="feed-filter-group-sort" hidden={collapsedFilterGroups.sort}>
+          <div className="filter-group-content" id="feed-filter-group-sort" hidden={isFilterGroupCollapsed("sort")}>
             <label className="sort-select">
               <ArrowDownUp size={14} />
               <select
@@ -549,6 +571,9 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
         </div>
       </aside>
       <section className="content-main">
+        {/* A3：每视图一个 h1。文献库的页面标题此前缺失（只有筛选面板的 h2），
+            屏幕阅读器无法按标题导航；用 sr-only 保持视觉不变。 */}
+        <h1 className="sr-only">文献库</h1>
         <div className="feed-toolbar">
           {/* Two equal columns instead of two free-floating buttons: the pair
               used to share one flex row with the display toggles and collapsed
@@ -561,13 +586,14 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
           </div>
         <div className="display-toggles">
           <span className="display-toggles-label">显示内容</span>
-          <button type="button" className={`display-toggle ${displayPreferences.authors ? "active" : ""}`} onClick={() => toggleDisplay("authors")}>
+          {/* A4：显示开关统一 aria-pressed + 动态 aria-label，屏幕阅读器可播报开关态 */}
+          <button type="button" className={`display-toggle ${displayPreferences.authors ? "active" : ""}`} aria-pressed={displayPreferences.authors} aria-label={displayPreferences.authors ? "隐藏作者" : "显示作者"} title={displayPreferences.authors ? "隐藏作者" : "显示作者"} onClick={() => toggleDisplay("authors")}>
             {displayPreferences.authors ? <Eye size={14} /> : <EyeOff size={14} />} 作者
           </button>
-          <button type="button" className={`display-toggle ${displayPreferences.keywords ? "active" : ""}`} onClick={() => toggleDisplay("keywords")}>
+          <button type="button" className={`display-toggle ${displayPreferences.keywords ? "active" : ""}`} aria-pressed={displayPreferences.keywords} aria-label={displayPreferences.keywords ? "隐藏关键词" : "显示关键词"} title={displayPreferences.keywords ? "隐藏关键词" : "显示关键词"} onClick={() => toggleDisplay("keywords")}>
             {displayPreferences.keywords ? <Eye size={14} /> : <EyeOff size={14} />} 关键词
           </button>
-          <button type="button" className={`display-toggle ${displayPreferences.abstract ? "active" : ""}`} onClick={() => toggleDisplay("abstract")}>
+          <button type="button" className={`display-toggle ${displayPreferences.abstract ? "active" : ""}`} aria-pressed={displayPreferences.abstract} aria-label={displayPreferences.abstract ? "隐藏摘要" : "显示摘要"} title={displayPreferences.abstract ? "隐藏摘要" : "显示摘要"} onClick={() => toggleDisplay("abstract")}>
             {displayPreferences.abstract ? <Eye size={14} /> : <EyeOff size={14} />} 摘要
           </button>
           <button
@@ -581,11 +607,16 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
             {displayPreferences.bilingual ? <Eye size={14} /> : <EyeOff size={14} />}
             中文标题
           </button>
-          <button type="button" className={`display-toggle ${displayPreferences.translatedAbstract ? "active" : ""}`} onClick={() => toggleDisplay("translatedAbstract")}>
+          <button type="button" className={`display-toggle ${displayPreferences.translatedAbstract ? "active" : ""}`} aria-pressed={displayPreferences.translatedAbstract} aria-label={displayPreferences.translatedAbstract ? "隐藏中文摘要" : "显示中文摘要"} title={displayPreferences.translatedAbstract ? "隐藏中文摘要" : "显示中文摘要"} onClick={() => toggleDisplay("translatedAbstract")}>
             {displayPreferences.translatedAbstract ? <Eye size={14} /> : <EyeOff size={14} />} 中文摘要
           </button>
         </div>
         </div>
+
+        {/* U5/P3：列表后台更新提示（stale-while-revalidate：旧结果驻留，不闪空） */}
+        {listUpdating && (
+          <p className="list-updating-pill" role="status">正在更新，显示的是上次结果</p>
+        )}
 
         <div className="article-count" role="status" aria-live="polite">
           共 <strong>{articlesTotal || sortedArticles.length}</strong> 篇文献
@@ -613,7 +644,7 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
           </div>
         )}
 
-        <div className="article-list">
+        <div className="article-list" id="article-list">
           {sortedArticles.length === 0 ? (
             activeFilterCount > 0 ? (
               <EmptyState

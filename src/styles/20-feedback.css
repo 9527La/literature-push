@@ -1,0 +1,92 @@
+/* ═══════════════════════════════════════════════════════════
+   20-feedback.css — Toast 队列 + 骨架屏（.toast / .skeleton）
+   P6 分区拆分（2026-10-12）：由 styles.css 按原 section 边界拆出，
+   顺序与原文件一致；新规则请追加到 99-tail.css 末尾。
+   ═══════════════════════════════════════════════════════════ */
+/* ──────────────────────────────────────────
+   Toast queue
+   ────────────────────────────────────────── */
+.toast-region {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 48px));
+  pointer-events: none;
+}
+
+.toast-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px 11px 14px;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--text-tertiary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  pointer-events: auto;
+  animation: toastIn 0.28s var(--ease-spring);
+}
+
+.toast-icon { flex: 0 0 auto; margin-top: 1px; }
+.toast-text { flex: 1 1 auto; min-width: 0; line-height: 1.5; font-weight: 500; overflow-wrap: anywhere; }
+
+.toast-close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.toast-close:hover { color: var(--text-primary); background: var(--surface-hover); }
+
+.toast-success { border-left-color: var(--success); }
+.toast-success .toast-icon { color: var(--success); }
+.toast-error { border-left-color: var(--error); }
+.toast-error .toast-icon { color: var(--error); }
+.toast-warning { border-left-color: var(--warning); }
+.toast-warning .toast-icon { color: var(--warning); }
+.toast-info { border-left-color: var(--accent-primary); }
+.toast-info .toast-icon { color: var(--accent-primary); }
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ──────────────────────────────────────────
+   Skeleton cards
+   ────────────────────────────────────────── */
+.skeleton-card {
+  min-height: 132px;
+  pointer-events: none;
+  content-visibility: visible;
+}
+
+.skeleton-meta { width: 42%; height: 12px; }
+.skeleton-title { width: 78%; height: 20px; }
+.skeleton-text { width: 100%; height: 12px; }
+.skeleton-text-short { width: 62%; }
+.skeleton-rail { gap: 6px; }
+.skeleton-action { display: block; width: 34px; height: 34px; border-radius: var(--radius-md); }
+

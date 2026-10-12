@@ -2321,7 +2321,7 @@ export function getAdminOverview() {
     `).all(),
     journals: journalDistribution,
     recentRefreshes: db.prepare(`
-      SELECT started_at, finished_at, added_count, task_type,
+      SELECT id, started_at, finished_at, added_count, task_type,
         enriched_abstract_count, enriched_keyword_count, translated_count,
         failed_article_count, failed_abstract_count, failed_keyword_count, failed_translation_count,
         translated_title_count, translated_abstract_count, translation_unit_count, translation_request_count,

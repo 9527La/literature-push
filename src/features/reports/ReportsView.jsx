@@ -8,6 +8,8 @@ import { formatRelativeDate } from "../../lib/format.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
 import Modal from "../../components/Modal.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
+import useAsync from "../../hooks/useAsync.js";
+import useCollapsedGroups from "../../hooks/useCollapsedGroups.js";
 
 const KINDS = [
   { key: "weekly", label: "一周速览" },
@@ -392,29 +394,16 @@ function ArticleListDialog({ title, markLabel, subtitle, items, loading, error, 
   );
 }
 
-/** 期刊文献卡片弹窗。 */
+/** 期刊文献卡片弹窗（S3：数据三态走 useAsync/AsyncState 同一套）。 */
 function JournalArticlesDialog({ journalName, onClose, onOpenArticle }) {
-  const [articles, setArticles] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!journalName) return undefined;
-    let cancelled = false;
-    setLoading(true);
-    setError("");
-    api.get(`/api/articles?journal=${encodeURIComponent(journalName)}&sort=desc&limit=12`).then((data) => {
-      if (cancelled) return;
-      setArticles(data.articles || []);
-      setTotal(data.total || 0);
-    }).catch((e) => {
-      if (!cancelled) setError(e.message);
-    }).finally(() => {
-      if (!cancelled) setLoading(false);
-    });
-    return () => { cancelled = true; };
-  }, [journalName]);
+  const { data, loading, error, reload } = useAsync(
+    () => (journalName
+      ? api.get(`/api/articles?journal=${encodeURIComponent(journalName)}&sort=desc&limit=12`)
+      : Promise.resolve({ articles: [], total: 0 })),
+    [journalName]
+  );
+  const articles = data?.articles || [];
+  const total = data?.total || 0;
 
   return (
     <Modal open={Boolean(journalName)} onClose={onClose} labelledBy="journal-dialog-title" className="journal-dialog">
@@ -427,27 +416,40 @@ function JournalArticlesDialog({ journalName, onClose, onOpenArticle }) {
         <button type="button" className="journal-dialog-close" onClick={onClose} aria-label="关闭"><X size={16} /></button>
       </div>
       <div className="journal-dialog-body">
-        {error && <p className="journal-dialog-msg">加载失败：{error}</p>}
-        {!loading && !error && !articles.length && <p className="journal-dialog-msg">该刊暂无入库文献。</p>}
-        {articles.map((article) => {
-          const direction = article.research_direction || "";
-          return (
-            <button
-              key={article.id}
-              type="button"
-              className={`journal-article-row${direction ? " has-direction" : ""}`}
-              style={direction ? { "--dir-key": directionVar(direction) } : undefined}
-              onClick={() => onOpenArticle(article)}
-            >
-              <span className="journal-article-title">{article.translated_title || article.title}</span>
-              <span className="journal-article-meta">
-                {direction && <span className="journal-article-dot" aria-hidden="true" />}
-                <span>{direction ? directionLabel(direction) : "未标注方向"}</span>
-                <span>{formatRelativeDate(article.display_date || article.published_at)}</span>
-              </span>
-            </button>
-          );
-        })}
+        {loading ? (
+          <div className="journal-dialog-loading" role="status" aria-live="polite">
+            <span className="skeleton" style={{ height: 14, marginBottom: 10 }} />
+            <span className="skeleton" style={{ height: 14, marginBottom: 10 }} />
+            <span className="skeleton" style={{ height: 14, width: "60%" }} />
+          </div>
+        ) : error ? (
+          <div className="journal-dialog-msg" role="alert">
+            加载失败：{error}
+            <button className="secondary compact" type="button" onClick={reload} style={{ marginLeft: 10 }}>重试</button>
+          </div>
+        ) : !articles.length ? (
+          <p className="journal-dialog-msg">该刊暂无入库文献。</p>
+        ) : (
+          articles.map((article) => {
+            const direction = article.research_direction || "";
+            return (
+              <button
+                key={article.id}
+                type="button"
+                className={`journal-article-row${direction ? " has-direction" : ""}`}
+                style={direction ? { "--dir-key": directionVar(direction) } : undefined}
+                onClick={() => onOpenArticle(article)}
+              >
+                <span className="journal-article-title">{article.translated_title || article.title}</span>
+                <span className="journal-article-meta">
+                  {direction && <span className="journal-article-dot" aria-hidden="true" />}
+                  <span>{direction ? directionLabel(direction) : "未标注方向"}</span>
+                  <span>{formatRelativeDate(article.display_date || article.published_at)}</span>
+                </span>
+              </button>
+            );
+          })
+        )}
       </div>
     </Modal>
   );
@@ -469,9 +471,9 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
   // 研究速览 v2：当前期数详情（总览 + 全部方向专报）按需懒加载
   const [periodDetails, setPeriodDetails] = useState({ overview: null, dirs: new Map() });
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState(() => new Set());
-  // 主题聚类手风琴（月度/方向专报）：默认全部展开
-  const [collapsedClusters, setCollapsedClusters] = useState(() => new Set());
+  // 折叠分组（S4：与文献库筛选面板、期刊小节共用 useCollapsedGroups）
+  const { collapsed: collapsedGroups, toggle: toggleGroup, setCollapsed: setCollapsedGroups } = useCollapsedGroups();
+  const { collapsed: collapsedClusters, toggle: toggleCluster, setCollapsed: setCollapsedClusters } = useCollapsedGroups();
   // 聚类组内速评卡「默认一行、按需加载全部」（需求）：记录用户点了
   // 「继续加载全部」的组名；未点过的组只渲染前 3 条（宽屏一行）。
   const [expandedClusterReviews, setExpandedClusterReviews] = useState(() => new Set());
@@ -673,15 +675,6 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
     }).catch(() => {}).finally(() => setLoadingArticle(false));
   }
 
-  function toggleGroup(key) {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }
-
   // 全部折叠/展开：只要有任一组打开就折叠全部，全关时才展开全部（避免手工折叠一组后按钮语义翻转）。
   const anyGroupOpen = groups.some((group) => !collapsedGroups.has(group.key));
   function toggleAllGroups() {
@@ -695,14 +688,6 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
     setExpandedClusterReviews(new Set());
   }, [current?.id]);
   const anyClusterOpen = parsed.clusters.some((cluster) => !collapsedClusters.has(cluster.name));
-  function toggleCluster(name) {
-    setCollapsedClusters((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  }
   function toggleAllClusters() {
     setCollapsedClusters(() => (anyClusterOpen ? new Set(parsed.clusters.map((cluster) => cluster.name)) : new Set()));
   }

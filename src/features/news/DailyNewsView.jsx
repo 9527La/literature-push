@@ -321,6 +321,8 @@ export default function DailyNewsView() {
       </aside>
 
       <section className="daily-content">
+        {/* A3：每视图一个 h1（sr-only，视觉不变）；日期标题从 h2 起不跳级 */}
+        <h1 className="sr-only">每日资讯</h1>
         {detailLoading ? (
           <div className="daily-loading">加载中…</div>
         ) : detailError ? (

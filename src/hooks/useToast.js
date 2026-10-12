@@ -8,6 +8,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * silently overwrote an earlier one. This keeps up to `max` notices, each with
  * its own type and lifetime, so consecutive actions no longer clobber each
  * other.
+ *
+ * U4: `options.action = { label, onClick }` 给 toast 加一个操作按钮
+ * （如批量标记已读后的「撤销」）。带操作的 toast 默认停留 8 秒。
  */
 export default function useToast({ max = 3 } = {}) {
   const [toasts, setToasts] = useState([]);
@@ -27,15 +30,19 @@ export default function useToast({ max = 3 } = {}) {
     const text = String(message || "").trim();
     if (!text) return null;
     const type = ["success", "error", "info", "warning"].includes(options.type) ? options.type : "info";
-    const duration = Number.isFinite(options.duration) ? options.duration : (type === "error" ? 6000 : 4000);
+    const hasAction = Boolean(options.action && options.action.label && typeof options.action.onClick === "function");
+    const duration = Number.isFinite(options.duration)
+      ? options.duration
+      : (hasAction ? 8000 : type === "error" ? 6000 : 4000);
     const id = (nextIdRef.current += 1);
 
     setToasts((current) => {
-      if (current.length < max) return [...current, { id, type, message: text }];
+      const nextToast = { id, type, message: text, action: hasAction ? options.action : null };
+      if (current.length < max) return [...current, nextToast];
       // Drop the oldest non-error notice first so failures stay on screen.
       const dropIndex = current.findIndex((toast) => toast.type !== "error");
       const next = [...current];
-      next.splice(dropIndex === -1 ? 0 : dropIndex, 1, { id, type, message: text });
+      next.splice(dropIndex === -1 ? 0 : dropIndex, 1, nextToast);
       return next;
     });
 

@@ -12,6 +12,8 @@ const ICONS = {
  *
  * The polite/assertive live regions are rendered permanently (even while
  * empty) so assistive technology reliably announces notices that appear later.
+ *
+ * U4: toast 可带一个操作按钮（如「撤销」）；点击后执行 action 并自动消失。
  */
 export default function Toast({ toasts, onDismiss }) {
   const errors = toasts.filter((toast) => toast.type === "error");
@@ -20,9 +22,21 @@ export default function Toast({ toasts, onDismiss }) {
   const render = (toast) => {
     const Icon = ICONS[toast.type] || Info;
     return (
-      <div className={`toast toast-${toast.type}`} key={toast.id}>
+      <div className={`toast toast-${toast.type}${toast.action ? " has-action" : ""}`} key={toast.id}>
         <Icon size={16} className="toast-icon" aria-hidden="true" />
         <span className="toast-text">{toast.message}</span>
+        {toast.action && (
+          <button
+            type="button"
+            className="toast-action"
+            onClick={() => {
+              toast.action.onClick?.();
+              onDismiss(toast.id);
+            }}
+          >
+            {toast.action.label}
+          </button>
+        )}
         <button
           type="button"
           className="toast-close"

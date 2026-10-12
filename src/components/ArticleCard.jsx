@@ -1,9 +1,10 @@
 import { memo } from "react";
-import { Check, FileText, Globe, Heart, Languages, Star, Tag } from "lucide-react";
+import { Check, FileText, Globe, Heart, Languages, Star } from "lucide-react";
 import Highlight from "./Highlight.jsx";
 import { articleDate, formatDate, formatRelativeDate } from "../lib/format.js";
 import { findJournal, journalAbbr, journalGroup } from "../lib/journal.js";
-import { directionLabel, directionVar } from "../lib/directions.js";
+import DirectionChip from "./DirectionChip.jsx";
+import KeywordTag from "./KeywordTag.jsx";
 
 /** Cards show the three strongest keywords; the rest collapse into "+N". */
 const KEYWORD_PREVIEW_LIMIT = 3;
@@ -32,10 +33,12 @@ function ArticleCard({
 
   const journalRecord = findJournal(journals, article.journal);
   const tone = journalGroup(journalRecord || article.journal);
-  const keywords = String(article.keywords || "")
+  // R1：先去重再切片——重复关键词对读者是噪音，去重后可以安全地用关键词
+  // 文本作 key（不再依赖数组下标，列表重排/插入不会错位）。
+  const keywords = [...new Set(String(article.keywords || "")
     .split(/[;；]/)
     .map((keyword) => keyword.trim())
-    .filter(Boolean);
+    .filter(Boolean))];
   const hiddenKeywordCount = Math.max(0, keywords.length - KEYWORD_PREVIEW_LIMIT);
   const direction = article.research_direction || "";
   const directionTip = direction
@@ -70,14 +73,7 @@ function ArticleCard({
           {article.is_favorite ? <span className="article-status-badge fav-badge"><Star size={11} /> 收藏</span> : null}
           <span className="article-head-spacer" aria-hidden="true" />
           {direction && (
-            <span
-              className="direction-chip"
-              style={{ "--dir-key": directionVar(direction) }}
-              title={directionTip}
-            >
-              <Tag size={11} aria-hidden="true" />
-              {directionLabel(direction)}
-            </span>
+            <DirectionChip direction={direction} icon="tag" title={directionTip} />
           )}
           <time dateTime={absoluteDate} title={absoluteDate}>{formatRelativeDate(dateValue)}</time>
           {/* 动作按钮顶部横向 + 中文名（需求 5）：替代右侧竖排图标栏，标题占满整行 */}
@@ -111,7 +107,7 @@ function ArticleCard({
               {article.is_favorite ? "已藏" : "收藏"}
             </button>
             {article.url && (
-              <a title="打开原文网页" aria-label="打开原文网页" href={article.url} target="_blank" rel="noopener noreferrer">
+              <a title="打开原文网页" aria-label="打开原文网页（新窗口）" href={article.url} target="_blank" rel="noopener noreferrer">
                 <Globe size={12} /> 原文
               </a>
             )}
@@ -121,23 +117,20 @@ function ArticleCard({
           <Highlight text={article.title} terms={highlightTerms} />
         </button>
         {displayPreferences.bilingual && article.translated_title && article.translated_title !== article.title && (
-          <p className="translated-title"><Languages size={14} /> {article.translated_title}</p>
+          <p className="translated-title"><Languages size={14} aria-hidden="true" /> {article.translated_title}</p>
         )}
         {displayPreferences.authors && article.authors && <p className="authors"><Highlight text={article.authors} terms={highlightTerms} /></p>}
         {displayPreferences.keywords && keywords.length > 0 && (
           <div className="keywords">
             {/* 关键词胶囊：浅底次级标签。AI 方向标签已升格为期刊身份条里的
                 实底标签（行首），两者主次分明，不再挤在同一行抢权重。 */}
-            {keywords.slice(0, KEYWORD_PREVIEW_LIMIT).map((keyword, index) => (
-              <button
-                type="button"
-                className={`keyword-tag ${highlightTerms.some((term) => keyword.toLowerCase().includes(term.toLowerCase())) ? "keyword-tag-highlight" : ""}`}
-                key={index}
-                title={`按关键词「${keyword}」筛选`}
-                onClick={() => onSelectKeyword?.(keyword)}
-              >
-                <Highlight text={keyword} terms={highlightTerms} />
-              </button>
+            {keywords.slice(0, KEYWORD_PREVIEW_LIMIT).map((keyword) => (
+              <KeywordTag
+                key={keyword}
+                keyword={keyword}
+                onClick={onSelectKeyword}
+                highlightTerms={highlightTerms}
+              />
             ))}
             {hiddenKeywordCount > 0 && (
               <button

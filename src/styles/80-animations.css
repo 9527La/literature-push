@@ -1,0 +1,191 @@
+/* ═══════════════════════════════════════════════════════════
+   80-animations.css — 动效 + 版本更新弹窗 + 邮箱状态提示
+   P6 分区拆分（2026-10-12）：由 styles.css 按原 section 边界拆出，
+   顺序与原文件一致；新规则请追加到 99-tail.css 末尾。
+   ═══════════════════════════════════════════════════════════ */
+/* ──────────────────────────────────────────
+   Animations
+   ────────────────────────────────────────── */
+.spin {
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Loading skeleton */
+@keyframes shimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(226, 229, 235, 0.55) 0px,
+    rgba(246, 247, 249, 0.9) 40px,
+    rgba(226, 229, 235, 0.55) 80px
+  );
+  background-size: 200px 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-lg);
+}
+
+/* Smooth scroll */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Loading skeleton container */
+.loading-skeleton {
+  padding: 20px;
+}
+
+/* Global focus styles */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* ──────────────────────────────────────────
+   Update Modal Dialog
+   ────────────────────────────────────────── */
+.update-dialog {
+  width: min(600px, 100%);
+  max-height: min(700px, calc(100vh - 48px));
+  max-height: min(700px, calc(100dvh - 48px));
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: var(--radius-2xl);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: var(--shadow-xl), 0 0 0 1px rgba(255,255,255,0.5) inset;
+  padding: 28px;
+  animation: dialogEnter 0.35s var(--ease-spring);
+}
+
+.update-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.update-dialog-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.update-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  background: rgba(13, 148, 136, 0.10);
+  color: var(--accent-primary);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 5px;
+}
+
+.update-notes {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.75;
+}
+
+.update-notes ul {
+  padding-left: 20px;
+}
+
+.update-notes li {
+  margin-bottom: 7px;
+}
+
+.update-markdown h3,
+.update-markdown h4,
+.update-markdown h5 {
+  margin: 14px 0 7px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.update-markdown p {
+  margin-bottom: 9px;
+}
+
+.update-markdown ul {
+  padding-left: 20px;
+  margin-bottom: 9px;
+}
+
+.update-markdown li {
+  margin-bottom: 5px;
+}
+
+.update-empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.update-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(26, 26, 46, 0.06);
+}
+
+/* ──────────────────────────────────────────
+   Email Status & Hints
+   ────────────────────────────────────────── */
+.saved-email-status {
+  font-size: 14px;
+  color: var(--text-secondary);
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.45);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(26, 26, 46, 0.06);
+}
+
+.saved-email-status strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.unsaved-hint {
+  color: var(--warning);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.no-email-hint {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* Crawl note */
+.crawl-note {
+  font-size: 13px;
+  color: var(--warning);
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(217, 119, 6, 0.06);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(217, 119, 6, 0.10);
+}
+

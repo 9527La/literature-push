@@ -1,3 +1,19 @@
+/**
+ * 北京业务日的「今天」（R3）。
+ *
+ * 弹窗「正式出版日只展示已经发生的日期」判定与导出文件名时间戳此前各写
+ * 一份 `new Date(Date.now() + 8 * 3600000).toISOString()`；后端业务日同样
+ * 按北京时区计算，这里收敛为单一真源，避免两端漂移。
+ */
+export function todayStr(now = Date.now()) {
+  return new Date(now + 8 * 3600000).toISOString().slice(0, 10);
+}
+
+/** 导出文件名用的日期戳（YYYY-MM-DD，北京时区）。 */
+export function formatStamp(now = Date.now()) {
+  return todayStr(now);
+}
+
 export function formatDate(value) {
   if (!value) return "未知日期";
   if (/^\d{8}$/.test(value)) return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}`;

@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { Check, Copy, Globe, Heart, Languages, Quote, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { copyText } from "../../lib/clipboard.js";
-import { articleDate, formatDate, formatCitationGB7714, formatRelativeDate } from "../../lib/format.js";
+import { articleDate, formatCitationGB7714, formatDate, formatRelativeDate, todayStr } from "../../lib/format.js";
 import { journalAbbr, journalGroup } from "../../lib/journal.js";
-import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
+import { DIRECTIONS, directionLabel } from "../../lib/directions.js";
 import Modal from "../../components/Modal.jsx";
+import DirectionChip from "../../components/DirectionChip.jsx";
+import KeywordTag from "../../components/KeywordTag.jsx";
 
 function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpdated, onOpenArticle, showActions = true, hideTranslatedAbstract = false, canModerate = false }) {
   const [detail, setDetail] = useState(article);
@@ -134,9 +136,10 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
   //   · 正式出版 published_at —— 只在「已经发生」且与首次公开不同日时展示，
   //     未来的卷期日仍留在数据库里但不对用户展示；
   //   · 系统收录 first_seen_at —— 本系统首次抓到的时间，用于审计。
-  const todayStr = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+  // R3：「今天」判定统一走 lib/format.js#todayStr（北京业务日单一真源）。
+  const today = todayStr();
   const publishedDate = String(detail.published_at || "").slice(0, 10);
-  const officialDate = publishedDate && publishedDate <= todayStr && publishedDate !== String(dateValue || "").slice(0, 10)
+  const officialDate = publishedDate && publishedDate <= today && publishedDate !== String(dateValue || "").slice(0, 10)
     ? formatDate(publishedDate)
     : "";
   const seenDate = detail.first_seen_at ? formatDate(String(detail.first_seen_at)) : "";
@@ -159,7 +162,8 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
               <span className={`journal-mark tone-${tone}`} aria-hidden="true">{journalAbbr(detail.journal)}</span>
               <span className="article-journal">{detail.journal || "未知期刊"}</span>
             </div>
-            <h3 id="article-dialog-title">{detail.title}</h3>
+            {/* A3：弹窗标题层级 h3 → h2（与全站「每视图一个 h1、弹窗从 h2 起」对齐） */}
+            <h2 id="article-dialog-title">{detail.title}</h2>
             {translatedTitle && translatedTitle !== detail.title && (
               <p className="translated-title"><Languages size={14} /> {translatedTitle}</p>
             )}
@@ -196,14 +200,9 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
               {detail.research_direction ? (
                 <>
                   <div className="direction-block-chips">
-                    <span className="direction-chip" style={{ "--dir-key": directionVar(detail.research_direction) }}>
-                      <i className="direction-dot" aria-hidden="true" />
-                      {directionLabel(detail.research_direction)}
-                    </span>
+                    <DirectionChip direction={detail.research_direction} />
                     {String(detail.research_direction_secondary || "").split(",").filter(Boolean).map((key) => (
-                      <span key={key} className="direction-chip direction-chip-soft" style={{ "--dir-key": directionVar(key) }}>
-                        {directionLabel(key)}
-                      </span>
+                      <DirectionChip key={key} direction={key} variant="soft" />
                     ))}
                     {String(detail.direction_reason || "").startsWith("[待复核]") && (
                       <span className="direction-review-badge">待复核</span>
@@ -300,7 +299,7 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
 
         <div className={`abstract-region ${hasBothAbstracts ? "is-dual" : "is-single"}`}>
           <section className="abstract-panel">
-            <h4>摘要 · Abstract</h4>
+            <h3>摘要 · Abstract</h3>
             {detail.abstract ? (
               <p>{detail.abstract}</p>
             ) : loadingDetail ? (
@@ -315,7 +314,7 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
           </section>
           {hasBothAbstracts && (
             <section className="abstract-panel abstract-panel-zh">
-              <h4>中文摘要</h4>
+              <h3>中文摘要</h3>
               <p>{translatedAbstract}</p>
             </section>
           )}
@@ -326,7 +325,7 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
             <span className="keywords-band-label">关键词 / Keywords</span>
             <div className="keywords">
               {detail.keywords.split(/[;；]/).map((keyword) => keyword.trim()).filter(Boolean).map((keyword, index) => (
-                <span className="keyword-tag" key={index}>{keyword}</span>
+                <KeywordTag keyword={keyword} key={`${keyword}-${index}`} />
               ))}
             </div>
           </div>
@@ -336,7 +335,7 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
             不渲染。有 onOpenArticle（文献库）时点击可直接在弹窗内切换文献。 */}
         {related.length > 0 && (
           <section className="related-articles" aria-label="相关文献">
-            <h4>相关文献</h4>
+            <h3>相关文献</h3>
             <ul className="related-list">
               {related.map((item) => (
                 <li key={item.id}>
@@ -347,11 +346,9 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
                     title={onOpenArticle ? "查看这篇文献" : undefined}
                   >
                     <span className="related-item-meta">
-                      {item.research_direction && (
-                        <span className="direction-chip direction-chip-soft" style={{ "--dir-key": directionVar(item.research_direction) }}>
-                          {directionLabel(item.research_direction)}
-                        </span>
-                      )}
+                    {item.research_direction && (
+                      <DirectionChip direction={item.research_direction} variant="soft" />
+                    )}
                       <span className="related-item-journal">{item.journal || "未知期刊"}</span>
                       <time dateTime={formatDate(item.display_date)}>{formatDate(item.display_date)}</time>
                     </span>

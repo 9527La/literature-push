@@ -34,6 +34,13 @@ function WordCloud({ keywords, maxCount, onSelect, selectedKeyword }) {
     );
   }
 
+  // A2：词云对屏幕阅读器只是一堆散字——给容器一个摘要 aria-label，
+  // 完整数值进下方数据表。
+  const cloudSummary = items
+    .slice(0, 5)
+    .map((item) => `${item.keyword} ${item.count} 篇`)
+    .join("，");
+
   return (
     <div className="wordcloud-container">
       <div className="wordcloud-controls">
@@ -53,7 +60,7 @@ function WordCloud({ keywords, maxCount, onSelect, selectedKeyword }) {
         <button type="button" className={sortMode === "count" ? "active" : ""} aria-pressed={sortMode === "count"} onClick={() => setSortMode("count")}>按频次</button>
         <button type="button" className={sortMode === "alpha" ? "active" : ""} aria-pressed={sortMode === "alpha"} onClick={() => setSortMode("alpha")}>按首字</button>
       </div>
-      <div className="wordcloud">
+      <div className="wordcloud" role="img" aria-label={`关键词词云，前五个：${cloudSummary} 等；完整数据见下方数据表。`}>
         {items.map((item, index) => {
           const ratio = Math.min(1, item.count / (maxCount || 1));
           const isSelected = selectedKeyword === item.keyword;
@@ -79,6 +86,21 @@ function WordCloud({ keywords, maxCount, onSelect, selectedKeyword }) {
           );
         })}
       </div>
+      <details className="datatable">
+        <summary>查看数据表（屏幕阅读器友好）</summary>
+        <table className="mini">
+          <thead><tr><th>#</th><th>关键词</th><th style={{ textAlign: "right" }}>篇数</th></tr></thead>
+          <tbody>
+            {items.map((item, index) => (
+              <tr key={item.keyword}>
+                <td>{index + 1}</td>
+                <td>{item.keyword}</td>
+                <td className="num">{item.count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
       {keywords.length > limit && (
         <p className="wordcloud-more">
           共 {keywords.length} 个关键词，当前显示前 {limit} 个。

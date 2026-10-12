@@ -208,11 +208,13 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
 
   return (
     <div className="settings-view">
+      {/* A3：登录态设置页补 h1（此前直接从 h4 起，跳级）；小节标题 h4 → h2 */}
+      <h1 className="sr-only">文献推送设置</h1>
       <div className="settings-columns">
         {/* Left Column: Email + Push Settings */}
         <div className="settings-left">
           <section className="settings-section">
-            <h4><Mail size={15} /> 我的周报邮箱</h4>
+            <h2><Mail size={15} aria-hidden="true" /> 我的周报邮箱</h2>
             <p className="section-hint">填写后系统将每周推送最新文献到此邮箱。</p>
             <div className="saved-email-status">
               {savedEmail ? (
@@ -250,7 +252,7 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
           </section>
 
           <form className="settings-section" onSubmit={submit}>
-            <h4><Send size={15} /> 文献推送</h4>
+            <h2><Send size={15} aria-hidden="true" /> 文献推送</h2>
             <p className="section-hint">配置自动推送文献到邮箱的设置。</p>
             
             <div className="push-settings">

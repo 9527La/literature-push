@@ -1,0 +1,209 @@
+/* ═══════════════════════════════════════════════════════════
+   40-dialog.css — 文献摘要弹窗（.article-dialog / .abstract-panel / .related-articles）
+   P6 分区拆分（2026-10-12）：由 styles.css 按原 section 边界拆出，
+   顺序与原文件一致；新规则请追加到 99-tail.css 末尾。
+   ═══════════════════════════════════════════════════════════ */
+/* ──────────────────────────────────────────
+   Article Dialog
+   ────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 25, 0.50);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 24px;
+  animation: fadeIn 0.2s var(--ease-out);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.article-dialog {
+  width: min(820px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  max-height: min(760px, calc(100dvh - 48px));
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: var(--radius-2xl);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: var(--shadow-xl), 0 0 0 1px rgba(255,255,255,0.5) inset;
+  padding: 28px;
+  animation: dialogEnter 0.35s var(--ease-spring);
+}
+
+@keyframes dialogEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.dialog-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px;
+  align-items: start;
+}
+
+.dialog-header h2 {
+  margin: 6px 0 0;
+  font-size: 20px;
+  line-height: 1.45;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.icon-button {
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-tertiary);
+  transition: var(--t-colors);
+}
+
+.icon-button:hover {
+  background: rgba(26, 26, 46, 0.06);
+  color: var(--text-primary);
+}
+
+.icon-button:active {
+  transform: scale(0.93);
+}
+
+.dialog-authors {
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-size: 15px;
+  margin: 8px 0;
+}
+
+.paper-fields {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 8px 14px;
+  margin: 14px 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.paper-fields dt {
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+
+.paper-fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.keywords-panel {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: rgba(26, 26, 46, 0.02);
+  border: 1px solid rgba(26, 26, 46, 0.06);
+  border-radius: var(--radius-xl);
+}
+
+.keywords-panel h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.keywords-panel .keywords {
+  margin: 0;
+}
+
+.abstract-panel {
+  border-top: 1px solid rgba(26, 26, 46, 0.06);
+  border-bottom: 1px solid rgba(26, 26, 46, 0.06);
+  padding: 16px 0;
+}
+
+.abstract-panel h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.abstract-panel p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.75;
+  font-size: 15px;
+}
+
+.translation-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.translation-panel {
+  margin-top: 14px;
+  border: 1px solid rgba(5, 150, 105, 0.20);
+  border-radius: var(--radius-xl);
+  background: rgba(5, 150, 105, 0.05);
+  padding: 14px 16px;
+}
+
+.translation-panel h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.translation-panel strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  font-size: 16px;
+}
+
+.translation-panel p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.75;
+  font-size: 15px;
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.icon-button,
+.secondary {
+  border-radius: var(--radius-md);
+}
+
+.dialog-actions a {
+  text-decoration: none;
+}
+

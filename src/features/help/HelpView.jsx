@@ -15,7 +15,7 @@ function HelpView() {
       </section>
 
       <section className="help-section">
-        <h3><Library size={18} /> 文献库</h3>
+        <h2><Library size={18} /> 文献库</h2>
         <p>展示站点收录期刊的最新论文。摘要、关键词与中文翻译由管理员统一维护入库，打开即可直接阅读。</p>
         <ul>
           <li><strong>搜索与筛选</strong>：筛选面板默认收起，点击“打开筛选”展开后，可按标题、作者、摘要、关键词、期刊、研究方向、日期、未读状态和收藏状态筛选（面板内各分组默认收起，点击组名展开）；同一条件内的多选为“或”关系，不同条件之间为“且”关系。</li>
@@ -30,7 +30,7 @@ function HelpView() {
       </section>
 
       <section className="help-section">
-        <h3><Sparkles size={18} /> 研究速览</h3>
+        <h2><Sparkles size={18} /> 研究速览</h2>
         <p>AI 每周生成的文献速报：总览各方向本期动态，并为主要研究方向各生成一份方向专报。</p>
         <ul>
           <li><strong>总览与专报</strong>：总览按方向分组展示本期文献与速评；点击方向 chips 或分组可查看该方向的完整专报与全部文献。</li>
@@ -40,7 +40,7 @@ function HelpView() {
       </section>
 
       <section className="help-section">
-        <h3><Newspaper size={18} /> 每日资讯</h3>
+        <h2><Newspaper size={18} /> 每日资讯</h2>
         <p>每天自动汇总前一天的电力能源政策文件与重点新闻，左侧为日期列表，右侧为当日内容。</p>
         <ul>
           <li><strong>日期筛选</strong>：点击左栏「筛选日期」展开筛选框，自主选择开始 / 结束年月日（或只填一端），日期列表即时按范围过滤，可一键清除。</li>
@@ -51,7 +51,7 @@ function HelpView() {
       </section>
 
       <section className="help-section">
-        <h3><Star size={18} /> 收藏文献</h3>
+        <h2><Star size={18} /> 收藏文献</h2>
         <p>把重要文献集中保存，按研究方向管理，并为每篇文献记录自己的备注。</p>
         <ul>
           <li><strong>默认收藏夹</strong>：新注册的个人账户会自动创建“默认收藏夹”，首次收藏时会优先选中它。</li>
@@ -62,7 +62,7 @@ function HelpView() {
       </section>
 
       <section className="help-section">
-        <h3><BarChart3 size={18} /> 关键词统计</h3>
+        <h2><BarChart3 size={18} /> 关键词统计</h2>
         <p>汇总文献关键词及其频次，帮助了解研究热点和关键词之间的共现关系。</p>
         <ul>
           <li>可按期刊和时间范围重新统计。</li>
@@ -72,7 +72,7 @@ function HelpView() {
       </section>
 
       <section className="help-section">
-        <h3><Mail size={18} /> 文献推送</h3>
+        <h2><Mail size={18} /> 文献推送</h2>
         <p>在“文献推送”页面管理邮箱、推送计划和推送范围。</p>
         <ul>
           <li><strong>邮箱</strong>：填写并保存邮箱后，可以发送测试邮件。</li>
@@ -83,7 +83,7 @@ function HelpView() {
       </section>
 
       <section className="help-section">
-        <h3><UserRound size={18} /> 账户与个性设置</h3>
+        <h2><UserRound size={18} /> 账户与个性设置</h2>
         <ul>
           <li><strong>网页通行证</strong>：用于进入网页；它与个人账户相互独立。</li>
           <li><strong>个人账户</strong>：可注册、登录和退出。登录后才能保存阅读、收藏、推送和讨论相关数据。</li>
@@ -94,7 +94,7 @@ function HelpView() {
       </section>
 
       <section className="help-section">
-        <h3><RefreshCw size={18} /> 数据刷新</h3>
+        <h2><RefreshCw size={18} /> 数据刷新</h2>
         <p>系统支持后台定时刷新和管理员手动维护。</p>
         <ul>
           <li><strong>定时刷新</strong>：系统按服务器配置的计划获取新文献。</li>
@@ -104,7 +104,7 @@ function HelpView() {
       </section>
 
       <section className="help-section help-section-wide">
-        <h3><HelpCircle size={18} /> 常见问题</h3>
+        <h2><HelpCircle size={18} /> 常见问题</h2>
         <ul>
           <li><strong>局域网访问</strong>：同一 Wi-Fi 下的其他设备可通过浏览器输入本机显示的局域网地址访问本系统。</li>
           <li><strong>版本更新</strong>：系统更新后会弹出更新说明，可选择“知道了”关闭；同一版本不会重复提示。</li>

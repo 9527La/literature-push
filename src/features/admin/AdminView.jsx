@@ -4,6 +4,8 @@ import { api } from "../../lib/api.js";
 import { articleDate, formatDate, formatDateTime } from "../../lib/format.js";
 import { directionVar } from "../../lib/directions.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
+import AsyncState from "../../components/AsyncState.jsx";
+import ConfirmDialog from "../../components/ConfirmDialog.jsx";
 
 /** One-click maintenance entry points; the server decides the batching. */
 const MAINTENANCE_ACTIONS = [
@@ -80,7 +82,6 @@ function AdminView({ onDataChanged }) {
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [userForm, setUserForm] = useState({ username: "", password: "", name: "", email: "" });
   const [userSubmitting, setUserSubmitting] = useState(false);
-  const [deleteUserId, setDeleteUserId] = useState(null);
   const [expandedCoverageKey, setExpandedCoverageKey] = useState(null);
   const [selectedCoverageArticle, setSelectedCoverageArticle] = useState(null);
   const [maintenance, setMaintenance] = useState(null);
@@ -89,6 +90,12 @@ function AdminView({ onDataChanged }) {
   // Text a failed request wrote into `message`, so a recovered service can
   // retract exactly that banner without clobbering messages from user actions.
   const pollErrorRef = useRef("");
+  // S3：首屏加载/失败三态收敛到 AsyncState；bootstrapNonce 供「重试」按钮
+  // 重新触发一次带退避的首屏加载。
+  const [bootstrapNonce, setBootstrapNonce] = useState(0);
+  // R2：删除用户改阻断式确认（原来靠「再点一次同一按钮」的隐式确认）。
+  const [pendingDeleteUser, setPendingDeleteUser] = useState(null);
+  const [deletingUser, setDeletingUser] = useState(false);
 
   useEffect(() => {
     // 只读状态卡：分类由 WorkBuddy 定时任务完成，这里不做任何触发。
@@ -144,7 +151,7 @@ function AdminView({ onDataChanged }) {
       if (retryTimer) clearTimeout(retryTimer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [bootstrapNonce]);
 
   // Poll the job while it runs. A maintenance drain is a long-lived server-side
   // loop now, so the progress bar and the remaining-time estimate come from the
@@ -261,29 +268,43 @@ function AdminView({ onDataChanged }) {
     }
   }
 
+  // R2：删除用户走阻断式确认框（ConfirmDialog），不再「再点一次同一按钮」。
   async function removeUser(user) {
-    if (deleteUserId !== user.id) {
-      setDeleteUserId(user.id);
-      setMessage(`再次点击“确认删除”才会删除用户 ${user.username}。`);
-      return;
-    }
-    setUserSubmitting(true);
+    if (!pendingDeleteUser || pendingDeleteUser.id !== user.id) return;
+    setDeletingUser(true);
     setMessage("");
     try {
       await api.delete(`/api/admin/users/${user.id}`);
       setMessage(`用户 ${user.username} 已删除，其会话和个人数据也已清理。`);
-      setDeleteUserId(null);
+      setPendingDeleteUser(null);
       await loadOverview();
     } catch (error) {
       setMessage(error.message);
-      setDeleteUserId(null);
+      setPendingDeleteUser(null);
     } finally {
-      setUserSubmitting(false);
+      setDeletingUser(false);
     }
   }
 
-  if (loading) return <div className="loading-skeleton"><div className="skeleton" style={{ height: 150, marginBottom: 16 }} /><div className="skeleton" style={{ height: 320 }} /></div>;
-  if (!overview) return <div className="empty">无法读取管理数据。{message}</div>;
+  if (loading) {
+    return (
+      <div className="loading-skeleton" role="status" aria-label="正在加载管理数据">
+        <div className="skeleton" style={{ height: 150, marginBottom: 16 }} />
+        <div className="skeleton" style={{ height: 320 }} />
+      </div>
+    );
+  }
+  if (!overview) {
+    return (
+      <AsyncState
+        loading={false}
+        error={message || "无法读取管理数据。"}
+        onRetry={() => setBootstrapNonce((n) => n + 1)}
+      >
+        {null}
+      </AsyncState>
+    );
+  }
 
   const counts = overview.counts || {};
   const coverage = overview.coverage || {};
@@ -562,21 +583,27 @@ function AdminView({ onDataChanged }) {
 
         <section className="admin-panel-card refresh-panel">
           <header><div><span className="eyebrow">任务记录</span><h2>最近任务</h2></div><RefreshCw size={19} /></header>
+          {/* A6：任务记录用列表语义（ul/li + role），屏幕阅读器可逐条朗读；
+              R1：key 用服务端 id（原 `${started_at}-${index}` 在同秒启动时会撞键）。 */}
           <div className="refresh-ledger">
-            {recentRefreshes.length ? recentRefreshes.map((run, index) => (
-              <div key={`${run.started_at}-${index}`}>
-                <span className={`run-state ${run.status}`}>{taskStatusLabels[run.status] || run.status}</span>
-                <div className="run-details">
-                   <div className="run-heading"><strong>{taskLabels[run.task_type] || "数据维护"}</strong><time dateTime={run.started_at} title={run.finished_at ? `完成：${formatDateTime(run.finished_at)}` : "仍在进行"}>开始 {formatDateTime(run.started_at)}{run.finished_at && <> · 完成 {formatDateTime(run.finished_at)}</>}</time></div>
-                  <small>文献 +{run.added_count || 0} · 摘要 +{run.enriched_abstract_count || 0} · 关键词 +{run.enriched_keyword_count || 0} · 翻译 +{run.translated_count || 0}</small>
-                  {(run.translation_unit_count || run.translation_request_count || run.translated_title_count || run.translated_abstract_count) && <small>翻译单元 {run.translation_unit_count || 0}（标题 {run.translated_title_count || 0} · 摘要 {run.translated_abstract_count || 0}） · API 请求 {run.translation_request_count || 0} 次</small>}
-                  <small className="run-failures">失败：文献 {run.failed_article_count || 0} · 摘要 {run.failed_abstract_count || 0} · 关键词 {run.failed_keyword_count || 0} · 翻译 {run.failed_translation_count || 0}</small>
-                  <small className="run-pending">待补全：摘要 {run.remaining_abstract_count ?? pending.abstracts ?? 0} · 关键词 {run.remaining_keyword_count ?? pending.keywords ?? 0}</small>
-                  {(run.task_type === "translate_title" || run.task_type === "translate_abstract") && <small className="run-pending">待翻译：{run.remaining_translation_count ?? 0} 篇</small>}
-                  {run.message && <small className="run-message">{run.message}</small>}
-                </div>
-              </div>
-            )) : <p className="empty-compact">暂无刷新记录</p>}
+            {recentRefreshes.length ? (
+              <ul className="refresh-ledger-list" aria-label="最近任务记录">
+                {recentRefreshes.map((run) => (
+                  <li key={run.id}>
+                    <span className={`run-state ${run.status}`}>{taskStatusLabels[run.status] || run.status}</span>
+                    <div className="run-details">
+                       <div className="run-heading"><strong>{taskLabels[run.task_type] || "数据维护"}</strong><time dateTime={run.started_at} title={run.finished_at ? `完成：${formatDateTime(run.finished_at)}` : "仍在进行"}>开始 {formatDateTime(run.started_at)}{run.finished_at && <> · 完成 {formatDateTime(run.finished_at)}</>}</time></div>
+                      <small>文献 +{run.added_count || 0} · 摘要 +{run.enriched_abstract_count || 0} · 关键词 +{run.enriched_keyword_count || 0} · 翻译 +{run.translated_count || 0}</small>
+                      {(run.translation_unit_count || run.translation_request_count || run.translated_title_count || run.translated_abstract_count) && <small>翻译单元 {run.translation_unit_count || 0}（标题 {run.translated_title_count || 0} · 摘要 {run.translated_abstract_count || 0}） · API 请求 {run.translation_request_count || 0} 次</small>}
+                      <small className="run-failures">失败：文献 {run.failed_article_count || 0} · 摘要 {run.failed_abstract_count || 0} · 关键词 {run.failed_keyword_count || 0} · 翻译 {run.failed_translation_count || 0}</small>
+                      <small className="run-pending">待补全：摘要 {run.remaining_abstract_count ?? pending.abstracts ?? 0} · 关键词 {run.remaining_keyword_count ?? pending.keywords ?? 0}</small>
+                      {(run.task_type === "translate_title" || run.task_type === "translate_abstract") && <small className="run-pending">待翻译：{run.remaining_translation_count ?? 0} 篇</small>}
+                      {run.message && <small className="run-message">{run.message}</small>}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="empty-compact">暂无刷新记录</p>}
           </div>
         </section>
       </div>
@@ -585,7 +612,7 @@ function AdminView({ onDataChanged }) {
         <header>
           <div><span className="eyebrow">账户权限</span><h2>用户管理</h2></div>
           <div className="admin-section-actions">
-            <button className="secondary compact" type="button" aria-expanded={showCreateUser} onClick={() => { setShowCreateUser((current) => !current); setMessage(""); setDeleteUserId(null); }}>
+            <button className="secondary compact" type="button" aria-expanded={showCreateUser} onClick={() => { setShowCreateUser((current) => !current); setMessage(""); setPendingDeleteUser(null); }}>
               <UserPlus size={15} /> {showCreateUser ? "取消新增" : "新增用户"}
             </button>
             <Users size={19} />
@@ -605,7 +632,7 @@ function AdminView({ onDataChanged }) {
             </div>
           </form>
         )}
-        <div className="admin-table-wrap"><table><thead><tr><th>用户</th><th>账户角色</th><th>学籍</th><th>邮箱</th><th>注册日期</th><th>操作</th></tr></thead><tbody>{overview.users.map((user) => <tr key={user.id}><td><strong>{user.name || user.username}</strong><small>@{user.username}</small></td><td><span className={`role-chip ${user.role}`}>{user.role === "super_admin" ? "最高管理员" : "普通用户"}</span></td><td>{user.enrollment_year ? `${user.enrollment_year}级 ${user.degree || ""}` : "—"}</td><td>{user.email || "—"}</td><td>{formatDate(user.created_at)}</td><td className="user-actions">{user.role === "super_admin" ? <small>受保护</small> : <button className="danger-button compact" type="button" disabled={userSubmitting} onClick={() => removeUser(user)}><Trash2 size={14} /> {deleteUserId === user.id ? "确认删除" : "删除"}</button>}</td></tr>)}</tbody></table></div>
+        <div className="admin-table-wrap"><table><thead><tr><th>用户</th><th>账户角色</th><th>学籍</th><th>邮箱</th><th>注册日期</th><th>操作</th></tr></thead><tbody>{overview.users.map((user) => <tr key={user.id}><td><strong>{user.name || user.username}</strong><small>@{user.username}</small></td><td><span className={`role-chip ${user.role}`}>{user.role === "super_admin" ? "最高管理员" : "普通用户"}</span></td><td>{user.enrollment_year ? `${user.enrollment_year}级 ${user.degree || ""}` : "—"}</td><td>{user.email || "—"}</td><td>{formatDate(user.created_at)}</td><td className="user-actions">{user.role === "super_admin" ? <small>受保护</small> : <button className="danger-button compact" type="button" disabled={userSubmitting} onClick={() => setPendingDeleteUser(user)}><Trash2 size={14} /> 删除</button>}</td></tr>)}</tbody></table></div>
       </section>
 
       <section className="admin-panel-card admin-table-card">
@@ -620,6 +647,17 @@ function AdminView({ onDataChanged }) {
           onOpenArticle={setSelectedCoverageArticle}
         />
       )}
+      {/* R2：删除用户阻断式确认 */}
+      <ConfirmDialog
+        open={Boolean(pendingDeleteUser)}
+        title="删除用户"
+        danger
+        busy={deletingUser}
+        confirmLabel="确认删除"
+        message={`将删除用户 ${pendingDeleteUser?.username || ""}，其会话、收藏与个人数据也会一并清理，且不可恢复。`}
+        onConfirm={() => pendingDeleteUser && removeUser(pendingDeleteUser)}
+        onCancel={() => { if (!deletingUser) setPendingDeleteUser(null); }}
+      />
     </section>
   );
 }

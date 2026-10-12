@@ -97,6 +97,8 @@ function StatsView({ journals, markRead, toggleFavorite }) {
 
   return (
     <div className="stats-view">
+      {/* A3：每视图一个 h1（sr-only）；原 h3 小节标题升为 h2，不再跳级 */}
+      <h1 className="sr-only">关键词统计</h1>
       <section className="stats-filters">
         <label>
           <Filter size={16} />
@@ -134,24 +136,27 @@ function StatsView({ journals, markRead, toggleFavorite }) {
             {keywordSearch && <>，匹配 <strong>{filteredKeywords.length}</strong> 个</>}
           </div>
 
-          <div className="stats-view-toggle">
-            <button 
+          <div className="stats-view-toggle" role="group" aria-label="统计视图切换">
+            <button
               className={`stats-view-btn ${viewMode === "list" ? "active" : ""}`}
+              aria-pressed={viewMode === "list"}
               onClick={() => setViewMode("list")}
             >
-              <BarChart3 size={14} /> 列表
+              <BarChart3 size={14} aria-hidden="true" /> 列表
             </button>
-            <button 
+            <button
               className={`stats-view-btn ${viewMode === "wordcloud" ? "active" : ""}`}
+              aria-pressed={viewMode === "wordcloud"}
               onClick={() => setViewMode("wordcloud")}
             >
-              <Cloud size={14} /> 词云
+              <Cloud size={14} aria-hidden="true" /> 词云
             </button>
-            <button 
+            <button
               className={`stats-view-btn ${viewMode === "cooccurrence" ? "active" : ""}`}
+              aria-pressed={viewMode === "cooccurrence"}
               onClick={() => setViewMode("cooccurrence")}
             >
-              <Network size={14} /> 共现
+              <Network size={14} aria-hidden="true" /> 共现
             </button>
           </div>
 
@@ -213,7 +218,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
             {selectedKeyword && (
               <div className="keyword-articles-panel">
                 <div className="keyword-articles-header">
-                  <h3>{selectedKeyword}</h3>
+                  <h2>{selectedKeyword}</h2>
                   <span className="keyword-articles-count">
                     {(stats.keywords.find((k) => k.keyword === selectedKeyword)?.articles || []).length} 篇文献
                   </span>
@@ -255,7 +260,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
           {directionStats && (
             <section className="direction-stats-panel" aria-label="研究方向分布">
               <div className="direction-stats-head">
-                <h3><Compass size={16} aria-hidden="true" /> 研究方向分布</h3>
+                <h2><Compass size={16} aria-hidden="true" /> 研究方向分布</h2>
                 <div className="direction-window-toggle" role="tablist" aria-label="统计窗口">
                   {DIRECTION_WINDOWS.map((item) => (
                     <button
