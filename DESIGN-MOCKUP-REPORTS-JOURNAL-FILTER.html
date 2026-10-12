@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>研究速览 · 专题来源期刊筛选 mockup 预览稿</title>
+<style>
+  :root{
+    --bg:#f2f4f7; --surface:#fff; --border:#d8dce3; --border-light:rgba(23,27,36,.09);
+    --ink:#171b24; --ink2:#525a68; --ink3:#6b7280;
+    --accent:#3157d5; --accent-hover:#2848b8;
+    --dir-microgrid:#4E7D3B; --warn:#b45309;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;font-size:14px;line-height:1.65;padding:26px 32px 60px}
+  .wrap{max-width:1240px;margin:0 auto}
+  .note{background:#eef2fd;border:1px solid #c9d6f5;color:#2b4bb0;border-radius:8px;padding:11px 16px;font-size:12.5px;line-height:1.8;margin-bottom:18px}
+  .note b{font-weight:600}
+  .page{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px 30px 34px}
+  /* ── 页头 ── */
+  .head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:4px}
+  h1{font-size:22px;display:flex;align-items:center;gap:10px;font-weight:600}
+  .ai-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(49,87,213,.1);color:var(--accent);border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600}
+  .head-hint{color:var(--ink3);font-size:12.5px}
+  .tabs{display:flex;gap:8px}
+  .tab{border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:999px;padding:6px 18px;font-size:13.5px;cursor:pointer;font-family:inherit}
+  .tab.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  /* ── 工具栏 ── */
+  .toolbar{margin:16px 0;display:flex;flex-direction:column;gap:10px}
+  .period{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;background:var(--surface);padding:5px 10px;font-size:13px;color:var(--ink2);width:fit-content}
+  .period b{color:var(--ink);font-weight:600}
+  .dir-chips{display:flex;gap:6px;flex-wrap:wrap}
+  .dir-chip{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);background:var(--surface);color:var(--ink2);border-radius:999px;padding:4px 11px;font-size:12.5px}
+  .dir-chip .dot{width:8px;height:8px;border-radius:50%;background:var(--dc,var(--ink3))}
+  .dir-chip .n{font-size:11px;color:var(--ink3)}
+  .dir-chip.on{background:var(--dc);border-color:var(--dc);color:#fff;font-weight:600}
+  .dir-chip.on .dot{background:#fff}
+  .dir-chip.on .n{color:rgba(255,255,255,.85)}
+  .dir-chip.overview{border-style:dashed}
+  /* ── 报告信息条（红框区）：新增来源期刊行 ── */
+  .meta{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:16px}
+  .meta-row{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--ink2);font-size:13px;align-items:center}
+  .meta-row b{color:var(--ink);font-weight:600}
+  .meta-dir{display:inline-flex;align-items:center;padding:1px 10px;border-radius:999px;font-size:12px;font-weight:600;background:var(--dir-microgrid);color:#fff}
+  .meta-journals{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:9px;padding-top:9px;border-top:1px dashed var(--border);font-size:12.5px}
+  .mj-label{color:var(--ink2);font-weight:600;white-space:nowrap}
+  .mj-label small{color:var(--ink3);font-weight:400}
+  .jchip{--tone-ink:#5f6773;--tone-soft:#f1f3f5;--tone-line:#dce0e5;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--tone-line);background:var(--tone-soft);color:var(--tone-ink);border-radius:999px;padding:3px 10px 3px 4px;font-size:12.5px;cursor:pointer;transition:box-shadow .15s,border-color .15s;font-family:inherit}
+  .jchip .jm{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:18px;padding:0 5px;border-radius:999px;background:var(--tone-ink);color:#fff;font-size:10.5px;font-weight:600;letter-spacing:.02em}
+  .jchip .jc{font-size:11px;color:var(--tone-ink);opacity:.75}
+  .jchip:hover{border-color:var(--tone-ink);box-shadow:0 1px 4px rgba(23,27,36,.08)}
+  .jchip.tone-ieee{--tone-ink:#3f5d93;--tone-soft:#edf1f8;--tone-line:#d5deec}
+  .jchip.tone-elsevier{--tone-ink:#8a6238;--tone-soft:#f8f2e9;--tone-line:#e8dbc6}
+  .jchip.tone-cn{--tone-ink:#3d6e66;--tone-soft:#ecf4f2;--tone-line:#cfe0dc}
+  .jchip.off{--tone-ink:#98a0ab;--tone-soft:#f6f7f9;--tone-line:#cfd4db;border-style:dashed}
+  .jchip.off .jn{text-decoration:line-through}
+  .jchip.off .jm{background:#a8aeb8}
+  .mj-status{margin-left:auto;display:flex;align-items:center;gap:10px;color:var(--ink3);font-size:12px}
+  .mj-status b{color:var(--warn);font-weight:600}
+  .mj-reset{border:1px solid var(--border);background:var(--surface);color:var(--accent);border-radius:999px;padding:2px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+  .mj-reset:hover{border-color:var(--accent)}
+  /* ── 板块与卡片 ── */
+  .sect{font-size:15px;margin:22px 0 10px;padding-left:10px;border-left:3px solid var(--accent);line-height:1.4;display:flex;align-items:baseline;gap:8px;font-weight:600}
+  .sect .hint{font-size:12px;color:var(--ink3);font-weight:400}
+  .cluster{border:1px solid var(--border);border-radius:10px;margin-bottom:14px;overflow:hidden}
+  .cluster-head{display:flex;align-items:center;gap:9px;width:100%;background:#f7f8fa;border-bottom:1px solid var(--border-light);padding:9px 14px;font-size:13.5px;text-align:left}
+  .cluster-head .caret{font-size:10px;color:var(--ink3);transform:rotate(90deg)}
+  .cluster-name{color:var(--ink);font-weight:600}
+  .cluster-meta{margin-left:auto;font-size:12px;color:var(--accent);font-weight:600}
+  .cluster-meta em{font-style:normal;color:var(--warn);font-weight:400;margin-left:6px}
+  .cluster-body{padding:12px 14px 14px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:10px}
+  .bc{--tone-ink:#525a68;--tone-soft:#f4f5f7;--tone-line:#d8dce3;border:1px solid var(--border);border-left:3px solid var(--tone-line);border-radius:10px;background:var(--surface);overflow:hidden;display:flex;flex-direction:column}
+  .bc.tone-ieee{--tone-ink:#3f5d93;--tone-soft:#edf1f8;--tone-line:#d5deec}
+  .bc.tone-elsevier{--tone-ink:#8a6238;--tone-soft:#f8f2e9;--tone-line:#e8dbc6}
+  .bc.tone-cn{--tone-ink:#3d6e66;--tone-soft:#ecf4f2;--tone-line:#cfe0dc}
+  .bc-head{display:flex;align-items:center;gap:8px;padding:6px 13px;background:var(--tone-soft);border-bottom:1px solid var(--border-light)}
+  .bc-mark{min-width:32px;text-align:center;background:var(--tone-ink);color:#fff;border-radius:6px;font-size:10.5px;font-weight:600;padding:1px 6px}
+  .bc-journal{font-size:12px;color:var(--tone-ink);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bc-date{font-size:11.5px;color:var(--ink3)}
+  .bc-body{padding:9px 13px 11px;display:grid;gap:4px}
+  .bc-title{font-size:13.5px;font-weight:600;line-height:1.5}
+  .bc-en{font-size:11.5px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .f{display:grid;grid-template-columns:56px 1fr;gap:8px;font-size:12px;line-height:1.55}
+  .f .k{color:var(--tone-ink);font-weight:600;white-space:nowrap}
+  .f .v{color:var(--ink2)}
+  .hidden-hint{margin:0;font-size:12.5px;color:var(--ink3);padding:10px 12px;border:1px dashed var(--border);border-radius:8px;background:#fafbfc}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="note">
+    <b>mockup 预览稿 · 示意数据 ｜ 研究速览 · 专题「来源期刊」筛选</b><br>
+    报告信息条（红框区）新增第二行：完整列出该专题当期出现的<strong>全部期刊</strong>（全名 + 篇数，按期刊组配色）。
+    点任意期刊 chip 即隐藏其文献、再点恢复，下方各板块卡片实时联动；右侧实时统计「已隐藏 N 种 · M 篇」，可一键「全部显示」。<b>试试点击「Applied Energy」「电网技术」查看联动效果。</b><br>
+    待确认：① 期刊口径 = 专报引用的全部文献（客户端实时计算，推荐）｜② 筛选按专题独立记忆（仅本会话，推荐）｜③ 总览态暂不加，仅方向专报态（推荐）。
+  </div>
+
+  <div class="page">
+    <div class="head">
+      <div>
+        <h1>研究速览 <span class="ai-badge">✦ AI 生成</span></h1>
+        <p class="head-hint">智能体基于当期入库文献自动生成 · 数字取自数据库统计 · 三字段速评卡/期刊名/主题词均可点击交互</p>
+      </div>
+      <div class="tabs">
+        <button type="button" class="tab on">一周速览</button>
+        <button type="button" class="tab">月度趋势</button>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="period">📅 <b>2026-10-06 ~ 2026-10-12</b>（9 份报告） ▾</div>
+      <div class="dir-chips">
+        <span class="dir-chip overview">总览</span>
+        <span class="dir-chip on" style="--dc:#4E7D3B"><span class="dot"></span>微电网与虚拟电厂 <span class="n">8</span></span>
+        <span class="dir-chip" style="--dc:#8A6238"><span class="dot"></span>分布式电源与并网 <span class="n">13</span></span>
+        <span class="dir-chip" style="--dc:#3D6E66"><span class="dot"></span>储能系统 <span class="n">11</span></span>
+        <span class="dir-chip" style="--dc:#34547A"><span class="dot"></span>输电网运行与规划 <span class="n">9</span></span>
+        <span class="dir-chip" style="--dc:#7D5BA6"><span class="dot"></span>预测与数据驱动 <span class="n">7</span></span>
+      </div>
+    </div>
+
+    <!-- 红框区：报告信息条 -->
+    <div class="meta">
+      <div class="meta-row">
+        <span class="meta-dir">微电网与虚拟电厂专报</span>
+        <span>本期 <b>2026-10-06 ~ 2026-10-12</b></span>
+        <span>收录 <b>8</b> 篇</span>
+        <span>生成时间 2026-10-12</span>
+      </div>
+      <div class="meta-journals" id="journalRow"></div>
+    </div>
+
+    <h2 class="sect">主题聚类速评 <span class="hint">本期该方向的全部主题聚类 · 点击聚类头展开/收起</span></h2>
+    <div id="clusters"></div>
+
+    <h2 class="sect">论文速评 <span class="hint" id="reviewHint"></span></h2>
+    <div id="reviews"></div>
+
+    <h2 class="sect">值得精读 <span class="hint" id="pickHint"></span></h2>
+    <div id="picks"></div>
+  </div>
+</div>
+
+<script>
+const J = {
+  AE:  { name: "Applied Energy", abbr: "AE", tone: "elsevier" },
+  TSG: { name: "IEEE Transactions on Smart Grid", abbr: "TSG", tone: "ieee" },
+  EPC: { name: "电网技术", abbr: "电网", tone: "cn" },
+  AEPS:{ name: "电力系统自动化", abbr: "电自", tone: "cn" },
+  IJE: { name: "International Journal of Electrical Power & Energy Systems", abbr: "IJE", tone: "elsevier" }
+};
+
+const ART = {
+  1: { j: "AE",  date: "12 小时前", title: "多源不确定性下量化办公楼空调灵活性的概率框架", en: "A probability-based framework for quantifying office building flexibility under multi-source uncertainty", obj: "办公楼空调负荷聚合体", mth: "机会约束规划 + 场景削减的灵活性量化", fin: "可释放约 12% 日内调节潜力且不牺牲舒适度" },
+  2: { j: "AE",  date: "4 天前",  title: "保证稳态和小信号稳定性的联网直流微电网中最佳惯性分配", en: "Optimal inertia allocation in networked DC microgrids with steady-state and small-signal stability guarantees", obj: "联网型直流微电网", mth: "稳态—小信号联合约束下的惯性优化分配", fin: "母线电压波动下降 21% 且阻尼裕度不劣化" },
+  3: { j: "TSG", date: "5 天前",  title: "基于分布式优化的微网群能量管理鲁棒协调", en: "Robust coordination of multi-microgrid energy management via distributed optimization", obj: "多微网互联集群", mth: "ADMM 分布式鲁棒优化逐时协调", fin: "日运行成本较集中式基准下降 6.8%" },
+  4: { j: "AEPS",date: "5 天前",  title: "考虑通信时延的孤岛微网二次控制稳定性分析", en: "Stability analysis of islanded microgrid secondary control with communication delays", obj: "孤岛微网二次控制回路", mth: "时延依赖 Lyapunov 稳定性判据", fin: "给出容许时延上界 380 ms" },
+  5: { j: "AE",  date: "3 天前",  title: "考虑任务级碳可追溯性的人工智能计算中心园区脱碳调度", en: "Decarbonization dispatch for AI computing center parks with task-level carbon traceability", obj: "AI 算力园区", mth: "任务级碳流建模 + 调度优化", fin: "建立碳账套与能耗时序追踪机制" },
+  6: { j: "TSG", date: "2 天前",  title: "构网型储能与虚拟电厂协同的配电网惯量支撑策略", en: "Inertia support strategy for distribution grids coordinating grid-forming storage and VPPs", obj: "含构网储能的配电网", mth: "虚拟惯量分配 + 频率支撑协调控制", fin: "频率最低点抬升 0.12 Hz，响应时间 < 40 ms" },
+  7: { j: "EPC", date: "1 天前",  title: "台风频发地区配电网韧性提升的移动储能预布局", en: "Pre-positioning of mobile energy storage for distribution grid resilience in typhoon-prone areas", obj: "台风多发配电网络", mth: "两阶段随机规划预布局", fin: "关键负荷缺供时间缩短 34%" },
+  8: { j: "IJE", date: "1 天前",  title: "共享储能参与现货市场的双层竞标模型", en: "Bi-level bidding model for shared energy storage in spot markets", obj: "共享储能电站与市场运营商", mth: "主从博弈双层模型 + KKT 转化", fin: "电站收益提升 9%，峰谷差缩小 6%" }
+};
+
+const CLUSTERS = [
+  { name: "微网能量管理", ids: [1, 2, 3, 4] },
+  { name: "虚拟电厂与聚合调控", ids: [5, 6, 7, 8] }
+];
+const REVIEWS = [1, 3, 6, 8];
+const PICKS = [2, 4, 5];
+
+const hidden = new Set();
+const allIds = [...new Set([...CLUSTERS.flatMap((c) => c.ids), ...REVIEWS, ...PICKS])];
+const journalOrder = Object.keys(J);
+const journalCounts = {};
+for (const id of allIds) journalCounts[ART[id].j] = (journalCounts[ART[id].j] || 0) + 1;
+
+const isHid = (id) => hidden.has(ART[id].j);
+
+function cardHtml(id) {
+  const a = ART[id], j = J[a.j];
+  return `<div class="bc tone-${j.tone}" data-j="${a.j}">
+    <div class="bc-head"><span class="bc-mark">${j.abbr}</span><span class="bc-journal">${j.name}</span><span class="bc-date">${a.date}</span></div>
+    <div class="bc-body">
+      <div class="bc-title">${a.title}</div>
+      <div class="bc-en">${a.en}</div>
+      <div class="f"><span class="k">研究对象</span><span class="v">${a.obj}</span></div>
+      <div class="f"><span class="k">研究方法</span><span class="v">${a.mth}</span></div>
+      <div class="f"><span class="k">核心结论</span><span class="v">${a.fin}</span></div>
+    </div>
+  </div>`;
+}
+
+function renderJournals() {
+  const chips = journalOrder.map((k) => {
+    const j = J[k], off = hidden.has(k);
+    return `<button type="button" class="jchip tone-${j.tone}${off ? " off" : ""}" data-j="${k}" aria-pressed="${!off}"
+      title="${off ? `已隐藏，点击恢复「${j.name}」的文献` : `点击隐藏「${j.name}」的文献`}">
+      <span class="jm">${j.abbr}</span><span class="jn">${j.name}</span><span class="jc">${journalCounts[k] || 0} 篇</span>
+    </button>`;
+  }).join("");
+  const hidArt = allIds.filter(isHid);
+  const status = hidden.size
+    ? `<span>已隐藏 <b>${hidden.size}</b> 种 · <b>${hidArt.length}</b> 篇</span><button type="button" class="mj-reset" id="resetBtn">全部显示</button>`
+    : `<span>点击期刊可隐藏其文献</span>`;
+  document.getElementById("journalRow").innerHTML =
+    `<span class="mj-label">来源期刊 <small>（${journalOrder.length} 种）</small></span>${chips}<span class="mj-status">${status}</span>`;
+}
+
+function renderClusters() {
+  document.getElementById("clusters").innerHTML = CLUSTERS.map((c) => {
+    const hid = c.ids.filter(isHid);
+    const visible = c.ids.filter((id) => !isHid(id));
+    const meta = `${c.ids.length} 条速评${hid.length ? ` · <em>已隐藏 ${hid.length} 条</em>` : ""} · 点击收起`;
+    const body = visible.length
+      ? `<div class="cards">${visible.map(cardHtml).join("")}</div>`
+      : `<p class="hidden-hint">本聚类 ${c.ids.length} 条速评已按「来源期刊」筛选隐藏，点击上方期刊 chip 或「全部显示」即可恢复。</p>`;
+    return `<div class="cluster"><div class="cluster-head"><span class="caret">▶</span><span class="cluster-name">${c.name}</span><span class="cluster-meta">${meta}</span></div><div class="cluster-body">${body}</div></div>`;
+  }).join("");
+}
+
+function renderSection(listId, hintId, ids) {
+  const visible = ids.filter((id) => !isHid(id));
+  const hid = ids.length - visible.length;
+  document.getElementById(hintId).textContent = hid ? `已隐藏 ${hid} 篇（按来源期刊筛选）` : "";
+  document.getElementById(listId).innerHTML = visible.length
+    ? `<div class="cards">${visible.map(cardHtml).join("")}</div>`
+    : `<p class="hidden-hint">本节 ${ids.length} 篇速评已按「来源期刊」筛选隐藏，点击「全部显示」恢复。</p>`;
+}
+
+function renderAll() {
+  renderJournals();
+  renderClusters();
+  renderSection("reviews", "reviewHint", REVIEWS);
+  renderSection("picks", "pickHint", PICKS);
+}
+
+document.addEventListener("click", (event) => {
+  const chip = event.target.closest(".jchip");
+  if (chip) {
+    const k = chip.dataset.j;
+    hidden.has(k) ? hidden.delete(k) : hidden.add(k);
+    renderAll();
+    return;
+  }
+  if (event.target.closest("#resetBtn")) {
+    hidden.clear();
+    renderAll();
+  }
+});
+
+renderAll();
+</script>
+</body>
+</html>

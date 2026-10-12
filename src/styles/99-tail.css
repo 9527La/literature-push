@@ -2458,3 +2458,30 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
   .article .abstract { -webkit-line-clamp: unset; overflow: visible; }
   .content-layout { display: block; }
 }
+
+/* ═══ 研究速览 · 专题「来源期刊」筛选（2026-10-12；DESIGN-MOCKUP-REPORTS-JOURNAL-FILTER.html）
+   报告信息条新增一行：完整列出专报引用文献的来源期刊（全名 + 篇数），
+   点 chip 隐藏/恢复该刊文献，聚类/速评/精读卡实时联动；配色沿用期刊组四色 tone。 ═══ */
+.reports-meta-journals { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 8px; padding-top: 9px; border-top: 1px dashed var(--border-color); font-size: 12.5px; }
+.reports-meta-journals-label { color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
+.reports-meta-journals-count { color: var(--text-tertiary); font-weight: 400; }
+.reports-journal-chip { --tone-ink: var(--text-secondary); --tone-soft: var(--surface-subtle); --tone-line: var(--border-color); display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--tone-line); background: var(--tone-soft); color: var(--tone-ink); border-radius: 999px; padding: 2px 10px 2px 3px; font-size: 12.5px; font-family: inherit; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.reports-journal-chip:hover { border-color: var(--tone-ink); box-shadow: var(--shadow-sm); }
+.reports-journal-chip.tone-ieee { --tone-ink: #3f5d93; --tone-soft: #edf1f8; --tone-line: #d5deec; }
+.reports-journal-chip.tone-elsevier { --tone-ink: #8a6238; --tone-soft: #f8f2e9; --tone-line: #e8dbc6; }
+.reports-journal-chip.tone-cn { --tone-ink: #3d6e66; --tone-soft: #ecf4f2; --tone-line: #cfe0dc; }
+.reports-journal-chip.tone-other { --tone-ink: #5f6773; --tone-soft: #f1f3f5; --tone-line: #dce0e5; }
+.reports-journal-chip.is-off { --tone-ink: #98a0ab; --tone-soft: #f6f7f9; --tone-line: #cfd4db; border-style: dashed; }
+.reports-journal-mark { display: inline-flex; align-items: center; justify-content: center; min-width: 30px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--tone-ink); color: #fff; font-size: 10.5px; font-weight: 600; letter-spacing: .02em; }
+.reports-journal-chip.is-off .reports-journal-mark { background: #a8aeb8; }
+.reports-journal-name { white-space: nowrap; }
+.reports-journal-chip.is-off .reports-journal-name { text-decoration: line-through; }
+.reports-journal-count { font-size: 11px; opacity: .78; }
+.reports-meta-journals-status { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; color: var(--text-tertiary); font-size: 12px; }
+.reports-meta-journals-status strong { color: var(--warning); font-weight: 600; }
+.reports-meta-journals-tip { color: var(--text-tertiary); }
+.reports-journal-reset { border: 1px solid var(--border-color); background: var(--surface); color: var(--accent-primary); border-radius: 999px; padding: 1px 12px; font-size: 12px; font-family: inherit; cursor: pointer; transition: border-color .15s; }
+.reports-journal-reset:hover { border-color: var(--accent-primary); }
+.reports-cluster-hidden { font-style: normal; color: var(--warning); font-weight: 400; }
+.reports-sect-hint.is-warn { color: var(--warning); }
+.reports-filter-hint { margin: 0; font-size: 12.5px; color: var(--text-tertiary); padding: 10px 12px; border: 1px dashed var(--border-color); border-radius: 8px; background: var(--surface-subtle); }

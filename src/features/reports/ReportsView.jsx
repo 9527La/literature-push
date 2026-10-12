@@ -3,6 +3,7 @@ import { CalendarRange, Check, ChevronDown, GripVertical, Plus, RotateCcw, Setti
 import { api } from "../../lib/api.js";
 import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 import { journalAbbr, journalGroup } from "../../lib/journal.js";
+import { hiddenIdsForJournals, journalEntriesFromIds } from "../../lib/report-journals.js";
 import { renderInlineMarkdown, renderMarkdown } from "../../lib/markdown.jsx";
 import { formatRelativeDate } from "../../lib/format.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
@@ -481,6 +482,8 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
   const [chipPrefs, setChipPrefs] = useState(loadChipPrefs);
   const [chipPanelOpen, setChipPanelOpen] = useState(false);
   const [dragKey, setDragKey] = useState(null);
+  // 来源期刊筛选（仅方向专报态）：按「类型|期数|方向」逐报告独立记忆，仅保留在本次会话内存中
+  const [hiddenJournalsByReport, setHiddenJournalsByReport] = useState({});
 
   useEffect(() => {
     let cancelled = false;
@@ -791,6 +794,34 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
   // 旧格式总览期数（无任何方向专报）：保留 v1「各方向动态」卡片网格
   const showInsightGrid = isOverview && periodDetails.dirs.size === 0 && parsedWithJournals.insights.length > 0;
   const nonPickReviews = parsedWithJournals.reviews.filter((review) => !review.pick);
+
+  // ── 来源期刊筛选（仅方向专报态；口径 = 报告引用的全部文献，与页面卡片一一对应）──
+  const reportFilterKey = current ? `${current.kind}|${current.period_start}|${current.direction || "overview"}` : "";
+  const journalEntries = useMemo(
+    () => (isOverview ? [] : journalEntriesFromIds(refIds, articleMap)),
+    [isOverview, refIds, articleMap]
+  );
+  const hiddenJournalSet = useMemo(
+    () => new Set(hiddenJournalsByReport[reportFilterKey] || []),
+    [hiddenJournalsByReport, reportFilterKey]
+  );
+  // 被隐藏期刊命中的文献 id；无元数据/未知期刊的卡片永不隐藏
+  const filteredOutIds = useMemo(
+    () => (isOverview ? new Set() : hiddenIdsForJournals(refIds, articleMap, hiddenJournalSet)),
+    [isOverview, refIds, articleMap, hiddenJournalSet]
+  );
+  const hiddenJournalCount = journalEntries.filter((entry) => hiddenJournalSet.has(entry.name)).length;
+  const visibleNonPick = nonPickReviews.filter((review) => !filteredOutIds.has(review.id));
+  const visibleHighlightIds = highlightIds.filter((id) => !filteredOutIds.has(id));
+  function toggleJournalFilter(name) {
+    if (!reportFilterKey) return;
+    setHiddenJournalsByReport((prev) => {
+      const list = prev[reportFilterKey] || [];
+      const next = name === null ? [] : (list.includes(name) ? list.filter((item) => item !== name) : [...list, name]);
+      return { ...prev, [reportFilterKey]: next };
+    });
+  }
+
   // 注意：intro 段落框已按需求移除，因此不计入「有内容」——否则只剩导语时会渲染成一片空白。
   const hasAnyContent = Boolean(
     current && (parsed.insights.length || nonPickReviews.length || parsed.clusters.length
@@ -985,6 +1016,42 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                 )}
                 {!!current.stats?.unclassified && <span>其中 <strong>{current.stats.unclassified}</strong> 篇待方向标注</span>}
                 <span>生成时间 {String(current.generated_at || "").slice(0, 10)}</span>
+                {!isOverview && journalEntries.length > 0 && (
+                  <div className="reports-meta-journals" role="group" aria-label="来源期刊筛选">
+                    <span className="reports-meta-journals-label">
+                      来源期刊<span className="reports-meta-journals-count">（{journalEntries.length} 种）</span>
+                    </span>
+                    {journalEntries.map(({ name, count }) => {
+                      const off = hiddenJournalSet.has(name);
+                      return (
+                        <button
+                          key={name}
+                          type="button"
+                          className={`reports-journal-chip tone-${journalGroup(name)}${off ? " is-off" : ""}`}
+                          aria-pressed={!off}
+                          title={off ? `已隐藏，点击恢复「${name}」的文献` : `点击隐藏「${name}」的文献`}
+                          onClick={() => toggleJournalFilter(name)}
+                        >
+                          <span className="reports-journal-mark" aria-hidden="true">{journalAbbr(name)}</span>
+                          <span className="reports-journal-name">{name}</span>
+                          <span className="reports-journal-count">{count} 篇</span>
+                        </button>
+                      );
+                    })}
+                    <span className="reports-meta-journals-status">
+                      {hiddenJournalCount > 0 ? (
+                        <>
+                          <span>已隐藏 <strong>{hiddenJournalCount}</strong> 种 · <strong>{filteredOutIds.size}</strong> 篇</span>
+                          <button type="button" className="reports-journal-reset" onClick={() => toggleJournalFilter(null)}>
+                            全部显示
+                          </button>
+                        </>
+                      ) : (
+                        <span className="reports-meta-journals-tip">点击期刊可隐藏其文献</span>
+                      )}
+                    </span>
+                  </div>
+                )}
               </div>
 
               {isOverview && <DirectionBars report={current} />}
@@ -1054,10 +1121,13 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                   <div className="reports-clusters">
                     {parsedWithJournals.clusters.map((cluster) => {
                       const open = !collapsedClusters.has(cluster.name);
+                      // 来源期刊筛选在「一行/全部」切片之前生效（「继续加载」的计数也是过滤后的）；
                       // 组内速评卡默认只渲染一行（前 3 条），点「继续加载」看全部。
+                      const remainingReviews = cluster.reviews.filter((review) => !filteredOutIds.has(review.id));
+                      const hiddenReviewCount = cluster.reviews.length - remainingReviews.length;
                       const reviewsExpanded = expandedClusterReviews.has(cluster.name);
-                      const visibleReviews = reviewsExpanded ? cluster.reviews : cluster.reviews.slice(0, 3);
-                      const hiddenReviewCount = cluster.reviews.length - visibleReviews.length;
+                      const visibleReviews = reviewsExpanded ? remainingReviews : remainingReviews.slice(0, 3);
+                      const moreCount = remainingReviews.length - visibleReviews.length;
                       return (
                         <div className={`reports-cluster${open ? " is-open" : ""}`} key={cluster.name}>
                           <button
@@ -1069,22 +1139,30 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                           >
                             <span className="reports-cluster-caret" aria-hidden="true">▶</span>
                             <span className="reports-cluster-name">{cluster.name}</span>
-                            <span className="reports-cluster-meta">{cluster.reviews.length} 条速评 · {open ? "点击收起" : "点击展开"}</span>
+                            <span className="reports-cluster-meta">
+                              {cluster.reviews.length} 条速评
+                              {hiddenReviewCount > 0 && <> · <em className="reports-cluster-hidden">已隐藏 {hiddenReviewCount} 条</em></>}
+                              {" · "}{open ? "点击收起" : "点击展开"}
+                            </span>
                           </button>
                           <div className="reports-cluster-body">
-                            <div className="reports-brief-grid">
-                              {visibleReviews.map((review) => (
-                                <BriefCard
-                                  key={review.id}
-                                  id={review.id}
-                                  article={articleMap.get(review.id) || null}
-                                  brief={briefById.get(review.id) || null}
-                                  fallbackText={review.text}
-                                  onOpen={openArticleById}
-                                />
-                              ))}
-                            </div>
-                            {hiddenReviewCount > 0 && (
+                            {remainingReviews.length > 0 ? (
+                              <div className="reports-brief-grid">
+                                {visibleReviews.map((review) => (
+                                  <BriefCard
+                                    key={review.id}
+                                    id={review.id}
+                                    article={articleMap.get(review.id) || null}
+                                    brief={briefById.get(review.id) || null}
+                                    fallbackText={review.text}
+                                    onOpen={openArticleById}
+                                  />
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="reports-filter-hint">本聚类 {cluster.reviews.length} 条速评已按「来源期刊」筛选隐藏，点信息条期刊 chip 或「全部显示」即可恢复。</p>
+                            )}
+                            {moreCount > 0 && (
                               <div className="reports-cluster-more">
                                 <button
                                   type="button"
@@ -1095,7 +1173,7 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                                     return next;
                                   })}
                                 >
-                                  继续加载全部 {cluster.reviews.length} 条速评（还有 {hiddenReviewCount} 条）
+                                  继续加载全部 {remainingReviews.length} 条速评（还有 {moreCount} 条）
                                 </button>
                               </div>
                             )}
@@ -1109,37 +1187,55 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
 
               {nonPickReviews.length > 0 && (
                 <>
-                  <h2 className="reports-sect">论文速评</h2>
-                  <div className="reports-brief-grid">
-                    {nonPickReviews.map((review) => (
-                      <BriefCard
-                        key={review.id}
-                        id={review.id}
-                        article={articleMap.get(review.id) || null}
-                        brief={briefById.get(review.id) || null}
-                        fallbackText={review.text}
-                        onOpen={openArticleById}
-                      />
-                    ))}
-                  </div>
+                  <h2 className="reports-sect">
+                    论文速评
+                    {visibleNonPick.length < nonPickReviews.length && (
+                      <span className="reports-sect-hint is-warn">已隐藏 {nonPickReviews.length - visibleNonPick.length} 篇（来源期刊筛选）</span>
+                    )}
+                  </h2>
+                  {visibleNonPick.length > 0 ? (
+                    <div className="reports-brief-grid">
+                      {visibleNonPick.map((review) => (
+                        <BriefCard
+                          key={review.id}
+                          id={review.id}
+                          article={articleMap.get(review.id) || null}
+                          brief={briefById.get(review.id) || null}
+                          fallbackText={review.text}
+                          onOpen={openArticleById}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="reports-filter-hint">本节 {nonPickReviews.length} 篇速评已按「来源期刊」筛选隐藏，点信息条期刊 chip 或「全部显示」即可恢复。</p>
+                  )}
                 </>
               )}
 
               {!isOverview && highlightIds.length > 0 && (
                 <>
-                  <h2 className="reports-sect">值得精读</h2>
-                  <div className="reports-brief-grid reports-brief-grid--wide">
-                    {highlightIds.map((id) => (
-                      <BriefCard
-                        key={id}
-                        id={id}
-                        article={articleMap.get(id) || null}
-                        brief={briefById.get(id) || null}
-                        fallbackText={pickTextById.get(id) || ""}
-                        onOpen={openArticleById}
-                      />
-                    ))}
-                  </div>
+                  <h2 className="reports-sect">
+                    值得精读
+                    {visibleHighlightIds.length < highlightIds.length && (
+                      <span className="reports-sect-hint is-warn">已隐藏 {highlightIds.length - visibleHighlightIds.length} 篇（来源期刊筛选）</span>
+                    )}
+                  </h2>
+                  {visibleHighlightIds.length > 0 ? (
+                    <div className="reports-brief-grid reports-brief-grid--wide">
+                      {visibleHighlightIds.map((id) => (
+                        <BriefCard
+                          key={id}
+                          id={id}
+                          article={articleMap.get(id) || null}
+                          brief={briefById.get(id) || null}
+                          fallbackText={pickTextById.get(id) || ""}
+                          onOpen={openArticleById}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="reports-filter-hint">本节 {highlightIds.length} 篇速评已按「来源期刊」筛选隐藏，点信息条期刊 chip 或「全部显示」即可恢复。</p>
+                  )}
                 </>
               )}
 
