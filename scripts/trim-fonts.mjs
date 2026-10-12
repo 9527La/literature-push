@@ -25,13 +25,17 @@ const CSS_PATH = join(ROOT, "src", "fonts.css");
 const FONT_DIR = join(ROOT, "public", "fonts", "noto-serif-sc");
 const PUBLIC_PREFIX = "/fonts/noto-serif-sc";
 
-const KEEP_TESTS = [
-  (cp) => cp >= 0x20 && cp <= 0x7e,      // 拉丁基本（英文标题/UI）
-  (cp) => cp >= 0xa0 && cp <= 0x24f,     // 拉丁扩展补充
-  (cp) => cp >= 0x2000 && cp <= 0x206f,  // 通用标点
-  (cp) => cp >= 0x3000 && cp <= 0x303f,  // CJK 符号与标点
-  (cp) => cp >= 0x4e00 && cp <= 0x9fff,  // CJK 统一表意文字（中文标题主体）
-  (cp) => cp >= 0xff00 && cp <= 0xffef   // 全角形式（中文标点）
+/* 安全字码区间（保留区）。注意：判定必须「按片段求交集」，不能因分片里
+   夹带了少量越界码位（如私用区图标、emoji）就把整片丢掉——Google 的 CJK
+   分片常常把常用汉字与个别图标码位放在同一片里，整片丢弃会导致
+   电/前/沿/方/分/类… 这类高频字回退到系统宋体，同词内混排（P7 回归事故）。 */
+const KEEP_ZONES = [
+  [0x20, 0x7e],      // 拉丁基本（英文标题/UI）
+  [0xa0, 0x24f],     // 拉丁扩展补充
+  [0x2000, 0x206f],  // 通用标点
+  [0x3000, 0x303f],  // CJK 符号与标点
+  [0x4e00, 0x9fff],  // CJK 统一表意文字（中文标题主体）
+  [0xff00, 0xffef]   // 全角形式（中文标点）
 ];
 
 function parseRanges(str) {
@@ -49,9 +53,35 @@ function parseRanges(str) {
     .filter(Boolean);
 }
 
-function isSafeRange([start, end]) {
-  const mid = Math.floor((start + end) / 2);
-  return KEEP_TESTS.some((test) => test(start) && test(mid) && test(end));
+/* 把某个 unicode-range 片段与保留区求交集，返回若干「安全片段」。 */
+function intersectZones([start, end]) {
+  const out = [];
+  for (const [zoneStart, zoneEnd] of KEEP_ZONES) {
+    const s = Math.max(start, zoneStart);
+    const e = Math.min(end, zoneEnd);
+    if (s <= e) out.push([s, e]);
+  }
+  return out;
+}
+
+function formatRanges(ranges) {
+  return ranges
+    .map(([a, b]) => (a === b
+      ? `U+${a.toString(16).toUpperCase()}`
+      : `U+${a.toString(16).toUpperCase()}-${b.toString(16).toUpperCase()}`))
+    .join(", ");
+}
+
+/* 合并相邻/重叠片段，避免重写后出现碎片化区间（减少 CSS 体积）。 */
+function mergeRanges(ranges) {
+  const sorted = [...ranges].sort((x, y) => x[0] - y[0]);
+  const merged = [];
+  for (const range of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && range[0] <= last[1] + 1) last[1] = Math.max(last[1], range[1]);
+    else merged.push([...range]);
+  }
+  return merged;
 }
 
 function main() {
@@ -62,18 +92,31 @@ function main() {
 
   const kept = [];
   const dropped = [];
+  let rewritten = 0;
   for (const face of faces) {
     const rangeText = (face.match(/unicode-range:([^;]+);/) || [])[1] || "";
     const ranges = parseRanges(rangeText);
-    const safe = ranges.length > 0 && ranges.every(isSafeRange);
-    (safe ? kept : dropped).push(face);
+    const safe = mergeRanges(ranges.flatMap(intersectZones));
+    if (!safe.length) {
+      dropped.push(face);
+      continue;
+    }
+    // 有越界片段：仅重写 unicode-range（保留同一 woff2，不丢常用字）
+    if (safe.length !== ranges.length) {
+      rewritten += 1;
+      kept.push(face.replace(/unicode-range:[^;]+;/, `unicode-range:${formatRanges(safe)};`));
+    } else {
+      kept.push(face);
+    }
   }
 
   const header = [
     "/* 由 scripts/fetch-fonts.mjs 生成，请勿手工编辑。",
     "   P7（2026-10-12）：经 scripts/trim-fonts.mjs 按本站实际字码裁剪——",
-    "   保留拉丁/CJK 标点/CJK 统一表意/全角，丢弃 emoji、韩文、私用区等",
-    `   ${faces.length} → ${kept.length} 条。重新执行 fetch-fonts.mjs 后需再跑一次 trim-fonts.mjs。 */`,
+    "   保留拉丁/CJK 标点/CJK 统一表意/全角，丢弃 emoji、韩文、私用区等；",
+    "   含混合码位的分片只重写 unicode-range，不整片丢弃（避免高频汉字回退）。",
+    `   ${faces.length} → ${kept.length} 条（其中 ${rewritten} 条重写 unicode-range）。`,
+    "   重新执行 fetch-fonts.mjs 后需再跑一次 trim-fonts.mjs。 */",
     ""
   ].join("\n");
   writeFileSync(CSS_PATH, header + kept.join("\n") + "\n", "utf8");

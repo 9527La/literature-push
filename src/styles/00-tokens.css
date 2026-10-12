@@ -133,10 +133,22 @@ html { scroll-behavior: smooth; }
   background: var(--text-primary);
   color: white;
   border-radius: var(--radius-md);
-  transform: translateY(-150%);
+  /* 双重隐藏：opacity 作主开关，translateY 只负责“滑入”观感。
+     translateY 的百分比只按自身高度计算，一旦外部再调 top（如多链接
+     纵向堆叠 50px/92px），单靠位移会残留可见（P8 回归事故）。
+     以 opacity 为主开关后，任何 top 变化都不会让链接提前显形。 */
+  opacity: 0;
+  transform: translateY(-120%);
+  pointer-events: none;
+  transition: opacity 0.12s ease, transform 0.12s ease;
 }
 
-.skip-link:focus { transform: translateY(0); }
+.skip-link:focus,
+.skip-link:focus-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
 
 button, input, select, textarea {
   font: inherit;

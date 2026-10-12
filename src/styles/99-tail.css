@@ -2383,7 +2383,9 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
 }
 .refresh-ledger > .refresh-ledger-list > li:last-child { border-bottom: 0; }
 
-/* ── A5：多个 skip-link 纵向堆叠（不再互相重叠） ── */
+/* ── A5：多个 skip-link 纵向堆叠（不再互相重叠）──
+   仅改 top，不参与隐藏：显隐由 00-tokens.css 的 opacity 主开关控制，
+   因此这里的堆叠位不会导致链接在未聚焦时残留可见（P8 回归修复要点）。 */
 .skip-link + .skip-link { top: 50px; }
 .skip-link + .skip-link + .skip-link { top: 92px; }
 
