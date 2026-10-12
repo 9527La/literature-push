@@ -96,6 +96,12 @@ function countByGroupName(parsed) {
   return map;
 }
 
+/** 「政策标准」组计数（兼容 2026-10-12 改名前的旧组名「政策文件」；list 元信息 {count} 与解析结果 {items} 两种形态通用）。 */
+function policyGroupCount(groups) {
+  const group = (groups || []).find((g) => g.name === "政策标准" || g.name === "政策文件");
+  return group ? (group.count ?? group.items?.length ?? 0) : 0;
+}
+
 /** 概览条目编号 → 所属分组名（sections 本身不带分组信息，靠概览回填）。 */
 function sectionGroupMap(parsed) {
   const map = new Map();
@@ -118,7 +124,7 @@ export default function DailyNewsView() {
   // 筛选/查找（需求 5 + 本轮改进）：日期再多也能定位。
   //   dateFilterOpen —— 左栏日期筛选面板，默认收起，点「筛选」展开；
   //   dateFrom/dateTo —— 日期范围（年月日自主选择，闭区间）；
-  //   category    —— 内容分类（"all" 或概览分组名：政策文件/重点新闻）；
+  //   category    —— 内容分类（"all" 或概览分组名：政策标准/重点新闻）；
   //   contentQuery —— 单日内容查找（匹配条目标题与正文，不区分大小写）。
   const [dateFilterOpen, setDateFilterOpen] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
@@ -243,13 +249,31 @@ export default function DailyNewsView() {
       />
     );
   }
-  if (list === null) return <div className="daily-loading">加载中…</div>;
+  if (list === null) {
+    // 乙-5：首载骨架（与文献库同一套 .skeleton 扫光），替代纯文字「加载中…」
+    return (
+      <div className="daily-news" aria-busy="true">
+        <aside className="daily-rail" aria-label="资讯日期列表">
+          <div className="daily-rail-head"><ScrollText size={16} /><span>每日资讯</span></div>
+          {[0, 1, 2, 3, 4].map((index) => (
+            <div className="skeleton" key={index} style={{ height: 42, margin: "6px 0" }} />
+          ))}
+        </aside>
+        <section className="daily-content">
+          <div className="skeleton" style={{ height: 24, width: "38%", marginBottom: 14 }} />
+          <div className="skeleton" style={{ height: 14, marginBottom: 8 }} />
+          <div className="skeleton" style={{ height: 14, marginBottom: 8 }} />
+          <div className="skeleton" style={{ height: 14, width: "72%" }} />
+        </section>
+      </div>
+    );
+  }
   if (!list.items.length) {
     return (
       <EmptyState
-        art="inbox"
+        art="news"
         title="还没有每日资讯"
-        description="定时任务每天 00:30 生成前一天的电力能源政策与新闻，请稍后再来。"
+        description="定时任务每天 00:30 生成前一天的政策、标准与新闻，请稍后再来。"
       />
     );
   }
@@ -314,7 +338,7 @@ export default function DailyNewsView() {
               {item.date}
             </span>
             <span className="daily-date-meta">
-              政策 {item.groups.find((g) => g.name === "政策文件")?.count ?? 0} · 新闻 {item.groups.find((g) => g.name === "重点新闻")?.count ?? 0}
+              政策标准 {policyGroupCount(item.groups)} · 新闻 {item.groups.find((g) => g.name === "重点新闻")?.count ?? 0}
             </span>
           </button>
         ))}
@@ -324,7 +348,13 @@ export default function DailyNewsView() {
         {/* A3：每视图一个 h1（sr-only，视觉不变）；日期标题从 h2 起不跳级 */}
         <h1 className="sr-only">每日资讯</h1>
         {detailLoading ? (
-          <div className="daily-loading">加载中…</div>
+          <div className="daily-detail-skeleton" aria-busy="true">
+            <div className="skeleton" style={{ height: 24, width: "40%", marginBottom: 14 }} />
+            <div className="skeleton" style={{ height: 14, marginBottom: 8 }} />
+            <div className="skeleton" style={{ height: 14, marginBottom: 8 }} />
+            <div className="skeleton" style={{ height: 14, width: "84%", marginBottom: 8 }} />
+            <div className="skeleton" style={{ height: 14, width: "62%" }} />
+          </div>
         ) : detailError ? (
           <EmptyState
             icon={ScrollText}
@@ -333,14 +363,14 @@ export default function DailyNewsView() {
             action={<button className="secondary" onClick={() => setSelectedDate(selectedDate)}>重试</button>}
           />
         ) : parsed && parsed.sections.length === 0 ? (
-          <EmptyState icon={ScrollText} title="该日暂无资讯内容" description="文件可能尚未生成完整，请稍后刷新。" />
+          <EmptyState art="news" title="该日暂无资讯内容" description="文件可能尚未生成完整，请稍后刷新。" />
         ) : parsed ? (
           <>
             <header className="daily-head">
               <h2>{parsed.title || `电力能源每日资讯 ${selectedDate}`}</h2>
               {selectedMeta && (
                 <span className="daily-head-meta">
-                  共 {selectedMeta.total} 条 · 政策 {groupCounts.get("政策文件") ?? 0} · 新闻 {groupCounts.get("重点新闻") ?? 0}
+                  共 {selectedMeta.total} 条 · 政策标准 {policyGroupCount(parsed.groups)} · 新闻 {groupCounts.get("重点新闻") ?? 0}
                 </span>
               )}
             </header>

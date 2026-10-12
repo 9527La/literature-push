@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownUp, BookOpen, CalendarDays, Check, ChevronDown, Compass, Download, Eye, EyeOff, Filter, RefreshCw, RotateCcw, Search, Star, Tag, X } from "lucide-react";
+import { ArrowDownUp, ArrowUp, BookOpen, CalendarDays, Check, ChevronDown, Compass, Download, Eye, EyeOff, Filter, RefreshCw, RotateCcw, Search, Star, Tag, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { ARTICLE_PAGE_SIZE, DEFAULT_FILTERS } from "../../lib/constants.js";
 import { downloadTextFile, toBibtex, toRis } from "../../lib/export.js";
@@ -10,6 +10,67 @@ import ArticleCard from "../../components/ArticleCard.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
 import ArticleDialog from "./ArticleDialog.jsx";
 import useCollapsedGroups from "../../hooks/useCollapsedGroups.js";
+
+/** 时间快捷区间（甲-2）：按本地时区生成 YYYY-MM-DD，与站内业务日口径一致。 */
+function dateInputValue(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+function quickRangeDates(key) {
+  const now = new Date();
+  const to = dateInputValue(now);
+  if (key === "month") {
+    return { from: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`, to };
+  }
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (key === "7" ? 6 : 29));
+  return { from: dateInputValue(start), to };
+}
+const QUICK_RANGES = [
+  { key: "7", label: "近 7 日" },
+  { key: "30", label: "近 30 日" },
+  { key: "month", label: "本月" }
+];
+
+/** 长列表浮动「回到顶部」（乙-4）：滚动超过一屏后浮现，显示文档滚动进度。 */
+function BackToTop() {
+  const [state, setState] = useState({ visible: false, progress: 0 });
+  useEffect(() => {
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const doc = document.documentElement;
+      const max = doc.scrollHeight - window.innerHeight;
+      const progress = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+      setState({ visible: window.scrollY > 480, progress });
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    update();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+  if (!state.visible) return null;
+  const percent = Math.round(state.progress * 100);
+  return (
+    <button
+      type="button"
+      className="back-to-top"
+      title={`回到顶部（已滚动 ${percent}%）`}
+      onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+    >
+      <span className="back-to-top-prog" aria-hidden="true"><span style={{ width: `${percent}%` }} /></span>
+      <ArrowUp size={13} aria-hidden="true" />
+      <span className="back-to-top-pct" aria-hidden="true">{percent}%</span>
+      回到顶部
+    </button>
+  );
+}
 
 function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filters, setFilters, markRead, toggleFavorite, displayPreferences, onDisplayPreferencesChange, onArticleUpdated, canPersonalize, canModerate = false, onLoadMore, hasMoreArticles, loadingMoreArticles, listUpdating = false, queryKey = "", notify, onRefresh = null, refreshing = false, onDataChanged = null }) {
   const [selectedArticle, setSelectedArticle] = useState(null);
@@ -486,6 +547,25 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
             onClear: () => setFilters({ ...filters, from: "", to: "" })
           })}
           <div className="filter-group-content" id="feed-filter-group-date" hidden={isFilterGroupCollapsed("date")}>
+            {/* 甲-2：快捷区间——点击回填起止日期，再点取消；与摘要条联动 */}
+            <div className="feed-date-quick" role="group" aria-label="时间快捷区间">
+              {QUICK_RANGES.map((item) => {
+                const target = quickRangeDates(item.key);
+                const active = filters.from === target.from && filters.to === target.to;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`feed-date-quick-chip${active ? " on" : ""}`}
+                    aria-pressed={active}
+                    title={active ? `取消「${item.label}」` : `${item.label}：${target.from} ~ ${target.to}`}
+                    onClick={() => setFilters({ ...filters, from: active ? "" : target.from, to: active ? "" : target.to })}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
             <input
               type="date"
               value={filters.from}
@@ -613,6 +693,68 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
         </div>
         </div>
 
+        {/* 甲-1：生效筛选摘要条——一 chip 一组，点标签打开筛选面板、点 × 单组移除 */}
+        {activeFilterCount > 0 && (
+          <div className="feed-filter-summary" role="region" aria-label="已生效的筛选条件">
+            <span className="feed-filter-summary-label">已选条件</span>
+            {filters.journal.length > 0 && (
+              <span className="feed-filter-chip">
+                <button type="button" className="feed-filter-chip-label" title={`期刊：${filters.journal.join("、")}（点击打开筛选面板）`} onClick={() => setFilterOpen(true)}>
+                  期刊 ×{filters.journal.length}
+                </button>
+                <button type="button" className="feed-filter-chip-x" aria-label="移除期刊筛选" title="移除期刊筛选" onClick={() => setFilters({ ...filters, journal: [] })}><X size={11} aria-hidden="true" /></button>
+              </span>
+            )}
+            {filters.direction.length > 0 && (
+              <span className="feed-filter-chip">
+                <button type="button" className="feed-filter-chip-label" title={`方向：${filters.direction.map(directionLabel).join("、")}（点击打开筛选面板）`} onClick={() => setFilterOpen(true)}>
+                  方向 ×{filters.direction.length}
+                </button>
+                <button type="button" className="feed-filter-chip-x" aria-label="移除方向筛选" title="移除方向筛选" onClick={() => setFilters({ ...filters, direction: [] })}><X size={11} aria-hidden="true" /></button>
+              </span>
+            )}
+            {filters.keyword.length > 0 && (
+              <span className="feed-filter-chip">
+                <button type="button" className="feed-filter-chip-label" title={`关键词：${filters.keyword.join("、")}（点击打开筛选面板）`} onClick={() => setFilterOpen(true)}>
+                  关键词 ×{filters.keyword.length}
+                </button>
+                <button type="button" className="feed-filter-chip-x" aria-label="移除关键词筛选" title="移除关键词筛选" onClick={() => setFilters({ ...filters, keyword: [] })}><X size={11} aria-hidden="true" /></button>
+              </span>
+            )}
+            {filters.q && (
+              <span className="feed-filter-chip">
+                <button type="button" className="feed-filter-chip-label" title={`搜索：${filters.q}`} onClick={() => setFilterOpen(true)}>
+                  搜索「{filters.q.length > 12 ? `${filters.q.slice(0, 12)}…` : filters.q}」
+                </button>
+                <button type="button" className="feed-filter-chip-x" aria-label="移除搜索词" title="移除搜索词" onClick={() => setFilters({ ...filters, q: "" })}><X size={11} aria-hidden="true" /></button>
+              </span>
+            )}
+            {(filters.from || filters.to) && (
+              <span className="feed-filter-chip">
+                <button type="button" className="feed-filter-chip-label" title="时间范围（点击打开筛选面板）" onClick={() => setFilterOpen(true)}>
+                  时间 {filters.from || "…"} ~ {filters.to || "…"}
+                </button>
+                <button type="button" className="feed-filter-chip-x" aria-label="移除时间筛选" title="移除时间筛选" onClick={() => setFilters({ ...filters, from: "", to: "" })}><X size={11} aria-hidden="true" /></button>
+              </span>
+            )}
+            {filters.unread && (
+              <span className="feed-filter-chip">
+                <span className="feed-filter-chip-static">仅未读</span>
+                <button type="button" className="feed-filter-chip-x" aria-label="移除仅未读筛选" title="移除仅未读筛选" onClick={() => setFilters({ ...filters, unread: false })}><X size={11} aria-hidden="true" /></button>
+              </span>
+            )}
+            {filters.favorite && (
+              <span className="feed-filter-chip">
+                <span className="feed-filter-chip-static">仅收藏</span>
+                <button type="button" className="feed-filter-chip-x" aria-label="移除仅收藏筛选" title="移除仅收藏筛选" onClick={() => setFilters({ ...filters, favorite: false })}><X size={11} aria-hidden="true" /></button>
+              </span>
+            )}
+            <button type="button" className="feed-filter-summary-clear" onClick={() => setFilters({ ...DEFAULT_FILTERS })}>
+              清除全部
+            </button>
+          </div>
+        )}
+
         {/* U5/P3：列表后台更新提示（stale-while-revalidate：旧结果驻留，不闪空） */}
         {listUpdating && (
           <p className="list-updating-pill" role="status">正在更新，显示的是上次结果</p>
@@ -696,6 +838,7 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
           {loadingMoreArticles ? "加载中…" : hasMoreArticles ? "加载下一批文献" : `继续显示下一批文献（剩余 ${sortedArticles.length - visibleCount} 篇）`}
         </button></div>}
       </section>
+      <BackToTop />
       {selectedArticle && (
         <ArticleDialog
           article={selectedArticle}

@@ -17,6 +17,8 @@ const KINDS = [
   { key: "monthly", label: "月度趋势" }
 ];
 const BAR_LIMIT = 8;
+// 期刊组 tone 实底色（与 99-tail 的 tone-* 变量一致），供分组构成微条内联着色
+const TONE_FILL = { ieee: "#3f5d93", elsevier: "#8a6238", cn: "#3d6e66", other: "#5f6773" };
 const PREVIEW_COUNT = 3; // 方向分组内预览的速评卡张数
 const VIEW_ALL_LIMIT = 100; // 「查看全部」弹窗拉取上限（与服务端列表上限一致）
 const NAME_BY_LABEL = new Map(DIRECTIONS.map((d) => [d.label, d.key]));
@@ -297,6 +299,8 @@ function InsightGrid({ insights }) {
 
 /** 方向分组手风琴（研究速览 v2 分类浏览核心）：默认全展开，组头可折叠。 */
 function DirectionGroup({ group, open, onToggle, onPreviewOpen, onViewAll }) {
+  const composition = group.composition || [];
+  const compositionTotal = composition.reduce((sum, item) => sum + item.count, 0);
   return (
     <div className={`reports-group${open ? " is-open" : ""}`} style={{ "--dir-key": directionVar(group.key) }}>
       <button type="button" className="reports-group-head" onClick={onToggle} aria-expanded={open}>
@@ -310,6 +314,17 @@ function DirectionGroup({ group, open, onToggle, onPreviewOpen, onViewAll }) {
             </span>
           )}
         </span>
+        {composition.length > 0 && compositionTotal > 0 && (
+          <span
+            className="reports-group-comp"
+            title={`来源构成：${composition.map((item) => `${item.name} ${item.count}`).join(" · ")}`}
+            aria-hidden="true"
+          >
+            {composition.map((item) => (
+              <i key={item.name} style={{ width: `${(item.count / compositionTotal) * 100}%`, background: TONE_FILL[journalGroup(item.name)] }} />
+            ))}
+          </span>
+        )}
         <span className="reports-group-topic">{group.insight?.text || ""}</span>
         <span className="reports-group-caret" aria-hidden="true">▶</span>
       </button>
@@ -621,27 +636,44 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
         ...briefs.map((brief) => ({ id: brief.id, brief, article: articleMap.get(brief.id) || null, fallbackText: "" })),
         ...legacyReviews.map((review) => ({ id: review.id, brief: null, article: articleMap.get(review.id) || null, fallbackText: review.text }))
       ];
-      return { ...chip, label, report, insight, previewItems };
+      // 甲-4：来源构成——按该方向全部 briefs 的期刊聚合（articleMap 已由 refIds 分批拉全）
+      const compositionCounts = new Map();
+      for (const brief of report?.stats?.paperBriefs || []) {
+        const name = String(articleMap.get(brief.id)?.journal || "").trim();
+        if (!name) continue;
+        compositionCounts.set(name, (compositionCounts.get(name) || 0) + 1);
+      }
+      const composition = [...compositionCounts.entries()]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+      return { ...chip, label, report, insight, previewItems, composition };
     });
   }, [activeDirection, visibleChips, periodDetails, parsed, articleMap]);
 
-  // 当前报告引用的全部文献 id（精选 + 速评 + 聚类 + 分组预览）→ 一次批量取元数据
+  // 当前报告引用的全部文献 id（精选 + 速评 + 聚类 + 分组预览 + 分组全部 briefs，
+  // 后者供总览「来源构成」微条聚合）→ 分批批量取元数据；上限 300 兜底。
   const refIds = useMemo(() => {
     const ids = new Set(current?.stats?.highlightIds || []);
     for (const review of parsed.reviews) ids.add(review.id);
     for (const cluster of parsed.clusters) for (const review of cluster.reviews) ids.add(review.id);
     for (const group of groups) {
       for (const item of group.previewItems) ids.add(item.id);
+      for (const brief of group.report?.stats?.paperBriefs || []) ids.add(brief.id);
     }
-    return [...ids].filter((id) => Number.isInteger(id) && id > 0).slice(0, 100);
+    return [...ids].filter((id) => Number.isInteger(id) && id > 0).slice(0, 300);
   }, [current, parsed, groups]);
 
   useEffect(() => {
     if (!refIds.length) { setArticleMap(new Map()); return undefined; }
     let cancelled = false;
-    api.get(`/api/articles?ids=${refIds.join(",")}&limit=100`).then((data) => {
+    // 分批（每批 ≤100，与服务端上限一致）；总览分组构成需要全量 briefs 的期刊
+    const chunks = [];
+    for (let index = 0; index < refIds.length; index += 100) chunks.push(refIds.slice(index, index + 100));
+    Promise.all(chunks.map((ids) => api.get(`/api/articles?ids=${ids.join(",")}&limit=100`))).then((results) => {
       if (cancelled) return;
-      setArticleMap(new Map((data.articles || []).map((article) => [article.id, article])));
+      const map = new Map();
+      for (const data of results) for (const article of data.articles || []) map.set(article.id, article);
+      setArticleMap(map);
     }).catch(() => {
       if (!cancelled) setArticleMap(new Map());
     });
@@ -862,7 +894,7 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
       ) : !periods.length ? (
         <EmptyState
           icon={CalendarRange}
-          art="inbox"
+          art="reports"
           title="AI 速览生成中"
           description="第一份速览将在每周日晚由 AI 作业生成并自动入库，届时无需刷新即可查看。"
         />
@@ -989,6 +1021,7 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
           ) : !current ? (
             <EmptyState
               icon={CalendarRange}
+              art="reports"
               title={`${activeDirection ? directionLabel(activeDirection) : "该期"}暂无报告`}
               description={activeDirection
                 ? "该方向本期未生成专报，可切回「总览」按方向分组浏览全部文献。"

@@ -41,6 +41,40 @@ const ART = {
       <line x1="76" y1="74" x2="76" y2="54" stroke="#85b7eb" strokeWidth="4" strokeLinecap="round" />
       <line x1="34" y1="74" x2="82" y2="74" stroke="#378add" strokeWidth="1.6" strokeLinecap="round" />
     </g>
+  ),
+  /* Nothing saved yet: a star waiting to be filed, next to a bookmark. */
+  favorites: (
+    <g>
+      <path d="M60 26l7.2 14.6 16.1 2.3-11.7 11.4 2.8 16.1L60 63.2 45.6 70.4l2.8-16.1L36.7 42.9l16.1-2.3z" fill="#ffffff" stroke="#378add" strokeWidth="1.6" strokeLinejoin="round" />
+      <path d="M84 30v14l-4-3.4-4 3.4V30" fill="none" stroke="#85b7eb" strokeWidth="1.6" strokeLinejoin="round" />
+    </g>
+  ),
+  /* No report yet: a calendar with a spark, waiting for the weekly run. */
+  reports: (
+    <g>
+      <rect x="38" y="26" width="44" height="48" rx="5" fill="#ffffff" stroke="#378add" strokeWidth="1.6" />
+      <line x1="38" y1="38" x2="82" y2="38" stroke="#378add" strokeWidth="1.6" />
+      <line x1="48" y1="22" x2="48" y2="31" stroke="#378add" strokeWidth="1.6" strokeLinecap="round" />
+      <line x1="72" y1="22" x2="72" y2="31" stroke="#378add" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="50" cy="49" r="2.2" fill="#85b7eb" />
+      <circle cx="60" cy="49" r="2.2" fill="#85b7eb" />
+      <circle cx="70" cy="49" r="2.2" fill="#c3d6f4" />
+      <circle cx="50" cy="59" r="2.2" fill="#85b7eb" />
+      <circle cx="60" cy="59" r="2.2" fill="#c3d6f4" />
+      <circle cx="70" cy="59" r="2.2" fill="#c3d6f4" />
+      <path d="M84 60l2 4.4 4.4 2-4.4 2-2 4.4-2-4.4-4.4-2 4.4-2z" fill="#ffffff" stroke="#378add" strokeWidth="1.4" strokeLinejoin="round" />
+    </g>
+  ),
+  /* No daily brief yet: a newspaper page with lines of copy. */
+  news: (
+    <g>
+      <rect x="44" y="22" width="38" height="50" rx="4" fill="#ffffff" stroke="#85b7eb" strokeWidth="1.4" />
+      <rect x="34" y="28" width="42" height="50" rx="4" fill="#ffffff" stroke="#378add" strokeWidth="1.6" />
+      <line x1="42" y1="40" x2="62" y2="40" stroke="#378add" strokeWidth="2.2" strokeLinecap="round" />
+      <line x1="42" y1="50" x2="68" y2="50" stroke="#85b7eb" strokeWidth="1.6" />
+      <line x1="42" y1="58" x2="68" y2="58" stroke="#85b7eb" strokeWidth="1.6" />
+      <line x1="42" y1="66" x2="58" y2="66" stroke="#85b7eb" strokeWidth="1.6" />
+    </g>
   )
 };
 

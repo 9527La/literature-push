@@ -245,7 +245,6 @@ export default function TopNav({
                 onClick={() => switchView("feed")}
                 icon={Library}
                 label="文献库"
-                badge={status?.unreadCount}
                 prefetch={false}
               />
               <div

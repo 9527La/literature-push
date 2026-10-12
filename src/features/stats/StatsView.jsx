@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { BarChart3, Check, Cloud, Compass, Filter, Globe, Network, Search, Star, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BarChart3, Check, Cloud, Compass, Filter, Globe, Network, RefreshCw, Search, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { articleDate, formatDate, isChineseJournalArticle } from "../../lib/format.js";
 import { directionVar } from "../../lib/directions.js";
@@ -7,6 +7,31 @@ import ArticleDialog from "../feed/ArticleDialog.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
 import WordCloud from "./WordCloud.jsx";
 import CooccurrenceView from "./CooccurrenceView.jsx";
+
+/** 数字滚动（乙-1）：约 0.9s 逐帧写入 textContent；尊重系统「减少动态效果」偏好直接落终值。 */
+function CountUp({ value, replayKey = 0 }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return undefined;
+    const target = Number(value) || 0;
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      node.textContent = target.toLocaleString("zh-CN");
+      return undefined;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now) => {
+      const progress = Math.min(1, (now - start) / 900);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      node.textContent = Math.round(target * eased).toLocaleString("zh-CN");
+      if (progress < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, replayKey]);
+  return <span ref={ref}>{(Number(value) || 0).toLocaleString("zh-CN")}</span>;
+}
 
 const DIRECTION_WINDOWS = [
   { key: "7", label: "近 7 日" },
@@ -31,6 +56,9 @@ function StatsView({ journals, markRead, toggleFavorite }) {
   const [cooccurrenceData, setCooccurrenceData] = useState(null);
   const [directionStats, setDirectionStats] = useState(null);
   const [directionWindow, setDirectionWindow] = useState("30");
+  // 乙-1：入场动效批次键（统计成功 + 「重播动画」都会自增，触发重挂载重播）
+  const [animKey, setAnimKey] = useState(0);
+  const [directionLoading, setDirectionLoading] = useState(true);
 
   async function fetchStats() {
     setLoading(true);
@@ -42,6 +70,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
       if (filters.to) params.set("to", filters.to);
       const result = await api.get(`/api/keyword-stats?${params}`);
       setStats(result);
+      setAnimKey((key) => key + 1);
       
       const coResult = await api.get(`/api/keyword-cooccurrence?${params}`);
       setCooccurrenceData(coResult);
@@ -76,9 +105,13 @@ function StatsView({ journals, markRead, toggleFavorite }) {
 
   useEffect(() => {
     // 方向统计独立于关键词统计的筛选条件（全站口径），失败时整块隐藏。
+    let active = true;
+    setDirectionLoading(true);
     api.getDirectionStats({ window: directionWindow, matrix: true })
-      .then(setDirectionStats)
-      .catch(() => setDirectionStats(null));
+      .then((data) => { if (active) setDirectionStats(data); })
+      .catch(() => { if (active) setDirectionStats(null); })
+      .finally(() => { if (active) setDirectionLoading(false); });
+    return () => { active = false; };
   }, [directionWindow]);
 
   const directionMax = useMemo(() => {
@@ -129,11 +162,25 @@ function StatsView({ journals, markRead, toggleFavorite }) {
         </button>
       </section>
 
+      {!stats && loading && (
+        <div className="stats-skeleton" aria-hidden="true">
+          <div className="skeleton" style={{ height: 16, width: "42%", marginBottom: 14 }} />
+          <div className="skeleton" style={{ height: 40, marginBottom: 10 }} />
+          <div className="skeleton" style={{ height: 40, marginBottom: 10 }} />
+          <div className="skeleton" style={{ height: 40 }} />
+        </div>
+      )}
+
       {stats && (
         <>
           <div className="stats-summary" role="status" aria-live="polite">
-            共 <strong>{stats.totalArticles}</strong> 篇文献，提取出 <strong>{stats.keywords.length}</strong> 个不重复关键词
-            {keywordSearch && <>，匹配 <strong>{filteredKeywords.length}</strong> 个</>}
+            <span className="stats-summary-text">
+              共 <strong><CountUp value={stats.totalArticles} replayKey={animKey} /></strong> 篇文献，提取出 <strong><CountUp value={stats.keywords.length} replayKey={animKey} /></strong> 个不重复关键词
+              {keywordSearch && <>，匹配 <strong>{filteredKeywords.length}</strong> 个</>}
+            </span>
+            <button type="button" className="stats-replay" title="重播数据入场动画（仅视觉，不刷新数据）" onClick={() => setAnimKey((key) => key + 1)}>
+              <RefreshCw size={12} aria-hidden="true" /> 重播动画
+            </button>
           </div>
 
           <div className="stats-view-toggle" role="group" aria-label="统计视图切换">
@@ -257,6 +304,14 @@ function StatsView({ journals, markRead, toggleFavorite }) {
             )}
           </div>
 
+          {directionLoading && !directionStats && (
+            <div className="stats-skeleton" aria-hidden="true">
+              <div className="skeleton" style={{ height: 16, width: "30%", marginBottom: 12 }} />
+              <div className="skeleton" style={{ height: 14, marginBottom: 8 }} />
+              <div className="skeleton" style={{ height: 14, marginBottom: 8 }} />
+              <div className="skeleton" style={{ height: 14, width: "70%" }} />
+            </div>
+          )}
           {directionStats && (
             <section className="direction-stats-panel" aria-label="研究方向分布">
               <div className="direction-stats-head">
@@ -278,14 +333,14 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                 已分类 <strong>{directionStats.coverage.classified}</strong> / {directionStats.coverage.total} 篇
                 {directionStats.coverage.pendingReview > 0 && <>，待复核 <strong>{directionStats.coverage.pendingReview}</strong> 篇</>}
               </p>
-              <div className="direction-bars">
+              <div className="direction-bars" key={`bars-${directionWindow}-${animKey}`}>
                 {directionStats.directions
                   .filter((d) => (directionWindow === "365" ? d.total : d.lastN) > 0)
                   .sort((a, b) => (directionWindow === "365" ? b.total - a.total : b.lastN - a.lastN))
-                  .map((d) => {
+                  .map((d, index) => {
                     const count = directionWindow === "365" ? d.total : d.lastN;
                     return (
-                      <div className="direction-bar-row" key={d.key}>
+                      <div className="direction-bar-row" key={d.key} style={{ "--i": index }}>
                         <span className="direction-bar-label">{d.label}</span>
                         <div className="direction-bar-track">
                           <div
@@ -302,7 +357,7 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                   })}
               </div>
               {directionStats.matrix && (
-                <table className="direction-matrix">
+                <table className="direction-matrix" key={`matrix-${directionWindow}-${animKey}`}>
                   <thead>
                     <tr>
                       <th scope="col">方向</th>
@@ -310,12 +365,12 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {directionStats.directions.map((d) => {
+                    {directionStats.directions.map((d, index) => {
                       const cells = MATRIX_GROUPS.map((group) => directionStats.matrix[d.key]?.[group.key] || 0);
                       const rowMax = Math.max(1, ...cells);
                       if (cells.every((n) => n === 0)) return null;
                       return (
-                        <tr key={d.key}>
+                        <tr key={d.key} style={{ "--i": index }}>
                           <th scope="row">
                             <span className="direction-dot" style={{ "--dir-key": directionVar(d.key) }} aria-hidden="true" />
                             {d.label}
