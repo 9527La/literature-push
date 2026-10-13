@@ -46,6 +46,10 @@ function parseHash(hash) {
   return { view, params: new URLSearchParams(query) };
 }
 
+// 文献库筛选参数白名单：hash 回写时只认这些键，其余参数（如卡片阅读的 reader=1）
+// 原样保留 —— 保证 #feed?reader=1 这类分享/书签链接在启动与导航中不被抹掉。
+const FILTER_PARAM_KEYS = new Set(["journal", "direction", "keyword", "q", "unread", "read", "favorite", "from", "to", "sort"]);
+
 function filtersFromParams(params) {
   const next = { ...DEFAULT_FILTERS };
   if (params.has("journal")) next.journal = params.get("journal").split(",").filter(Boolean);
@@ -166,8 +170,16 @@ function App() {
   // than replaceState) is what makes the browser Back button return to the
   // previous view instead of leaving the site.
   useEffect(() => {
-    const suffix = activeView === "feed" && debouncedQuery ? `?${debouncedQuery}` : "";
-    const next = `#${activeView}${suffix}`;
+    let next = `#${activeView}`;
+    if (activeView === "feed") {
+      const params = new URLSearchParams(debouncedQuery || "");
+      const currentQuery = String(window.location.hash || "").split("?")[1] || "";
+      for (const [key, value] of new URLSearchParams(currentQuery)) {
+        if (!params.has(key) && !FILTER_PARAM_KEYS.has(key)) params.set(key, value);
+      }
+      const text = params.toString();
+      if (text) next += `?${text}`;
+    }
     if (window.location.hash === next) return;
     window.history.pushState(null, "", next);
   }, [activeView, debouncedQuery]);

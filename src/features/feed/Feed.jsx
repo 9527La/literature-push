@@ -86,12 +86,27 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
   const [filterOpen, setFilterOpen] = useState(false);
   // 文献库双子模块（2026-10-13）：文献总览 / 卡片阅读（范围选择 → 目录 → 全屏卡片阅读）
   const [feedMode, setFeedMode] = useState(() => {
+    // 分享/书签直达：#feed?reader=1 优先于本地记忆
+    try {
+      const query = String(window.location.hash || "").split("?")[1] || "";
+      if (new URLSearchParams(query).get("reader") === "1") return "reader";
+    } catch { /* 忽略 */ }
     try { return localStorage.getItem("feedMode") === "reader" ? "reader" : "overview"; } catch { return "overview"; }
   });
   const [readerSession, setReaderSession] = useState(null);
   function switchFeedMode(mode) {
     setFeedMode(mode);
     try { localStorage.setItem("feedMode", mode); } catch { /* 忽略隐私模式写入失败 */ }
+    // 同步进 hash（保留既有筛选参数）→ #feed?reader=1 可书签/分享；用 replaceState 不产生历史条目
+    try {
+      const [path, query = ""] = String(window.location.hash || "#feed").split("?");
+      const params = new URLSearchParams(query);
+      if (mode === "reader") params.set("reader", "1");
+      else params.delete("reader");
+      const queryText = params.toString();
+      const next = `${path || "#feed"}${queryText ? `?${queryText}` : ""}`;
+      if (window.location.hash !== next) window.history.replaceState(null, "", next);
+    } catch { /* 忽略 */ }
   }
   // 折叠分组状态（S4：与期刊小节、研究速览分组共用同一 hook）
   const { isCollapsed: isFilterGroupCollapsed, toggle: toggleFilterGroup } = useCollapsedGroups({
