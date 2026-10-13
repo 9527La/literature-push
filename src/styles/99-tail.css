@@ -2622,10 +2622,14 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
    保持原宽度。 */
 .favorites-view:has(.favorites-layout) { max-width: none; }
 
-/* 收藏工具条：时间范围 / 阅读状态 chips（2026-10-13 需求；单选/可取消，与期刊·方向筛选同层联动） */
-.favorites-tools-chip { display: inline-flex; align-items: center; border: 1px solid var(--border-color); background: var(--surface); color: var(--text-secondary); border-radius: 999px; padding: 2px 12px; font-size: 12px; font-family: inherit; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
-.favorites-tools-chip:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
-.favorites-tools-chip.on { background: var(--accent-light); border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-color)); color: var(--accent-primary); font-weight: 600; }
+/* 文献库工具栏：时间范围 / 阅读状态快捷筛选（2026-10-13 需求；与筛选面板共用同一批 filter 状态，
+   选中态沿用面板快捷区间的实底蓝胶囊）。 */
+.feed-toolbar { flex-wrap: wrap; }
+.feed-quick-group { display: inline-flex; align-items: center; gap: 7px; flex: none; }
+.feed-quick-label { margin-right: 4px; font-size: 12px; font-weight: 700; color: var(--text-tertiary); }
+.feed-quick-chip { border: 1px solid var(--border-color); background: var(--surface); color: var(--text-secondary); border-radius: 999px; padding: 2px 12px; font-size: 12px; font-family: inherit; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
+.feed-quick-chip:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+.feed-quick-chip.on { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; font-weight: 600; }
 
 /* ── 2026-10-13 需求：全站画幅适配（第二批）——账户 / 反馈 / 管理中心放开 + 页头对齐 ──
    全站审计（10 视图 × 1180/1280/1440/1920/2560）结论：文献库 / 速览 / 统计 / 资讯 /

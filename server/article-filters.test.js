@@ -83,8 +83,11 @@ test("feed filters cover every dimension end to end", async () => {
     if (totals({ favorite: "true" }, userId) !== 1) fail(41, "favorite only");
     const favDir = page({ favorite: "true" }, userId).articles[0].research_direction;
     if (favDir !== "market") fail(42, "favorite row is market");
-    // 未登录：unread/favorite 被忽略且不报错
+    // 仅已读（2026-10-13）：与 unread 互补，5 篇中恰有 1 篇已读
+    if (totals({ read: "true" }, userId) !== 1) fail(44, "read only, got " + totals({ read: "true" }, userId));
+    // 未登录：unread/favorite/read 被忽略且不报错
     if (totals({ unread: "true" }) !== 5) fail(43, "guest unread ignored");
+    if (totals({ read: "true" }) !== 5) fail(45, "guest read ignored");
 
     // 组合筛选：q + direction + journal + from/to
     const combo = page({ q: "battery", direction: "storage", journal: "Applied Energy", from: ymd(2), to: ymd(0), sort: "desc", limit: "10", offset: "0" });

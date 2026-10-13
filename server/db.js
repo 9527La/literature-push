@@ -729,6 +729,11 @@ function buildArticleListQuery(filters = {}, userId) {
       clauses.push("NOT EXISTS (SELECT 1 FROM user_interactions ui WHERE ui.user_id = @userId AND ui.article_id = a.id AND ui.is_read = 1)");
       params.userId = userId;
     }
+    // 仅已读（2026-10-13）：与 unread 镜像，按用户阅读记录过滤
+    if (filters.read === "true") {
+      clauses.push("EXISTS (SELECT 1 FROM user_interactions ui WHERE ui.user_id = @userId AND ui.article_id = a.id AND ui.is_read = 1)");
+      params.userId = userId;
+    }
     if (filters.favorite === "true") {
       clauses.push("EXISTS (SELECT 1 FROM user_interactions ui WHERE ui.user_id = @userId AND ui.article_id = a.id AND ui.is_favorite = 1)");
       params.userId = userId;

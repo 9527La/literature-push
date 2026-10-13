@@ -32,6 +32,12 @@ const QUICK_RANGES = [
   { key: "30", label: "近 30 日" },
   { key: "month", label: "本月" }
 ];
+/** 阅读状态（2026-10-13）：全部 / 未读 / 已读——前者清空 unread+read，后两者互斥。 */
+const READ_STATES = [
+  { key: "all", label: "全部" },
+  { key: "unread", label: "未读" },
+  { key: "read", label: "已读" }
+];
 
 /** 长列表浮动「回到顶部」（乙-4）：滚动超过一屏后浮现，显示文档滚动进度。 */
 function BackToTop() {
@@ -387,7 +393,7 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
 
   const activeFilterCount = filters.journal.length + filters.direction.length + filters.keyword.length
     + (filters.q ? 1 : 0) + (filters.from ? 1 : 0) + (filters.to ? 1 : 0)
-    + (filters.unread ? 1 : 0) + (filters.favorite ? 1 : 0);
+    + (filters.unread ? 1 : 0) + (filters.read ? 1 : 0) + (filters.favorite ? 1 : 0);
 
   return (
     <div className={`content-layout ${filterOpen ? "filters-open" : "filters-closed"}`}>
@@ -664,6 +670,46 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
               {activeFilterCount > 0 && <span className="filter-count-badge">{activeFilterCount}</span>}
             </button>
           </div>
+        {/* 2026-10-13：工具栏快捷筛选——时间范围（与面板快捷区间同源）与阅读状态（按用户） */}
+        <div className="feed-quick-group" role="group" aria-label="时间范围">
+          <span className="feed-quick-label">时间范围</span>
+          {QUICK_RANGES.map((item) => {
+            const target = quickRangeDates(item.key);
+            const active = filters.from === target.from && filters.to === target.to;
+            return (
+              <button
+                key={`toolbar-${item.key}`}
+                type="button"
+                className={`feed-quick-chip${active ? " on" : ""}`}
+                aria-pressed={active}
+                title={active ? `取消「${item.label}」` : `${item.label}：${target.from} ~ ${target.to}`}
+                onClick={() => setFilters({ ...filters, from: active ? "" : target.from, to: active ? "" : target.to })}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+        <div className="feed-quick-group" role="group" aria-label="阅读状态">
+          <span className="feed-quick-label">阅读状态</span>
+          {READ_STATES.map((item) => {
+            const active = item.key === "all"
+              ? !filters.unread && !filters.read
+              : (item.key === "unread" ? Boolean(filters.unread) : Boolean(filters.read));
+            return (
+              <button
+                key={`toolbar-${item.key}`}
+                type="button"
+                className={`feed-quick-chip${active ? " on" : ""}`}
+                aria-pressed={active}
+                title={item.key === "all" ? "显示全部阅读状态" : `只看${item.label}的文献`}
+                onClick={() => setFilters({ ...filters, unread: item.key === "unread", read: item.key === "read" })}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
         <div className="display-toggles">
           <span className="display-toggles-label">显示内容</span>
           {/* A4：显示开关统一 aria-pressed + 动态 aria-label，屏幕阅读器可播报开关态 */}
@@ -741,6 +787,12 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
               <span className="feed-filter-chip">
                 <span className="feed-filter-chip-static">仅未读</span>
                 <button type="button" className="feed-filter-chip-x" aria-label="移除仅未读筛选" title="移除仅未读筛选" onClick={() => setFilters({ ...filters, unread: false })}><X size={11} aria-hidden="true" /></button>
+              </span>
+            )}
+            {filters.read && (
+              <span className="feed-filter-chip">
+                <span className="feed-filter-chip-static">仅已读</span>
+                <button type="button" className="feed-filter-chip-x" aria-label="移除仅已读筛选" title="移除仅已读筛选" onClick={() => setFilters({ ...filters, read: false })}><X size={11} aria-hidden="true" /></button>
               </span>
             )}
             {filters.favorite && (

@@ -53,6 +53,7 @@ function filtersFromParams(params) {
   if (params.has("keyword")) next.keyword = params.get("keyword").split(",").filter(Boolean);
   if (params.has("q")) next.q = params.get("q");
   if (params.has("unread")) next.unread = params.get("unread") === "true";
+  if (params.has("read")) next.read = params.get("read") === "true";
   if (params.has("favorite")) next.favorite = params.get("favorite") === "true";
   if (params.has("from")) next.from = params.get("from");
   if (params.has("to")) next.to = params.get("to");

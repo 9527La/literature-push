@@ -92,6 +92,26 @@ try {
   await page.waitForTimeout(300);
   check(await page.locator(".feed-filter-summary").count() === 0, "清除全部后摘要条隐藏");
   check(await page.locator(".feed-date-quick-chip.on").count() === 0, "清除后快捷 chip 取消选中");
+
+  // ②b 工具栏快捷筛选（时间范围 / 阅读状态，2026-10-13；与面板共用同一批 filter 状态）
+  const tbTime = page.locator(".feed-quick-group[aria-label='时间范围'] .feed-quick-chip");
+  const tbRead = page.locator(".feed-quick-group[aria-label='阅读状态'] .feed-quick-chip");
+  check((await tbTime.count()) === 3 && (await tbRead.count()) === 3, "工具栏时间/阅读 chips 渲染", `${await tbTime.count()}+${await tbRead.count()}`);
+  const tbMonth = page.locator(".feed-quick-group[aria-label='时间范围'] .feed-quick-chip:has-text('本月')");
+  await tbMonth.click();
+  await page.waitForTimeout(700);
+  check((await tbMonth.getAttribute("aria-pressed")) === "true" && (await page.locator(".feed-date-quick-chip.on").count()) === 1, "工具栏「本月」回填（面板同步选中）");
+  await tbMonth.click();
+  await page.waitForTimeout(500);
+  check((await tbMonth.getAttribute("aria-pressed")) === "false", "再点取消「本月」");
+  const tbUnread = page.locator(".feed-quick-group[aria-label='阅读状态'] .feed-quick-chip:has-text('未读')");
+  await tbUnread.click();
+  await page.waitForTimeout(500);
+  check((await tbUnread.getAttribute("aria-pressed")) === "true", "未读 chip 进入选中态");
+  await page.locator(".feed-quick-group[aria-label='阅读状态'] .feed-quick-chip:has-text('全部')").click();
+  await page.waitForTimeout(500);
+  check((await tbUnread.getAttribute("aria-pressed")) === "false", "「全部」复位未读");
+
   await page.click("button.filter-toggle"); // 收起面板
   await page.waitForTimeout(300);
 
@@ -185,31 +205,6 @@ try {
     await page.waitForTimeout(400);
     check(await page.locator(".favorite-card").count() === favTotal && await page.locator(".fav-jchip.on").count() === 0, "再点恢复全量");
 
-    // 时间范围 + 阅读状态筛选（2026-10-13 新增）
-    const timeChips = await page.locator(".favorites-tools-row:has-text('时间范围') .favorites-tools-chip").count();
-    const readChips = await page.locator(".favorites-tools-row:has-text('阅读状态') .favorites-tools-chip").count();
-    check(timeChips === 3, "时间范围 chips（近7日/近30日/本月）", `${timeChips} 枚`);
-    check(readChips === 3, "阅读状态 chips（全部/未读/已读）", `${readChips} 枚`);
-    const readRow = ".favorites-tools-row:has-text('阅读状态')";
-    const timeRow = ".favorites-tools-row:has-text('时间范围')";
-    await page.locator(`${readRow} .favorites-tools-chip:has-text('已读')`).click();
-    await page.waitForTimeout(400);
-    check(await page.locator(".favorite-card").count() === 0, "已读筛选：刚收藏均为未读 → 0 篇");
-    await page.locator(`${readRow} .favorites-tools-chip:has-text('未读')`).click();
-    await page.waitForTimeout(400);
-    check(await page.locator(".favorite-card").count() === favTotal, "未读筛选恢复全量", `${favTotal} 篇`);
-    await page.locator(`${readRow} .favorites-tools-chip:has-text('全部')`).click();
-    await page.waitForTimeout(300);
-    const rangeChip = page.locator(`${timeRow} .favorites-tools-chip:has-text('近 30 日')`);
-    await rangeChip.click();
-    await page.waitForTimeout(400);
-    check((await rangeChip.getAttribute("aria-pressed")) === "true", "近 30 日 chip 进入选中态");
-    const timeVisible = await page.locator(".favorite-card").count();
-    check(timeVisible <= favTotal, "近 30 日筛选 ≤ 全量", `${timeVisible} ≤ ${favTotal}`);
-    await rangeChip.click();
-    await page.waitForTimeout(400);
-    check((await rangeChip.getAttribute("aria-pressed")) === "false" && await page.locator(".favorite-card").count() === favTotal, "取消时间筛选：chip 复位且恢复全量");
-
     // 备注折叠 → 展开 → 保存 → 收回归档
     const noteStamp = `探针备注-${Date.now().toString().slice(-5)}`;
     await page.screenshot({ path: `${shotDir}/3-favorites-tools.png` });
@@ -222,6 +217,19 @@ try {
     const preview = await page.locator(".favorite-note-text").first().innerText();
     const collapsed = await page.locator(".favorite-note-edit").count();
     check(preview.includes(noteStamp) && collapsed === 0, "保存后备注收回单行预览", preview.trim());
+
+    // ④b 工具栏阅读状态筛选（登录态 e2e：服务端按用户过滤）
+    await page.evaluate(() => { location.hash = "#feed"; });
+    await page.waitForSelector(".article, .empty", { timeout: 20000 });
+    await page.waitForTimeout(1200);
+    await page.locator(".feed-quick-group[aria-label='阅读状态'] .feed-quick-chip:has-text('已读')").click();
+    await page.waitForTimeout(1100);
+    check((await page.locator(".article").count()) === 0, "已读筛选（新账户无已读）→ 列表为空");
+    await page.locator(".feed-quick-group[aria-label='阅读状态'] .feed-quick-chip:has-text('未读')").click();
+    await page.waitForTimeout(1100);
+    check((await page.locator(".article").count()) > 0, "未读筛选 → 列表恢复");
+    await page.locator(".feed-quick-group[aria-label='阅读状态'] .feed-quick-chip:has-text('全部')").click();
+    await page.waitForTimeout(900);
   } else {
     console.log("SKIP 账户段落（--skip-account）");
   }
