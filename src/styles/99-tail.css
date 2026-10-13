@@ -2622,14 +2622,15 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
    保持原宽度。 */
 .favorites-view:has(.favorites-layout) { max-width: none; }
 
-/* 文献库工具栏：时间范围 / 阅读状态快捷筛选（2026-10-13 需求；与筛选面板共用同一批 filter 状态，
-   选中态沿用面板快捷区间的实底蓝胶囊）。 */
+/* 文献库工具栏：时间范围 / 阅读状态快捷筛选（2026-10-13 需求；与筛选面板共用同一批 filter 状态）
+   视觉与右侧「显示内容」盒完全一致：白底圆角容器的等尺寸胶囊 chip，选中实底蓝。
+   （尺寸/描边/悬停/选中值逐项对齐 .display-toggles / .display-toggle 的生效样式。） */
 .feed-toolbar { flex-wrap: wrap; }
-.feed-quick-group { display: inline-flex; align-items: center; gap: 7px; flex: none; }
-.feed-quick-label { margin-right: 4px; font-size: 12px; font-weight: 700; color: var(--text-tertiary); }
-.feed-quick-chip { border: 1px solid var(--border-color); background: var(--surface); color: var(--text-secondary); border-radius: 999px; padding: 2px 12px; font-size: 12px; font-family: inherit; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
-.feed-quick-chip:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
-.feed-quick-chip.on { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; font-weight: 600; }
+.feed-quick-group { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--surface-raised); border: 1px solid var(--border-color); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); min-width: 0; flex: none; }
+.feed-quick-label { flex: 0 0 auto; margin-right: 4px; font-size: 12px; font-weight: 700; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; }
+.feed-quick-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 13px; background: transparent; border: 1px solid rgba(26, 26, 46, 0.08); border-radius: var(--radius-full); font-size: 13px; font-weight: 600; color: var(--text-secondary); cursor: pointer; transition: var(--t-interactive); flex: 0 0 auto; font-family: inherit; }
+.feed-quick-chip:hover { background: rgba(255, 255, 255, 0.6); border-color: rgba(13, 148, 136, 0.25); }
+.feed-quick-chip.on { background: var(--accent-primary); border-color: var(--accent-primary); color: #ffffff; }
 
 /* ── 2026-10-13 需求：全站画幅适配（第二批）——账户 / 反馈 / 管理中心放开 + 页头对齐 ──
    全站审计（10 视图 × 1180/1280/1440/1920/2560）结论：文献库 / 速览 / 统计 / 资讯 /
