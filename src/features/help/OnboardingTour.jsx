@@ -164,7 +164,8 @@ const STEPS = [
     body: "顶部显示「第 N / M 条」，进度条可点击或拖动跳转；默认开启「读即标记」——翻过去就自动标记已读。",
     hint: "请点「下一条」，或直接按键盘 → / 空格。",
     enter: () => readerIndex(),
-    advance: (baseline) => readerIndex() > (baseline || 0)
+    // 只有 1 篇（下一条禁用）时无页可翻 → 自动继续，避免卡住
+    advance: (baseline) => readerIndex() > (baseline || 0) || !document.querySelector(".cr-nav--primary:not([disabled])")
   },
   {
     key: "reader-view",
