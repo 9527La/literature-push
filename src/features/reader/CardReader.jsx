@@ -531,8 +531,11 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
     }
   }
 
+  // 摘要类卡片横向放宽（2026-10-13 用户需求：尽量少上下滑动）；抽屉打开时舞台自动避让
+  const cardWide = view !== "brief";
+
   return (
-    <div className="card-reader" role="dialog" aria-modal="true" aria-label="卡片阅读模式">
+    <div className={`card-reader${drawerOpen ? " is-drawer" : ""}`} role="dialog" aria-modal="true" aria-label="卡片阅读模式">
       <header className="cr-head">
         <div className="cr-head-left">
           <span className="cr-brand">卡片阅读</span>
@@ -585,9 +588,9 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
 
       <main className="cr-stage">
         {loading || !article ? (
-          <div className={`cr-card cr-card--loading tone-${tone}`}><p className="cr-loading">{order.length ? "正在加载文献…" : "此范围内没有可阅读的文献。"}</p></div>
+          <div className={`cr-card cr-card--loading${cardWide ? " cr-card--wide" : ""} tone-${tone}`}><p className="cr-loading">{order.length ? "正在加载文献…" : "此范围内没有可阅读的文献。"}</p></div>
         ) : (
-          <article className={`cr-card tone-${tone}`} ref={cardRef} aria-live="polite">
+          <article className={`cr-card${cardWide ? " cr-card--wide" : ""} tone-${tone}`} ref={cardRef} aria-live="polite">
             <div className="cr-card-head">
               <span className="cr-mark">{journalAbbr(article.journal)}</span>
               <span className="cr-journal" title={article.journal || ""}>{article.journal || "未知期刊"}</span>

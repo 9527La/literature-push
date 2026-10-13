@@ -2657,14 +2657,24 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
 .cr-bar i { display: block; height: 100%; background: linear-gradient(90deg, #5b7ae0, var(--accent-primary)); transition: width .3s ease; pointer-events: none; }
 
 /* ── 卡片（整卡随出版社色系）── */
-.cr-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.cr-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 24px; transition: padding-right .2s ease; }
+/* 目录抽屉打开时舞台右移避让，卡片保持完整可见 */
+.card-reader.is-drawer .cr-stage { padding-right: 470px; }
 @keyframes cr-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
-.cr-card { width: min(800px, 100%); max-height: 100%; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #d4d9e6 transparent;
+.cr-card { width: min(880px, 100%); max-height: 100%; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #d4d9e6 transparent;
   background: var(--surface-raised); border: 1.5px solid var(--tone-ring, var(--border-color)); border-radius: 18px;
   box-shadow: 0 20px 48px color-mix(in srgb, var(--tone, #333a4d) 18%, transparent), 0 2px 10px rgba(28, 36, 66, .05);
   animation: cr-in .26s ease; }
 .cr-card::-webkit-scrollbar { width: 8px; }
 .cr-card::-webkit-scrollbar-thumb { background: #d4d9e6; border-radius: 4px; }
+/* 摘要 / 原文视图：横向尽量放宽（2026-10-13 需求：减少上下滑动） */
+.cr-card--wide { width: min(1600px, 100%); }
+.cr-card--wide .cr-card-head { padding: 14px 46px; }
+.cr-card--wide .cr-card-body { padding: 22px 46px 28px; }
+.cr-card--wide .cr-abstract { line-height: 1.85; }
+.cr-card--wide .cr-abstract--paired { line-height: 1.8; }
+.cr-card--wide .cr-title { font-size: 21px; }
+.cr-card--wide .cr-card-foot { padding: 14px 46px 24px; }
 .cr-card--loading { min-height: 220px; display: flex; align-items: center; justify-content: center; }
 .cr-loading { font-size: 14px; color: var(--text-tertiary); }
 .cr-card-head { display: flex; align-items: center; gap: 12px; padding: 15px 30px;
