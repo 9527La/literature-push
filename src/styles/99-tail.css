@@ -2604,16 +2604,15 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
 .rgj-count { flex: none; background: color-mix(in srgb, currentColor 13%, transparent); border-radius: 999px; padding: 0 7px; font-size: 11.5px; line-height: 18px; font-weight: 700; }
 .reports-group-jchip.is-more { --tone-ink: var(--text-tertiary); --tone-soft: transparent; --tone-line: var(--border-color); border-style: dashed; font-weight: 500; }
 
-/* ② 顶栏导航字号与左侧品牌一致（28px），图标同步放大、按钮加高。 */
-.nav button { font-size: 28px; gap: 10px; padding: 12px 16px 10px; min-height: 62px; }
-.nav button svg { width: 20px; height: 20px; }
-.nav button .chev { width: 18px; height: 18px; }
-/* 28px 字号下完整标签需要 ≥~1390px，1366 等窄幅会裁剪：提前切仅图标（原断点 1339px） */
-@media (max-width: 1429px) {
-  .nav .nav-label { display: none; }
-  .nav .group-btn .nav-label { display: none; }
-  .nav button, .nav .group-btn { min-height: 38px; padding: 7px 10px 6px; }
-}
+/* ② 顶栏导航：字号回调至 17px（28px 观感过大），选中态改「软色胶囊」
+      （浅蓝底 + 主题蓝字）比大字号下划线更清晰；悬停改浅灰底。
+      标签隐藏断点回归 1339px（17px 下 1366 可完整放下）。 */
+.nav button { font-size: 17px; gap: 8px; padding: 8px 14px; min-height: 46px; border-radius: 999px; }
+.nav button svg { width: 18px; height: 18px; }
+.nav button .chev { width: 15px; height: 15px; opacity: .7; }
+.nav button:hover { background: var(--surface-hover); color: var(--text-primary); }
+.nav button.active { background: var(--accent-light); color: var(--accent-primary); border-bottom-color: transparent; }
+.nav button.active:hover { background: var(--accent-light); }
 
 /* ── 2026-10-13 需求：收藏页宽度重设计——各画幅充分利用空间 ─────────────
    旧约束为双限宽：`.profile-layout` max-width:1160px（90-highlight）+
