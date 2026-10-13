@@ -6,7 +6,7 @@ import { journalAbbr, journalGroup } from "../../lib/journal.js";
 import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 import { articleDate, formatDate } from "../../lib/format.js";
 // 专题（主题聚类）解析与速览页共用同一解析器（报告 content_md → clusters）
-import { parseReportContent } from "../reports/ReportsView.jsx";
+import { parseReportContent } from "../../lib/report-content.js";
 
 /**
  * 文献库 · 「卡片阅读」子模块（2026-10-13）：
