@@ -7,6 +7,30 @@ import { directionLabel, directionVar } from "../../lib/directions.js";
 import ArticleDialog from "../feed/ArticleDialog.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
 
+// 时间范围（三档，与文献库快捷区间同口径：按文献日期计算下限）
+const FAV_TIME_RANGES = [
+  { key: "7d", label: "近 7 日" },
+  { key: "30d", label: "近 30 日" },
+  { key: "month", label: "本月" }
+];
+// 阅读状态（单选：全部 / 未读 / 已读）
+const FAV_READ_STATES = [
+  { key: "all", label: "全部" },
+  { key: "unread", label: "未读" },
+  { key: "read", label: "已读" }
+];
+
+function favoriteTimeFloor(range) {
+  const now = new Date();
+  if (range === "month") {
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  }
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (range === "7d") day.setDate(day.getDate() - 6);
+  if (range === "30d") day.setDate(day.getDate() - 29);
+  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+}
+
 function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpdated, onDataChanged, journals = [] }) {
   const [data, setData] = useState({ groups: [], favorites: [], total: 0 });
   const [selectedGroup, setSelectedGroup] = useState("all");
@@ -21,8 +45,8 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
   const [savingArticleId, setSavingArticleId] = useState(null);
   const [noteDrafts, setNoteDrafts] = useState({});
   const [selectedArticle, setSelectedArticle] = useState(null);
-  // 甲-3：列表轻筛选（来源期刊 + 研究方向 + 排序）——纯客户端，仅作用于当前分组视图
-  const [favFilters, setFavFilters] = useState({ journals: [], dirs: [], sort: "recent" });
+  // 甲-3：列表轻筛选（来源期刊 + 研究方向 + 排序 + 时间范围 + 阅读状态）——纯客户端，仅作用于当前分组视图
+  const [favFilters, setFavFilters] = useState({ journals: [], dirs: [], sort: "recent", timeRange: null, readState: "all" });
   // 乙-2：备注默认折叠为一行预览，点击「编辑/添加备注」展开
   const [noteEditing, setNoteEditing] = useState(() => new Set());
 
@@ -94,9 +118,13 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
   }, [data.favorites]);
 
   const visibleFavorites = useMemo(() => {
+    const floor = favFilters.timeRange ? favoriteTimeFloor(favFilters.timeRange) : "";
     const list = data.favorites.filter((article) =>
       (favFilters.journals.length === 0 || favFilters.journals.includes(String(article.journal || "").trim()))
       && (favFilters.dirs.length === 0 || favFilters.dirs.includes(article.research_direction || ""))
+      && (!floor || String(articleDate(article)) >= floor)
+      && (favFilters.readState === "all"
+        || (favFilters.readState === "unread" ? !article.is_read : Boolean(article.is_read)))
     );
     if (favFilters.sort === "date") {
       return [...list].sort((a, b) => String(articleDate(b)).localeCompare(String(articleDate(a))));
@@ -104,7 +132,8 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
     return list;
   }, [data.favorites, favFilters]);
 
-  const favFilterActive = favFilters.journals.length > 0 || favFilters.dirs.length > 0;
+  const favFilterActive = favFilters.journals.length > 0 || favFilters.dirs.length > 0
+    || Boolean(favFilters.timeRange) || favFilters.readState !== "all";
 
   function toggleFavFilter(field, value) {
     setFavFilters((prev) => ({
@@ -113,7 +142,7 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
     }));
   }
   function resetFavFilters() {
-    setFavFilters((prev) => ({ ...prev, journals: [], dirs: [] }));
+    setFavFilters((prev) => ({ ...prev, journals: [], dirs: [], timeRange: null, readState: "all" }));
   }
   function startEditNote(article) {
     setNoteEditing((prev) => new Set(prev).add(article.id));
@@ -361,6 +390,42 @@ function FavoritesView({ canPersonalize, markRead, toggleFavorite, onArticleUpda
                   })}
                 </div>
               )}
+              <div className="favorites-tools-row">
+                <span className="favorites-tools-label">时间范围</span>
+                {FAV_TIME_RANGES.map(({ key, label }) => {
+                  const on = favFilters.timeRange === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`favorites-tools-chip${on ? " on" : ""}`}
+                      aria-pressed={on}
+                      title={on ? "取消时间筛选" : `${label}内出版的收藏文献`}
+                      onClick={() => setFavFilters((prev) => ({ ...prev, timeRange: prev.timeRange === key ? null : key }))}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="favorites-tools-row">
+                <span className="favorites-tools-label">阅读状态</span>
+                {FAV_READ_STATES.map(({ key, label }) => {
+                  const on = favFilters.readState === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      className={`favorites-tools-chip${on ? " on" : ""}`}
+                      aria-pressed={on}
+                      title={key === "all" ? "显示全部阅读状态" : `只看${label}的收藏`}
+                      onClick={() => setFavFilters((prev) => ({ ...prev, readState: key }))}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
               <div className="favorites-tools-row favorites-tools-meta">
                 <label className="favorites-tools-sort">
                   排序

@@ -185,6 +185,31 @@ try {
     await page.waitForTimeout(400);
     check(await page.locator(".favorite-card").count() === favTotal && await page.locator(".fav-jchip.on").count() === 0, "再点恢复全量");
 
+    // 时间范围 + 阅读状态筛选（2026-10-13 新增）
+    const timeChips = await page.locator(".favorites-tools-row:has-text('时间范围') .favorites-tools-chip").count();
+    const readChips = await page.locator(".favorites-tools-row:has-text('阅读状态') .favorites-tools-chip").count();
+    check(timeChips === 3, "时间范围 chips（近7日/近30日/本月）", `${timeChips} 枚`);
+    check(readChips === 3, "阅读状态 chips（全部/未读/已读）", `${readChips} 枚`);
+    const readRow = ".favorites-tools-row:has-text('阅读状态')";
+    const timeRow = ".favorites-tools-row:has-text('时间范围')";
+    await page.locator(`${readRow} .favorites-tools-chip:has-text('已读')`).click();
+    await page.waitForTimeout(400);
+    check(await page.locator(".favorite-card").count() === 0, "已读筛选：刚收藏均为未读 → 0 篇");
+    await page.locator(`${readRow} .favorites-tools-chip:has-text('未读')`).click();
+    await page.waitForTimeout(400);
+    check(await page.locator(".favorite-card").count() === favTotal, "未读筛选恢复全量", `${favTotal} 篇`);
+    await page.locator(`${readRow} .favorites-tools-chip:has-text('全部')`).click();
+    await page.waitForTimeout(300);
+    const rangeChip = page.locator(`${timeRow} .favorites-tools-chip:has-text('近 30 日')`);
+    await rangeChip.click();
+    await page.waitForTimeout(400);
+    check((await rangeChip.getAttribute("aria-pressed")) === "true", "近 30 日 chip 进入选中态");
+    const timeVisible = await page.locator(".favorite-card").count();
+    check(timeVisible <= favTotal, "近 30 日筛选 ≤ 全量", `${timeVisible} ≤ ${favTotal}`);
+    await rangeChip.click();
+    await page.waitForTimeout(400);
+    check((await rangeChip.getAttribute("aria-pressed")) === "false" && await page.locator(".favorite-card").count() === favTotal, "取消时间筛选：chip 复位且恢复全量");
+
     // 备注折叠 → 展开 → 保存 → 收回归档
     const noteStamp = `探针备注-${Date.now().toString().slice(-5)}`;
     await page.screenshot({ path: `${shotDir}/3-favorites-tools.png` });
