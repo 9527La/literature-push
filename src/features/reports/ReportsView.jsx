@@ -316,13 +316,20 @@ function DirectionGroup({ group, open, onToggle, onPreviewOpen, onViewAll }) {
         </span>
         {composition.length > 0 && compositionTotal > 0 && (
           <span
-            className="reports-group-comp"
-            title={`来源构成：${composition.map((item) => `${item.name} ${item.count}`).join(" · ")}`}
+            className="reports-group-jchips"
+            title={`来源期刊：${composition.map((item) => `${item.name} ${item.count}`).join(" · ")}`}
             aria-hidden="true"
           >
-            {composition.map((item) => (
-              <i key={item.name} style={{ width: `${(item.count / compositionTotal) * 100}%`, background: TONE_FILL[journalGroup(item.name)] }} />
+            {composition.slice(0, 5).map((item) => (
+              <span key={item.name} className={`reports-group-jchip tone-${journalGroup(item.name)}`}>
+                <span className="rgj-dot" />
+                <span className="rgj-name">{item.name}</span>
+                <span className="rgj-count">{item.count}</span>
+              </span>
             ))}
+            {composition.length > 5 && (
+              <span className="reports-group-jchip is-more">+{composition.length - 5} 种</span>
+            )}
           </span>
         )}
         <span className="reports-group-topic">{group.insight?.text || ""}</span>

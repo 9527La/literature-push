@@ -12,7 +12,8 @@
  * Hard validation (fails with a non-zero exit listing every violation):
  *   - briefs: 0-8 items（0 仅限空窗口日报，RUNBOOK-AI-JOBS.md §8.5：只有导读与资讯的日报合法）,
  *     object ≤30 / method ≤40 / finding ≤50 chars (paperBriefs v2)
- *   - news: policy ≤3, general ≤5; every card needs title/summary/source
+ *   - news: policy / general 全量收录（与网站同源同量；渲染器仅设防守上限 policy ≤10、general ≤15）；
+ *     every card needs title/summary/source
  *   - listing: count must equal items.length; direction keys whitelisted
  *   - digest ≤60 chars (forwarding-card summary, used by draft/add / L0 SOP)
  *
@@ -120,8 +121,8 @@ function validate(raw) {
     }));
   };
   issue.news = {
-    policy: cleanCards(news.policy, "news.policy", 3),
-    general: cleanCards(news.general, "news.general", 5)
+    policy: cleanCards(news.policy, "news.policy", 10),
+    general: cleanCards(news.general, "news.general", 15)
   };
 
   // ── listing（今日新入库文献清单）──

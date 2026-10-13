@@ -218,14 +218,28 @@ try {
     await page.screenshot({ path: `${shotDir}/0-reports-diag.png` });
   }
   await page.waitForSelector(".reports-group", { timeout: 20000 });
-  await page.waitForSelector(".reports-group-comp", { timeout: 20000 }).catch(() => {});
+  await page.waitForSelector(".reports-group-jchips", { timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(600);
   const compInfo = await page.evaluate(() => {
-    const bars = [...document.querySelectorAll(".reports-group-comp")];
-    return { bars: bars.length, segments: bars.reduce((sum, bar) => sum + bar.querySelectorAll("i").length, 0) };
+    const wraps = [...document.querySelectorAll(".reports-group-jchips")];
+    return { bars: wraps.length, segments: wraps.reduce((sum, wrap) => sum + wrap.querySelectorAll(".reports-group-jchip").length, 0) };
   });
-  check(compInfo.bars >= 1 && compInfo.segments >= 1, "分组来源构成微条渲染", `${compInfo.bars} 组 / ${compInfo.segments} 段`);
+  check(compInfo.bars >= 1 && compInfo.segments >= 2, "分组来源期刊 chips 渲染", `${compInfo.bars} 组 / ${compInfo.segments} 枚`);
   await page.screenshot({ path: `${shotDir}/4-reports-comp.png` });
+  // 标题栏加高复核：收起全部已展开的组，量含主题文本的闭合组头高度（≥72px = 主题行成功换行）
+  const openGroups = await page.locator(".reports-group.is-open").count();
+  for (let i = 0; i < openGroups; i += 1) {
+    await page.locator(".reports-group.is-open .reports-group-head").first().click();
+    await page.waitForTimeout(250);
+  }
+  const tallHeads = await page.evaluate(() => [...document.querySelectorAll(".reports-group:not(.is-open) .reports-group-head")]
+    .filter((h) => ((h.querySelector(".reports-group-topic")?.textContent) || "").trim().length > 0)
+    .map((h) => Math.round(h.getBoundingClientRect().height)));
+  if (tallHeads.length) {
+    check(tallHeads.every((value) => value >= 72), "闭合分组标题栏含主题行加高", `heights=${tallHeads.slice(0, 4).join(",")}`);
+  } else {
+    console.log("SKIP 闭合分组标题栏高度复核（本环境 topic 均为空，生产复跑覆盖）");
+  }
 
   // ⑥ 统计入场动效 + 骨架可复盘
   await page.evaluate(() => { location.hash = "#stats"; });
