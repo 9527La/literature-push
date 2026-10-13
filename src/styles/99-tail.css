@@ -2585,3 +2585,11 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
   .feed-filter-summary,
   .favorites-tools { display: none !important; }
 }
+
+/* ── 2026-10-13 需求：收藏页宽度重设计——各画幅充分利用空间 ─────────────
+   旧约束为双限宽：`.profile-layout` max-width:1160px（90-highlight）+
+   `.favorites-view` max-width:1220px（95-theme），宽屏下两侧大片留白。
+   对齐「设置页/说明页恢复全宽」先例：已登录的收藏列表布局放开至 .main 可用
+   宽度（.main 自身仍限 1560px 保持站内节奏）；游客提示页（无 .favorites-layout）
+   保持原宽度。 */
+.favorites-view:has(.favorites-layout) { max-width: none; }
