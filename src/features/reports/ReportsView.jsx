@@ -320,15 +320,15 @@ function DirectionGroup({ group, open, onToggle, onPreviewOpen, onViewAll }) {
             title={`来源期刊：${composition.map((item) => `${item.name} ${item.count}`).join(" · ")}`}
             aria-hidden="true"
           >
-            {composition.slice(0, 5).map((item) => (
-              <span key={item.name} className={`reports-group-jchip tone-${journalGroup(item.name)}`}>
+            {composition.slice(0, 8).map((item) => (
+              <span key={item.name} className={`reports-group-jchip tone-${journalGroup(item.name)}`} title={item.name}>
                 <span className="rgj-dot" />
-                <span className="rgj-name">{item.name}</span>
+                <span className="rgj-name">{journalAbbr(item.name)}</span>
                 <span className="rgj-count">{item.count}</span>
               </span>
             ))}
-            {composition.length > 5 && (
-              <span className="reports-group-jchip is-more">+{composition.length - 5} 种</span>
+            {composition.length > 8 && (
+              <span className="reports-group-jchip is-more">+{composition.length - 8} 种</span>
             )}
           </span>
         )}

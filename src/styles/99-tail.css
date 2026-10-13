@@ -2588,23 +2588,21 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
 
 /* ═══ 2026-10-13 需求：速览分组头「来源期刊」汇总 chips + 顶栏字号与品牌一致 ═══ */
 
-/* ① 分组头：原 8px 构成微条 → 期刊名+数量 chips（描边配色沿用期刊组四色）；
-      标题栏加高、方向名字号加大（13.5→17px）。 */
-.reports-group-head { flex-wrap: wrap; row-gap: 7px; padding: 13px 16px; }
+/* ① 分组头：原 8px 构成微条 → 「期刊缩写+篇数」chips（四色描边；一行放得下即单行，
+      主题行保持行内，不再强制换行占高度）。方向名字号 13.5→17px。 */
+.reports-group-head { flex-wrap: wrap; row-gap: 7px; padding: 11px 16px; }
 .reports-group-name { font-size: 17px; }
 .reports-group-count { font-size: 13px; }
-.reports-group-head > .reports-group-topic { order: 5; flex: 1 1 100%; }
-.reports-group-head > .reports-group-caret { order: 4; }
-.reports-group-jchips { order: 1; flex: 1 1 auto; min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-left: 6px; }
-.reports-group-jchip { display: inline-flex; align-items: center; gap: 6px; max-width: 260px; border: 1px solid var(--tone-line, var(--border-color)); background: var(--tone-soft, var(--surface-subtle)); color: var(--tone-ink, var(--text-secondary)); border-radius: 999px; padding: 2px 6px 2px 10px; font-size: 12.5px; font-weight: 600; }
+.reports-group-jchips { flex: 0 1 auto; min-width: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-left: 6px; }
+.reports-group-jchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--tone-line, var(--border-color)); background: var(--tone-soft, var(--surface-subtle)); color: var(--tone-ink, var(--text-secondary)); border-radius: 999px; padding: 2px 6px 2px 9px; font-size: 12.5px; font-weight: 600; }
 .reports-group-jchip.tone-ieee { --tone-ink: #3f5d93; --tone-soft: #edf1f8; --tone-line: #d5deec; }
 .reports-group-jchip.tone-elsevier { --tone-ink: #8a6238; --tone-soft: #f8f2e9; --tone-line: #e8dbc6; }
 .reports-group-jchip.tone-cn { --tone-ink: #3d6e66; --tone-soft: #ecf4f2; --tone-line: #cfe0dc; }
 .reports-group-jchip.tone-other { --tone-ink: #5f6773; --tone-soft: #f1f3f5; --tone-line: #dce0e5; }
 .rgj-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
-.rgj-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rgj-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; letter-spacing: .2px; }
 .rgj-count { flex: none; background: color-mix(in srgb, currentColor 13%, transparent); border-radius: 999px; padding: 0 7px; font-size: 11.5px; line-height: 18px; font-weight: 700; }
-.reports-group-jchip.is-more { --tone-ink: var(--text-tertiary); --tone-soft: var(--surface-subtle); --tone-line: var(--border-color); font-weight: 500; }
+.reports-group-jchip.is-more { --tone-ink: var(--text-tertiary); --tone-soft: transparent; --tone-line: var(--border-color); border-style: dashed; font-weight: 500; }
 
 /* ② 顶栏导航字号与左侧品牌一致（28px），图标同步放大、按钮加高。 */
 .nav button { font-size: 28px; gap: 10px; padding: 12px 16px 10px; min-height: 62px; }

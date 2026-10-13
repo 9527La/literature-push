@@ -226,19 +226,36 @@ try {
   });
   check(compInfo.bars >= 1 && compInfo.segments >= 2, "分组来源期刊 chips 渲染", `${compInfo.bars} 组 / ${compInfo.segments} 枚`);
   await page.screenshot({ path: `${shotDir}/4-reports-comp.png` });
-  // 标题栏加高复核：收起全部已展开的组，量含主题文本的闭合组头高度（≥72px = 主题行成功换行）
+  // 标题栏紧凑复核：收起全部已展开的组 → 含主题文本的闭合组头应保持单行（主题行行内），
+  // 且 chips 文本为期刊缩写（≤4 字符，含中文两字缩写）。
   const openGroups = await page.locator(".reports-group.is-open").count();
   for (let i = 0; i < openGroups; i += 1) {
     await page.locator(".reports-group.is-open .reports-group-head").first().click();
     await page.waitForTimeout(250);
   }
-  const tallHeads = await page.evaluate(() => [...document.querySelectorAll(".reports-group:not(.is-open) .reports-group-head")]
-    .filter((h) => ((h.querySelector(".reports-group-topic")?.textContent) || "").trim().length > 0)
-    .map((h) => Math.round(h.getBoundingClientRect().height)));
-  if (tallHeads.length) {
-    check(tallHeads.every((value) => value >= 72), "闭合分组标题栏含主题行加高", `heights=${tallHeads.slice(0, 4).join(",")}`);
+  const headInfo = await page.evaluate(() => {
+    const heads = [...document.querySelectorAll(".reports-group:not(.is-open) .reports-group-head")]
+      .filter((h) => ((h.querySelector(".reports-group-topic")?.textContent) || "").trim().length > 0);
+    return heads.map((h) => {
+      const hr = h.getBoundingClientRect();
+      const topic = h.querySelector(".reports-group-topic");
+      return {
+        h: Math.round(hr.height),
+        topicTop: topic ? Math.round(topic.getBoundingClientRect().top - hr.top) : -1,
+        abbrs: [...h.querySelectorAll(".rgj-name")].map((n) => (n.textContent || "").trim())
+      };
+    });
+  });
+  if (headInfo.length) {
+    check(headInfo.every((x) => x.h <= 68 && x.topicTop < 30), "闭合分组标题栏单行紧凑（主题行内联）", JSON.stringify(headInfo.slice(0, 3)));
+    const abbrs = headInfo.flatMap((x) => x.abbrs);
+    if (abbrs.length) {
+      check(abbrs.every((a) => a.length <= 4), "期刊 chips 使用缩写", abbrs.slice(0, 8).join("/"));
+    } else {
+      console.log("SKIP 期刊缩写断言（取样分组无 chips）");
+    }
   } else {
-    console.log("SKIP 闭合分组标题栏高度复核（本环境 topic 均为空，生产复跑覆盖）");
+    console.log("SKIP 分组标题栏紧凑复核（本环境 topic 均为空，生产复跑覆盖）");
   }
 
   // ⑥ 统计入场动效 + 骨架可复盘
