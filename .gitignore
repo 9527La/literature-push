@@ -25,3 +25,6 @@ Tolist.txt
 # 一次性诊断/探针脚本（下划线前缀）
 scripts/_*
 scripts/diag-20260923b.mjs
+
+# 课题组通知稿（含通行证明文，仅本地保留，不上传 GitHub）
+NOTICE-*.md
