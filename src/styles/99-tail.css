@@ -2593,3 +2593,16 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
    宽度（.main 自身仍限 1560px 保持站内节奏）；游客提示页（无 .favorites-layout）
    保持原宽度。 */
 .favorites-view:has(.favorites-layout) { max-width: none; }
+
+/* ── 2026-10-13 需求：全站画幅适配（第二批）——账户 / 反馈 / 管理中心放开 + 页头对齐 ──
+   全站审计（10 视图 × 1180/1280/1440/1920/2560）结论：文献库 / 速览 / 统计 / 资讯 /
+   收藏 / 使用说明 / 设置（.settings-view 已全宽）均 100% 填满；账户页（死区 22%）/
+   公共讨论（20%）/ 管理中心（16%）仍带独立限宽（1160/1180/1240），本次统一放开到
+   .main 可用宽度（.main 自身仍限 1560，保持全站节奏一致）；页头 .page-intro /
+   .feedback-hero 去掉自身 1160 限宽，与内容左缘对齐（说明段落的 62ch 可读上限保留）；
+   账户注册表单页与游客页无 .account-grid，经 :has 作用域维持原宽度。 */
+.profile-layout:has(.account-grid) { max-width: none; }
+.feedback-layout { max-width: none; }
+.admin-dashboard { max-width: none; }
+.page-intro,
+.feedback-hero { max-width: none; }
