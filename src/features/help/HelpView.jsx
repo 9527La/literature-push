@@ -8,6 +8,7 @@ import {
   Mail,
   MessageSquare,
   Newspaper,
+  Play,
   RefreshCw,
   Sparkles,
   Star,
@@ -66,6 +67,13 @@ function HelpView() {
           <span className="eyebrow">快速上手</span>
           <h1 id="help-title">使用说明</h1>
           <p>本系统面向课题组内部的电力系统文献阅读与整理，提供文献浏览、卡片阅读、关键词统计、收藏管理、邮件推送、公共讨论和个性设置同步。</p>
+          <button
+            type="button"
+            className="help-tour-btn"
+            onClick={() => window.dispatchEvent(new CustomEvent("start-onboarding"))}
+          >
+            <Play size={14} aria-hidden="true" /> 重新体验新手教程
+          </button>
         </div>
         <InternalUseNotice compact />
       </section>

@@ -322,7 +322,7 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
             <span className="reader-field-label">期次</span>
             <div className="reader-chip-row">
               {periodOptions.map((period) => (
-                <button key={period} type="button" className={`reader-chip${periodStart === period ? " on" : ""}`} aria-pressed={periodStart === period} onClick={() => { setPeriodStart(period); setDirection(""); }}>
+                <button key={period} type="button" className={`reader-chip reader-chip--period${periodStart === period ? " on" : ""}`} aria-pressed={periodStart === period} onClick={() => { setPeriodStart(period); setDirection(""); }}>
                   {period}
                 </button>
               ))}
@@ -347,14 +347,14 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
             <div className="reader-field">
               <span className="reader-field-label">专题（主题聚类）</span>
               <div className="reader-chip-row">
-                <button type="button" className={`reader-chip${topicKey === "all" ? " on" : ""}`} aria-pressed={topicKey === "all"} onClick={() => setTopicKey("all")}>
+                <button type="button" className={`reader-chip reader-chip--topic${topicKey === "all" ? " on" : ""}`} aria-pressed={topicKey === "all"} onClick={() => setTopicKey("all")}>
                   全部专题
                 </button>
                 {topicOptions.map((item) => (
                   <button
                     key={item.key}
                     type="button"
-                    className={`reader-chip${topicKey === item.key ? " on" : ""}`}
+                    className={`reader-chip reader-chip--topic${topicKey === item.key ? " on" : ""}`}
                     aria-pressed={topicKey === item.key}
                     title={item.key}
                     onClick={() => setTopicKey(item.key)}

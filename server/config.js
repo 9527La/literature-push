@@ -16,7 +16,7 @@ export const config = {
   adminPassport: process.env.ADMIN_PASSPORT || "",
   userPassport: process.env.USER_PASSPORT || "",
   passportTokenTtlHours: Number(process.env.PASSPORT_TOKEN_TTL_HOURS || 24),
-  maxPersonalAccounts: Number(process.env.MAX_PERSONAL_ACCOUNTS || 40),
+  maxPersonalAccounts: Number(process.env.MAX_PERSONAL_ACCOUNTS || 100),
   maxActiveIps: Number(process.env.MAX_ACTIVE_IPS || 20),
   adminPassword: process.env.ADMIN_PASSWORD || "",
   adminTokenSecret: process.env.ADMIN_TOKEN_SECRET || process.env.ADMIN_PASSWORD || "",

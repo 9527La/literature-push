@@ -81,7 +81,7 @@ function PersonalAccountAuth({ onAuthenticate }) {
           <button className="primary" disabled={submitting || !credentials.username || !credentials.password}>{submitting ? "处理中" : mode === "login" ? "登录个人账户" : "注册并登录"}</button>
           {message && <div className="inline-msg login-error" role="alert">{message}</div>}
         </form>
-        <p className="auth-note">用户名必须唯一；最多注册 40 个个人账户。每个账户同一时间只能在一个 IP 上保持登录，但之后可从其他 IP 再次登录。记住密码会将密码保存在当前浏览器，请只在可信设备上启用。</p>
+        <p className="auth-note">用户名必须唯一；最多注册 100 个个人账户。每个账户同一时间只能在一个 IP 上保持登录，但之后可从其他 IP 再次登录。记住密码会将密码保存在当前浏览器，请只在可信设备上启用。</p>
       </div>
     </section>
   );

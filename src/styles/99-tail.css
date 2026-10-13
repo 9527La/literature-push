@@ -2942,3 +2942,72 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
   .help-toc-list { flex-direction: row; flex-wrap: wrap; }
   .help-section ul.help-list--cols { columns: 1; }
 }
+.help-tour-btn {
+  margin-top: 14px; display: inline-flex; align-items: center; gap: 7px;
+  font-family: inherit; font-size: 13.5px; font-weight: 700; color: var(--accent-primary);
+  background: var(--accent-light); border: 1px solid #c9d4f0; border-radius: 10px; padding: 9px 16px; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.help-tour-btn:hover { background: #e2e9fa; border-color: var(--accent-primary); }
+
+/* ══ 新手教程 v2（2026-10-13 重做）：聚光灯高亮真实元素 + 操作提示气泡 ══
+   覆盖层 pointer-events:none（点击穿透到真实界面），仅气泡可交互；
+   挖孔用超大面积 box-shadow 实现，目标周围带呼吸环。 */
+@keyframes tour-fade { from { opacity: 0; } }
+@keyframes tour-pop { from { opacity: 0; transform: translateY(8px) scale(.985); } }
+@keyframes tour-ring { 0% { transform: scale(.99); opacity: .95; } 70% { transform: scale(1.05); opacity: 0; } 100% { opacity: 0; } }
+.tour { position: fixed; inset: 0; z-index: 460; pointer-events: none; }
+.tour-dim { position: absolute; inset: 0; background: rgba(18, 22, 34, .55); pointer-events: none; animation: tour-fade .2s ease; }
+/* 遮罩用四块纯色条拼出"挖孔"：位移/缩放只重绘几块小矩形，
+   避免超大面积 box-shadow 每次变化都整屏重绘（卡顿主因）。 */
+.tour-band {
+  position: absolute; background: rgba(18, 22, 34, .55); pointer-events: none;
+  will-change: top, left, width, height;
+  transition: top .16s ease, left .16s ease, width .16s ease, height .16s ease;
+}
+.tour-ring {
+  position: absolute; border-radius: 14px; pointer-events: none;
+  border: 2px solid rgba(91, 122, 224, .95);
+  box-shadow: 0 0 0 5px rgba(91, 122, 224, .16);
+  will-change: top, left, width, height;
+  transition: top .16s ease, left .16s ease, width .16s ease, height .16s ease;
+}
+.tour-ring::after { content: ""; position: absolute; inset: -6px; border-radius: 18px; border: 2px solid rgba(91, 122, 224, .45); animation: tour-ring 1.7s ease-out infinite; }
+.tour-tip {
+  position: fixed; z-index: 470; pointer-events: auto; width: 380px;
+  background: var(--surface-raised); border: 1px solid rgba(255, 255, 255, .7); border-radius: 16px;
+  box-shadow: 0 20px 48px rgba(16, 20, 34, .28); overflow: hidden; animation: tour-pop .2s ease;
+  will-change: opacity;
+}
+.tour-tip.is-center { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(480px, calc(100vw - 40px)); }
+.tour-tip.is-flash { box-shadow: 0 0 0 3px rgba(27, 127, 75, .22), 0 20px 48px rgba(16, 20, 34, .28); }
+.tour-tip-head { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border-light); }
+.tour-tip-brand { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 800; color: var(--accent-primary); }
+.tour-tip-step { flex: 1; font-size: 12px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.tour-tip-close { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--surface-raised); color: var(--text-secondary); cursor: pointer; }
+.tour-tip-close:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+.tour-tip-bar { height: 3px; background: var(--border-light); }
+.tour-tip-bar i { display: block; height: 100%; background: linear-gradient(90deg, #5b7ae0, var(--accent-primary)); transition: width .3s ease; }
+.tour-tip-body { padding: 14px 16px 12px; }
+.tour-tip-title { margin: 0 0 8px; font-size: 16.5px; font-weight: 800; letter-spacing: -.01em; color: var(--text-primary); }
+.tour-tip-text { margin: 0 0 11px; font-size: 13.5px; line-height: 1.8; color: var(--text-secondary); }
+.tour-tip-hint {
+  display: flex; align-items: flex-start; gap: 7px; margin: 0;
+  font-size: 13px; font-weight: 700; line-height: 1.6; color: var(--accent-primary);
+  background: var(--accent-light); border-radius: 10px; padding: 9px 11px;
+}
+.tour-tip-hint svg { flex: none; margin-top: 2px; }
+.tour-tip-hint.is-ok { color: #1b7f4b; background: #e8f6ee; }
+.tour-tip-wait { margin: 9px 0 0; font-size: 12px; color: var(--text-tertiary); }
+.tour-tip-foot { display: flex; align-items: center; gap: 10px; padding: 10px 14px 12px; border-top: 1px solid var(--border-light); }
+.tour-skip { font-family: inherit; font-size: 12.5px; font-weight: 600; color: var(--text-tertiary); background: transparent; border: 0; cursor: pointer; padding: 4px 0; }
+.tour-skip:hover { color: var(--text-secondary); }
+.tour-tip-nav { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.tour-prev, .tour-next { display: inline-flex; align-items: center; gap: 4px; font-family: inherit; font-size: 12.5px; font-weight: 700; border-radius: 9px; padding: 7px 13px; cursor: pointer; }
+.tour-prev { color: var(--text-secondary); background: #fff; border: 1px solid var(--border-color); }
+.tour-prev:disabled { opacity: .45; cursor: default; }
+.tour-next { color: #fff; background: var(--accent-primary); border: 1px solid var(--accent-primary); }
+.tour-next:hover { background: #2b4bbd; }
+@media (max-width: 720px) {
+  .tour-tip { left: 12px !important; right: 12px; width: auto !important; }
+}

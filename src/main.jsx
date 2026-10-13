@@ -33,6 +33,7 @@ const StatsView = React.lazy(() => import("./features/stats/StatsView.jsx"));
 const ReportsView = React.lazy(() => import("./features/reports/ReportsView.jsx"));
 const DailyNewsView = React.lazy(() => import("./features/news/DailyNewsView.jsx"));
 const HelpView = React.lazy(() => import("./features/help/HelpView.jsx"));
+const OnboardingTour = React.lazy(() => import("./features/help/OnboardingTour.jsx"));
 const FavoritesViewLazy = React.lazy(() => import("./features/favorites/FavoritesView.jsx"));
 const SettingsViewLazy = React.lazy(() => import("./features/settings/SettingsView.jsx"));
 const AccountViewLazy = React.lazy(() => import("./features/account/AccountView.jsx"));
@@ -745,6 +746,13 @@ function App() {
         onConfirm={confirmFavorite}
         onClose={() => setFavoritePicker(null)}
       />
+
+      {/* 新手教程：首次访问自动弹出一次；使用说明页可随时重播 */}
+      {gateAuthenticated && !initialLoading && (
+        <Suspense fallback={null}>
+          <OnboardingTour enabled={gateAuthenticated && !initialLoading} />
+        </Suspense>
+      )}
 
       {versionInfo && (
         <UpdateModal versionInfo={versionInfo} onClose={dismissVersion} />

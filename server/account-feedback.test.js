@@ -8,8 +8,10 @@ import test from "node:test";
 test("keeps personal accounts, discussion identities, and session limits independent", async () => {
   const workingDirectory = mkdtempSync(path.join(tmpdir(), "literature-push-test-"));
   const dbUrl = new URL("./db.js", import.meta.url).href;
+  const configUrl = new URL("./config.js", import.meta.url).href;
   const script = `
     const dbModule = await import(${JSON.stringify(dbUrl)});
+    const { config } = await import(${JSON.stringify(configUrl)});
     const { db, updateUserProfile, getUserProfile, getAllUserEmails, saveTranslation, listArticles, addFeedback, addFeedbackComment, listPublicFeedback, toggleFeedbackLike, toggleFeedbackCommentLike, replyFeedback, closeFeedback, deleteFeedback, deleteFeedbackComment, createUserAccount, createUserSession, getActiveUserSession, revokeUserSession, getDiscussionProfile, updateDiscussionProfile, getAdminOverview, saveRemotePreferences, getRemotePreferences, updateUserSettings, getUserSettings, getUserAccountCount, getUserStatus, toggleArticleFavoriteForUser, createFavoriteGroup, updateUserFavorite, getUserFavorites } = dbModule;
     db.prepare("INSERT INTO articles (external_id, title, fetched_at, first_seen_at) VALUES (?, ?, datetime('now'), datetime('now'))").run('test-article', 'English title');
     const article = db.prepare("SELECT id FROM articles WHERE external_id = 'test-article'").get();
@@ -87,12 +89,15 @@ test("keeps personal accounts, discussion identities, and session limits indepen
     const overflowAccount = createUserAccount({ username: 'overflow-session-user', passwordHash: 'hash', passwordSalt: 'salt', registeredIp: '10.0.3.2' });
     if (createUserSession({ sessionId: 'overflow-session', accountId: overflowAccount.id, loginIp: '10.0.9.9', role: 'user', expiresAt, now: now + 41 }).reason !== 'active_ip_limit') process.exit(29);
     if (db.prepare("SELECT COUNT(DISTINCT login_ip) AS count FROM user_sessions WHERE revoked_at IS NULL AND expires_at > ?").get(now + 50).count !== 20) process.exit(30);
-    for (let index = 0; index < 15; index += 1) createUserAccount({ username: 'capacity-user-' + index, passwordHash: 'hash', passwordSalt: 'salt', registeredIp: '10.0.4.' + index });
+    // 上限取自配置（不再写死 40）：补足到"上限 - 1"后再断言下一个被拒
+    const accountLimit = config.maxPersonalAccounts;
+    const createdBefore = getUserAccountCount();
+    for (let index = 0; index < Math.max(0, accountLimit - createdBefore); index += 1) createUserAccount({ username: 'capacity-user-' + index, passwordHash: 'hash', passwordSalt: 'salt', registeredIp: '10.0.4.' + index });
     let capacityRejected = false;
     try { createUserAccount({ username: 'capacity-overflow', passwordHash: 'hash', passwordSalt: 'salt', registeredIp: '10.0.5.1' }); } catch (error) { capacityRejected = String(error.message).includes('上限'); }
-    if (!capacityRejected || getUserAccountCount() !== 40) process.exit(31);
+    if (!capacityRejected || getUserAccountCount() !== accountLimit) process.exit(31);
     const overview = getAdminOverview();
-    if (overview.counts.users !== 40 || overview.counts.articles !== 1 || typeof overview.coverage.abstracts !== 'number') process.exit(17);
+    if (overview.counts.users !== accountLimit || overview.counts.articles !== 1 || typeof overview.coverage.abstracts !== 'number') process.exit(17);
   `;
   try {
     const result = await runNodeScript(script, {
