@@ -2878,3 +2878,67 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
 .admin-dashboard { max-width: none; }
 .page-intro,
 .feedback-hero { max-width: none; }
+
+/* ══ 使用说明重设计（2026-10-13）：左侧粘性目录 + 右侧单栏卡片 ══
+   原实现为两栏等高网格，短卡片被拉高后出现成片空白；改为「目录 + 单栏流式卡片」，
+   长清单在卡片内部按两栏流动，卡片高度随内容收紧。 */
+.help-view {
+  width: min(100%, 1440px);
+  max-width: 1440px;
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 18px 22px;
+  align-items: start;
+}
+.help-hero { grid-column: 1 / -1; }
+.help-toc {
+  position: sticky;
+  top: 84px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255, 255, 255, .82);
+  border: 1px solid rgba(255, 255, 255, .65);
+  border-radius: var(--radius-2xl);
+  padding: 15px 13px;
+  box-shadow: var(--shadow-sm);
+  max-height: calc(100vh - 108px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.help-toc-title { margin: 0 0 2px; padding-left: 10px; font-size: 12px; font-weight: 800; letter-spacing: .08em; color: var(--text-tertiary); }
+.help-toc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.help-toc-item {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  border: 0; background: transparent; border-radius: 9px; padding: 7px 10px; cursor: pointer;
+  font-family: inherit; font-size: 13.5px; font-weight: 600; color: var(--text-secondary);
+  transition: background .15s, color .15s;
+}
+.help-toc-item:hover { background: var(--surface-hover, #f5f7fb); color: var(--accent-primary); }
+.help-toc-item.on { background: var(--accent-light); color: var(--accent-primary); font-weight: 700; }
+.help-toc-index { font-size: 11px; font-weight: 800; color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
+.help-toc-item.on .help-toc-index { color: var(--accent-primary); }
+.help-toc-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.help-toc-top {
+  margin-top: 6px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font-family: inherit; font-size: 12.5px; font-weight: 700; color: var(--accent-primary);
+  background: var(--accent-light); border: 1px dashed #c9d4f0; border-radius: 9px; padding: 7px 10px; cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.help-toc-top:hover { border-color: var(--accent-primary); background: #e2e9fa; }
+.help-body { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.help-body .help-section { scroll-margin-top: 88px; }
+/* 长清单在卡片内部两栏流动：压缩高度、消除成片空白 */
+.help-section ul.help-list--cols { display: block; columns: 2; column-gap: 30px; padding-left: 18px; }
+.help-section ul.help-list--cols li { break-inside: avoid; margin-bottom: 7px; }
+.help-section ul.help-list--cols li:last-child { margin-bottom: 0; }
+.help-section code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;
+  background: #f3f5f9; border: 1px solid #e4e8f0; border-radius: 6px; padding: 1px 6px;
+}
+@media (max-width: 1180px) {
+  .help-view { grid-template-columns: minmax(0, 1fr); }
+  .help-toc { position: static; max-height: none; }
+  .help-toc-list { flex-direction: row; flex-wrap: wrap; }
+  .help-section ul.help-list--cols { columns: 1; }
+}
