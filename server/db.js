@@ -759,6 +759,8 @@ function normalizeArticlePageOffset(value) {
 // through getArticleForUser()/the detail endpoint, so the first page does not
 // transfer every full abstract and translation.
 export function listArticlePage(filters = {}, userId) {
+  // full=1：返回完整摘要（默认截断 320 字符——列表/卡片只需预览；卡片阅读等
+  // 全屏阅读场景要全文，见 src/features/reader/CardReader.jsx）。
   const { clauses, params, order } = buildArticleListQuery(filters, userId);
   const limit = normalizeArticlePageLimit(filters.limit);
   const offset = normalizeArticlePageOffset(filters.offset);
@@ -784,7 +786,7 @@ export function listArticlePage(filters = {}, userId) {
       a.volume,
       a.issue,
       a.doi,
-      substr(a.abstract, 1, 320) AS abstract,
+      ${filters.full === "1" ? "a.abstract" : "substr(a.abstract, 1, 320)"} AS abstract,
       a.url,
       a.published_at,
       ${displayDateSql("a")} AS display_date,
@@ -796,7 +798,7 @@ export function listArticlePage(filters = {}, userId) {
       a.direction_reason,
       ${interactionFields},
       zh.title AS translated_title,
-      substr(zh.abstract, 1, 320) AS translated_abstract,
+      ${filters.full === "1" ? "zh.abstract" : "substr(zh.abstract, 1, 320)"} AS translated_abstract,
       COUNT(*) OVER () AS total_count
     FROM articles a
     LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'

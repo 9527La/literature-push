@@ -79,7 +79,7 @@ for (const dir of DIRS) {
   });
 }
 
-/** 生成方向专报正文（v2 契约：主题聚类速评 + 论文速评 + 值得精读）。 */
+/** 生成方向专报正文（v2 契约：主题聚类速评 + 论文速评；「值得精读」板块已于 2026-10-13 下线）。 */
 function directionMd(dir, rows) {
   const cut = Math.ceil(rows.length / 2);
   const c1 = rows.slice(0, cut);
@@ -104,10 +104,6 @@ function directionMd(dir, rows) {
   out.push("## 论文速评");
   out.push("");
   rows.slice(0, 6).forEach((row, i) => out.push(line(row, i)));
-  out.push("");
-  out.push("## 值得精读");
-  out.push("");
-  rows.slice(0, 3).forEach((row, i) => out.push(line(row, i)));
   return out.join("\n");
 }
 
@@ -119,16 +115,10 @@ const insert = db.prepare(
 function writeReports(kind, period, dirs, total, prevTotal) {
   const counts = Object.fromEntries(dirs.map((d) => [d.key, buckets.get(d.key).length]));
   const allDeltas = Object.fromEntries(dirs.map((d, i) => [d.key, (i % 3) - 1]));
-  const highlightIds = dirs.flatMap((d) => buckets.get(d.key).slice(0, 1).map((r) => r.id));
-  const highlightBriefs = briefs(highlightIds);
 
-  // 总览
+  // 总览（2026-10-13 起不含「值得注意」板块；highlightIds/paperBriefs 按新契约留空）
   const overviewMd = [
-    `${period.start} ~ ${period.end} 共收录 ${total} 篇电力能源领域文献，覆盖 ${dirs.length} 个研究方向，其中 ${highlightIds.length} 篇值得重点阅读。`,
-    "",
-    "## 本周值得注意",
-    "",
-    ...highlightIds.map((id, i) => `- [${id}] **重点文献 ${i + 1}**（${dirs[i % dirs.length].label}）`),
+    `${period.start} ~ ${period.end} 共收录 ${total} 篇电力能源领域文献，覆盖 ${dirs.length} 个研究方向。`,
     "",
     "## 高频关键词",
     "",
@@ -144,9 +134,9 @@ function writeReports(kind, period, dirs, total, prevTotal) {
     previous: { total: prevTotal },
     directionCounts: counts,
     directionDelta: allDeltas,
-    highlightIds,
+    highlightIds: [],
     unclassified: 12,
-    paperBriefs: highlightBriefs
+    paperBriefs: []
   }));
 
   // 各方向专报
@@ -158,7 +148,7 @@ function writeReports(kind, period, dirs, total, prevTotal) {
       total: rows.length,
       directionCounts: { [dir.key]: rows.length },
       directionDelta: { [dir.key]: allDeltas[dir.key] },
-      highlightIds: ids.slice(0, 3),
+      highlightIds: [],
       paperBriefs: briefs(ids)
     }));
   }

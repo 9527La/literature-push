@@ -64,7 +64,8 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
     setLoading(true);
     const chunks = [];
     for (let index = 0; index < order.length; index += 100) chunks.push(order.slice(index, index + 100));
-    Promise.all(chunks.map((chunk) => api.get(`/api/articles?ids=${chunk.join(",")}&limit=100`)))
+    // full=1：列表接口默认把摘要截到 320 字符，全屏阅读需要完整中英文摘要
+    Promise.all(chunks.map((chunk) => api.get(`/api/articles?ids=${chunk.join(",")}&limit=100&full=1`)))
       .then((results) => {
         if (cancelled) return;
         const map = new Map();

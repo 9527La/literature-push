@@ -756,14 +756,6 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
     };
   }, [parsed, journalNames]);
 
-  const highlightIds = current?.stats?.highlightIds || [];
-  const pickTextById = useMemo(() => {
-    const map = new Map();
-    for (const review of parsed.reviews) {
-      if (review.pick) map.set(review.id, review.text);
-    }
-    return map;
-  }, [parsed]);
   const isOverview = activeDirection === null;
   // 旧格式总览期数（无任何方向专报）：保留 v1「各方向动态」卡片网格
   const showInsightGrid = isOverview && periodDetails.dirs.size === 0 && parsedWithJournals.insights.length > 0;
@@ -786,7 +778,6 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
   );
   const hiddenJournalCount = journalEntries.filter((entry) => hiddenJournalSet.has(entry.name)).length;
   const visibleNonPick = nonPickReviews.filter((review) => !filteredOutIds.has(review.id));
-  const visibleHighlightIds = highlightIds.filter((id) => !filteredOutIds.has(id));
   function toggleJournalFilter(name) {
     if (!reportFilterKey) return;
     setHiddenJournalsByReport((prev) => {
@@ -797,9 +788,10 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
   }
 
   // 注意：intro 段落框已按需求移除，因此不计入「有内容」——否则只剩导语时会渲染成一片空白。
+  // highlightIds 不再计入「有内容」：对应板块已下线（2026-10-13），否则只剩精选的期数会渲染成空白。
   const hasAnyContent = Boolean(
     current && (parsed.insights.length || nonPickReviews.length || parsed.clusters.length
-      || parsed.keywords || parsed.textCards.length || highlightIds.length || groups.length
+      || parsed.keywords || parsed.textCards.length || groups.length
       || (isOverview && directionBars(current.stats).length))
   );
 
@@ -1045,23 +1037,7 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
 
               {isOverview && <DirectionBars report={current} />}
 
-              {isOverview && highlightIds.length > 0 && (
-                <>
-                  <h2 className="reports-sect">{current.kind === "monthly" ? "本期值得注意" : "本周值得注意"}</h2>
-                  <div className="reports-brief-grid reports-brief-grid--wide">
-                    {highlightIds.map((id) => (
-                      <BriefCard
-                        key={id}
-                        id={id}
-                        article={articleMap.get(id) || null}
-                        brief={briefById.get(id) || null}
-                        fallbackText={pickTextById.get(id) || ""}
-                        onOpen={openArticleById}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
+              {/* 「本周/本期值得注意」板块已下线（2026-10-13 用户需求）：AI 整理与前端展示均不再产出 */}
 
               {isOverview && groups.length > 0 && (
                 <>
@@ -1202,32 +1178,7 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                 </>
               )}
 
-              {!isOverview && highlightIds.length > 0 && (
-                <>
-                  <h2 className="reports-sect">
-                    值得精读
-                    {visibleHighlightIds.length < highlightIds.length && (
-                      <span className="reports-sect-hint is-warn">已隐藏 {highlightIds.length - visibleHighlightIds.length} 篇（来源期刊筛选）</span>
-                    )}
-                  </h2>
-                  {visibleHighlightIds.length > 0 ? (
-                    <div className="reports-brief-grid reports-brief-grid--wide">
-                      {visibleHighlightIds.map((id) => (
-                        <BriefCard
-                          key={id}
-                          id={id}
-                          article={articleMap.get(id) || null}
-                          brief={briefById.get(id) || null}
-                          fallbackText={pickTextById.get(id) || ""}
-                          onOpen={openArticleById}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="reports-filter-hint">本节 {highlightIds.length} 篇速评已按「来源期刊」筛选隐藏，点信息条期刊 chip 或「全部显示」即可恢复。</p>
-                  )}
-                </>
-              )}
+              {/* 「值得精读」板块已下线（2026-10-13 用户需求）：AI 整理与前端展示均不再产出 */}
 
               {parsed.keywords && (
                 <>

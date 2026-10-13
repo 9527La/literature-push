@@ -10,7 +10,8 @@ description: 文献推送站（E:\SC\文献推送）全部 AI 批量作业的统
 # 文献推送 · AI 批量作业执行手册（唯一执行依据）
 
 > **本手册是所有文献 AI 作业的唯一执行依据**；执行会话动手前必须完整通读本文。
-> 版本：2026-10-08 v6（wechat-daily prompt 增加步骤 ④.5 交稿自评：三段/字数/数字一致/禁夸大措辞，§8.5.1 同步）
+> 版本：2026-10-13 v7（下线「本周/本期值得注意」「值得精读」板块：模板删除、highlightIds 降级为保留字段一律填 `[]`；前端同步不再展示）
+> 上一版：2026-10-08 v6（wechat-daily prompt 增加步骤 ④.5 交稿自评：三段/字数/数字一致/禁夸大措辞，§8.5.1 同步）
 > 上一版：2026-10-01 v4（速评复用 priorBrief：月报/专报逐字复用周报已写速评，只新写未覆盖文献；定时任务提示词对齐全流程）
 > 维护：方向体系增删须同步第 4.2 节与 `server/directions.js` + `src/lib/directions.js`
 > 取代关系：第 4 节 = 原 `RUNBOOK-AI-DIRECTION.md` 全量并入（后者已标注被本 Skill 取代）。
@@ -161,11 +162,6 @@ Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\apply-report
 （每个非零方向一节，按篇数降序 → 前端渲染为「方向动态卡片网格」；
   若 stats.unclassified > 0 加「### 待方向标注（N 篇）」节如实说明）
 
-## 本周值得注意
-- [12345] **{论文标题}**（{期刊}）：{≤40 字推荐理由，只依据素材摘要}
-（3–5 篇；**行首必须带 `[id] `**——站内编号自动隐藏、整行可点击弹文献卡片，
-  邮件自动剥离编号；id 记入 highlightIds）
-
 ## 热点主题
 主题词一、主题词二、…（≤6 个顿号分隔 → 前端渲染为可点击主题 chips）
 ```
@@ -185,13 +181,13 @@ Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\apply-report
   "periodStart": "<原样带回>",
   "periodEnd": "<原样带回>",
   "contentMd": "<5.2 全文>",
-  "highlightIds": [4021, 3988],
+  "highlightIds": [],
   "topTopics": ["共享储能", "配电网重构"],
   "paperBriefs": [ { "id": 4021, "object": "…", "method": "…", "finding": "…" } ]
 }
 ```
 
-apply 硬校验（整批拒收）：四个头字段与素材逐字一致；contentMd 非空 ≤20 000 字符；highlightIds ⊆ 素材 articles 的 id 且 ≤8；topTopics ≤12 条（每条 ≤30 字）；paperBriefs 按 5.5 校验（总览可选、仅精选条目）。
+apply 硬校验（整批拒收）：四个头字段与素材逐字一致；contentMd 非空 ≤20 000 字符；highlightIds 为**保留字段**（2026-10-13 精选板块下线，一律填 `[]`）；topTopics ≤12 条（每条 ≤30 字）；paperBriefs 按 5.5 校验（总览一律留空、方向专报必填）。
 
 ### 5.5 三字段速评契约（paperBriefs，研究速览 v2）
 
@@ -207,9 +203,9 @@ apply 硬校验（整批拒收）：四个头字段与素材逐字一致；conte
 
 覆盖规则（apply 硬校验，任一失败整批拒收）：
 - **方向专报：paperBriefs 必须提供，且覆盖该方向批次内每一篇文献**（缺一篇即拒收，错误信息会列出缺失 id）；
-- **总览周报/月报：仅 highlightIds 精选条目附 brief**（ids ⊆ highlightIds，出现精选之外的 id 拒收）；
+- **总览周报/月报：不写 paperBriefs**（精选板块已下线，填 `[]`）；
 - 正文速评行与 paperBriefs 必须同源一致：同一 id 的对象/方法/结论两边说的是同一件事。
-- **速评复用（priorBrief，v4）**：导出素材中带 `priorBrief` 字段的文献 = 该篇已在本期周报（总览精选或周方向专报）写过三字段速评。月报/月度专报**必须逐字复用**其 object/method/finding（原样照抄，禁止改写、禁止重新总结），只有无 priorBrief 的文献才新写；周报正常首跑几乎无命中（当周都是新文献），重跑同期时整期可复用。
+- **速评复用（priorBrief，v4）**：导出素材中带 `priorBrief` 字段的文献 = 该篇已在本期周报（周方向专报）写过三字段速评。月报/月度专报**必须逐字复用**其 object/method/finding（原样照抄，禁止改写、禁止重新总结），只有无 priorBrief 的文献才新写；周报正常首跑几乎无命中（当周都是新文献），重跑同期时整期可复用。
 
 ## 6. job: report（全方向总览月报）
 
@@ -239,9 +235,6 @@ Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\export-repor
 ## 方法观察
 （跨方向方法趋势，可选节 → 前端文本卡）
 
-## 本月值得注意
-- [12345] **{标题}**（{期刊}）：{理由}
-（3–5 篇，行首 [id] 前缀同 5.2）
 ```
 
 环比口径提醒：若上月数据受分类覆盖进度影响（如分类刚收口），在引言注明「环比仅供参考」。
@@ -276,9 +269,6 @@ Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\export-repor
   三字段与结果 JSON 的 paperBriefs 同源一致，字数按 5.5 上限）
 ## 高频关键词
 词一、词二、…（顿号分隔 → 前端 chips）
-## 值得精读
-- [12345] **{标题}**（{期刊}）：{推荐理由}
-（2–3 篇，同样 [id] 前缀；id 记入 highlightIds）
 ```
 
 **月度专报结构**（主题聚类形式）：
@@ -297,7 +287,7 @@ Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\export-repor
 （可选节）
 ```
 
-**结果 JSON**：同 5.4 契约 + 顶层 `"direction": "<key>"`（与导出批次逐字一致）；`highlightIds` 2–3 个；
+**结果 JSON**：同 5.4 契约 + 顶层 `"direction": "<key>"`（与导出批次逐字一致）；`highlightIds` 保留字段（填 `[]`）；
 `paperBriefs` **必须覆盖该方向批次内每一篇**（5.5 契约，缺一篇整批拒收）。
 
 **步骤 4 — 批量写回**：全部专报结果 Write 到本地 `_ai-jobs-work\direction-inbox\`（文件名如 `d-storage.json` / `dm-202608-storage.json`），整目录 `sc_sync_upload` 到远端 `data\direction-inbox`，然后：
@@ -309,9 +299,9 @@ Set-Location 'E:\\SC\\文献推送'; & .runtime\node\node.exe scripts\apply-repo
 （bulk 按文件名自动匹配批次：周 `report-batch-d-<key>.json`、月 `report-batch-d-<YYYY-MM>-<key>.json`。）
 
 **纪律（硬性）**：
-1. 行内所有 `[id]`（含正文速评，不只 highlightIds）必须属于该方向导出批次——前端整行会渲染成该 id 的可点击卡片，写错会指向错误文献。
+1. 行内所有 `[id]`（正文速评行）必须属于该方向导出批次——前端整行会渲染成该 id 的可点击卡片，写错会指向错误文献。
 2. exportedAt/kind/periodStart/periodEnd/direction 五个头字段与素材逐字一致。
-3. contentMd 非空 ≤20 000 字符；highlightIds ⊆ 批次 id 且 ≤8；topTopics ≤12。
+3. contentMd 非空 ≤20 000 字符；highlightIds 填 `[]`；topTopics ≤12。
 4. 数字抄素材；评语只依据摘要。
 5. paperBriefs 按 5.5 规范：三字段非空、object ≤30 / method ≤40 / finding ≤50 字；方法禁空泛词、结论禁编造；与正文速评行同源一致。
 6. priorBrief 复用一致性（月度作业硬性）：素材带 priorBrief 的文献，结果 JSON 中该 id 的 object/method/finding 必须与 priorBrief **逐字一致**——写回前逐条比对，改写即视为质量事故（同一文献两期口径漂移）。
@@ -320,7 +310,7 @@ Set-Location 'E:\\SC\\文献推送'; & .runtime\node\node.exe scripts\apply-repo
 
 - 用本地脚本或正则核对每份专报：正文所有 `[id]` ⊆ 对应素材 articles 的 id 集（不等式：`contentMd.match(/\[(\d{4,6})\]/g)` 逐个比对）。
 - `exportedAt` 等五头字段与 `list-batch-headers.mjs` 输出逐字比对。
-- highlightIds 计数 ≤8、topTopics ≤12。
+- highlightIds 为空数组、topTopics ≤12。
 - paperBriefs 覆盖检查：方向专报的 paperBriefs id 数 = 素材 articles 条数（逐 id 比对），每条三字段非空且 ≤ 上限（object 30 / method 40 / finding 50）。
 - priorBrief 复用一致性：结果 JSON 中每条 brief，若该 id 在素材中带 priorBrief，则三字段与 priorBrief 逐字一致（本地脚本或正则逐条比对）。
 - 任何不符先改本地文件再上传——**远端 apply 拒收一轮就是一次浪费的往返**。
@@ -344,7 +334,7 @@ Set-Location 'E:\\SC\\文献推送'; & .runtime\node\node.exe scripts\apply-repo
 ```
 【文献 AI 作业报告】<日期>
 - classify：分类 N 篇（M 批），覆盖 classified/total，待复核 N 篇
-- digest：总览周报入库（period，total 篇，精选 k 篇）
+- digest：总览周报入库（period，total 篇）
 - digest-direction：方向专报 N 份入库（覆盖方向列表；bulk ok=X failed=Y；速评复用 R 篇 / 新写 W 篇）
 - 异常与处理：无 / 描述
 ```

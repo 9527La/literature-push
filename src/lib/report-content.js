@@ -85,11 +85,8 @@ export function parseReportContent(markdown) {
         if (review) result.reviews.push(review);
       }
     } else if (title.includes("值得注意") || title.includes("值得精读")) {
-      // 有 highlightIds 时由精选卡片渲染；专报 picks 作为「值得精读」补充
-      for (const line of section.body) {
-        const review = parseReviewLine(line);
-        if (review) result.reviews.push({ ...review, pick: true });
-      }
+      // 已下线（2026-10-13 用户需求）：「本周/本期值得注意」「值得精读」不再产出、不再展示；
+      // 历史报告中的同名节在此显式跳过（否则会落入兜底分支渲染成正文卡片）。
     } else if (title.includes("高频关键词") || title.includes("热点主题") || title.includes("新兴主题")) {
       result.keywords = result.keywords ? `${result.keywords}\n${body}` : body;
     } else if (title.includes("主题脉络") || title.includes("方法观察") || title.includes("方法趋势")) {
