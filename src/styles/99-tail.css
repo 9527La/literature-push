@@ -1217,10 +1217,11 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
 .nav-group .chev { transition: transform 160ms var(--ease-out); }
 .nav-group.open .chev { transform: rotate(180deg); }
 .nav-group.open > .group-btn { background: var(--accent-light); color: var(--accent-hover); }
+/* 2026-10-13：激活态对齐普通导航项的「软色胶囊」（原下划线样式与其余入口不一致） */
 .nav-group.active > .group-btn {
-  background: transparent;
+  background: var(--accent-light);
   color: var(--accent-primary);
-  border-bottom-color: var(--accent-primary);
+  border-bottom-color: transparent;
   box-shadow: none;
 }
 .nav-menu {

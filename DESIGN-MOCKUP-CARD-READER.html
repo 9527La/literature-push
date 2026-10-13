@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>卡片阅读模式 · 原型预览 — 电气前沿速递</title>
+<style>
+  :root {
+    --accent: #3157d5;
+    --accent-light: #eef2fb;
+    --text-1: #1c2030;
+    --text-2: #4b5468;
+    --text-3: #98a1b3;
+    --line: #e3e6ee;
+    --bg: #f2f3f8;
+    --surface: #ffffff;
+    --radius: 16px;
+    --font: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, -apple-system, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--font);
+    background: radial-gradient(1200px 500px at 50% -10%, #e9edf7 0%, var(--bg) 55%);
+    color: var(--text-1);
+    display: flex; flex-direction: column;
+    height: 100vh; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── 顶栏 ─────────────────────────────── */
+  .rd-header {
+    flex: none; height: 58px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 18px; padding: 0 22px;
+    background: rgba(255, 255, 255, .86);
+    backdrop-filter: blur(18px) saturate(1.15);
+    border-bottom: 1px solid var(--line);
+  }
+  .rd-brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 16px; letter-spacing: -.01em; }
+  .rd-brand-dot { width: 22px; height: 22px; border-radius: 7px; background: var(--accent); box-shadow: 0 3px 8px rgba(49,87,213,.35); position: relative; }
+  .rd-brand-dot::after { content: ""; position: absolute; inset: 6px; border-radius: 3px; background: #fff; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+  .rd-brand-sub { font-size: 12px; font-weight: 600; color: var(--text-3); margin-left: 6px; letter-spacing: 0; }
+
+  .rd-views { display: inline-flex; align-items: center; gap: 4px; background: #ebeefa; border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
+  .rd-views button {
+    border: 0; background: transparent; font-family: inherit; cursor: pointer;
+    font-size: 13.5px; font-weight: 600; color: var(--text-2);
+    padding: 6px 16px; border-radius: 999px; transition: background .15s, color .15s, box-shadow .15s;
+  }
+  .rd-views button:hover { color: var(--accent); }
+  .rd-views button.on { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(49,87,213,.28); }
+
+  .rd-meta { display: flex; align-items: center; gap: 14px; }
+  .rd-progress-text { font-size: 13.5px; font-weight: 700; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .rd-progress-text strong { color: var(--accent); font-size: 15px; }
+  .rd-close { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--text-2); font-size: 14px; cursor: pointer; transition: all .15s; }
+  .rd-close:hover { color: #c0392b; border-color: #e8c4bf; background: #fdf4f3; }
+
+  .rd-progress { flex: none; height: 3px; background: #e6e9f2; }
+  .rd-progress i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #5b7ae0, var(--accent)); transition: width .3s ease; }
+
+  /* ── 舞台与卡片 ───────────────────────── */
+  .rd-stage { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; padding: 26px 24px; }
+  .rd-card {
+    width: min(780px, 100%); max-height: 100%; overflow-y: auto;
+    background: var(--surface); border: 1px solid #e8eaf2; border-radius: var(--radius);
+    box-shadow: 0 18px 44px rgba(28, 36, 66, .10), 0 2px 8px rgba(28, 36, 66, .05);
+    padding: 30px 38px 34px;
+    scrollbar-width: thin; scrollbar-color: #d4d9e6 transparent;
+  }
+  .rd-card::-webkit-scrollbar { width: 8px; }
+  .rd-card::-webkit-scrollbar-thumb { background: #d4d9e6; border-radius: 4px; }
+  @keyframes rd-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .rd-card.enter { animation: rd-in .28s ease; }
+
+  .card-head { display: flex; align-items: center; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid #eef0f6; margin-bottom: 18px; }
+  .mark { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 44px; height: 26px; padding: 0 9px; border-radius: 7px; color: #fff; font-size: 12px; font-weight: 800; letter-spacing: .3px; }
+  .card-journal { font-size: 14.5px; font-weight: 700; color: #2a3145; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card-date { margin-left: auto; flex: none; font-size: 13px; color: var(--text-3); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .card-title { font-size: 20.5px; line-height: 1.5; font-weight: 800; letter-spacing: -.01em; color: var(--text-1); text-wrap: pretty; }
+  .card-en-title { margin-top: 8px; font-size: 13.5px; line-height: 1.6; color: var(--text-3); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* 速评版三段式 */
+  .brief-block { margin-top: 22px; display: grid; gap: 13px; }
+  .brief-row { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 12px; align-items: start; }
+  .brief-label { font-size: 14px; font-weight: 800; color: var(--accent); letter-spacing: .02em; padding-top: 1px; }
+  .brief-value { font-size: 15px; line-height: 1.7; color: #333a4d; }
+  .brief-topic { margin-top: 18px; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--accent); background: var(--accent-light); border: 1px solid #d9e2f8; border-radius: 999px; padding: 4px 13px; }
+
+  /* 摘要版 */
+  .sec-label { margin-top: 22px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 800; color: var(--accent); letter-spacing: .06em; }
+  .sec-label::after { content: ""; flex: 1; height: 1px; background: #edf0f7; }
+  .abs-text { margin-top: 12px; font-size: 15px; line-height: 1.95; color: #333a4d; text-align: justify; }
+  .abs-text.en { font-size: 14.5px; line-height: 1.85; color: #3d465c; }
+  .authors { margin-top: 14px; font-size: 13.5px; line-height: 1.7; color: #7a8396; }
+  .kw-row { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .kw { font-size: 12.5px; font-weight: 600; color: #5b6478; background: #f3f5f9; border: 1px solid #e4e8f0; border-radius: 999px; padding: 3px 12px; }
+
+  /* ── 底栏 ─────────────────────────────── */
+  .rd-footer {
+    flex: none; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px;
+    padding: 14px 26px 16px;
+  }
+  .rd-nav {
+    justify-self: start; display: inline-flex; align-items: center; gap: 8px;
+    font-family: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer;
+    border: 1px solid var(--line); background: #fff; color: var(--text-2);
+    border-radius: 999px; padding: 10px 22px; transition: all .15s;
+    box-shadow: 0 2px 6px rgba(28,36,66,.05);
+  }
+  .rd-nav:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); transform: translateY(-1px); }
+  .rd-nav:disabled { opacity: .38; cursor: default; }
+  .rd-nav.primary { justify-self: end; background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 6px 16px rgba(49,87,213,.30); }
+  .rd-nav.primary:hover:not(:disabled) { background: #2b4bbd; color: #fff; }
+
+  .rd-actions { display: inline-flex; align-items: center; gap: 10px; }
+  .rd-action {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer;
+    border: 1px solid var(--line); background: #fff; color: var(--text-2);
+    border-radius: 999px; padding: 8px 17px; transition: all .15s;
+  }
+  .rd-action:hover { border-color: #c8d0e2; color: var(--text-1); }
+  .rd-action .ico { font-size: 15px; line-height: 1; }
+  .rd-action.on-fav { background: #fdf6ea; border-color: #ecd9b6; color: #a16207; }
+  .rd-action.on-read { background: #ecf7f3; border-color: #c6e4d9; color: #2f7d68; }
+
+  .rd-hint { flex: none; text-align: center; padding: 0 0 10px; font-size: 12px; color: var(--text-3); letter-spacing: .02em; }
+  .rd-hint kbd { font-family: inherit; font-size: 11.5px; font-weight: 700; color: var(--text-2); background: #fff; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; margin: 0 1px; }
+</style>
+</head>
+<body>
+  <header class="rd-header">
+    <div class="rd-brand"><span class="rd-brand-dot"></span>卡片阅读模式<span class="rd-brand-sub">原型预览 · 两期真实周报样本</span></div>
+    <div class="rd-views" role="tablist" aria-label="卡片版本">
+      <button type="button" data-view="brief" class="on" role="tab" aria-selected="true">速评版</button>
+      <button type="button" data-view="zh" role="tab" aria-selected="false">中文摘要版</button>
+      <button type="button" data-view="en" role="tab" aria-selected="false">原文版</button>
+    </div>
+    <div class="rd-meta">
+      <span class="rd-progress-text">第 <strong id="rdIdx">1</strong> / <span id="rdTotal">12</span> 条</span>
+      <button class="rd-close" type="button" title="退出阅读模式（接入后执行关闭）">✕</button>
+    </div>
+  </header>
+  <div class="rd-progress"><i id="rdBar"></i></div>
+
+  <main class="rd-stage"><article class="rd-card" id="rdCard" aria-live="polite"></article></main>
+
+  <footer class="rd-footer">
+    <button class="rd-nav" id="rdPrev" type="button">← 上一条</button>
+    <div class="rd-actions">
+      <button class="rd-action" id="rdFav" type="button"><span class="ico">☆</span>收藏</button>
+      <button class="rd-action" id="rdRead" type="button"><span class="ico">○</span>标记已读</button>
+    </div>
+    <button class="rd-nav primary" id="rdNext" type="button">下一条 →</button>
+  </footer>
+  <div class="rd-hint"><kbd>←</kbd><kbd>→</kbd> 翻页 · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 切换版本 · <kbd>F</kbd> 收藏 · <kbd>R</kbd> 已读</div>
+
+<script>
+const DATA = {"periods":["2026-10-06","2026-09-28"],"samples":[{"id":53340,"title":"Hybrid Fault Isolation and Power Control of Wind Turbine Generators Based on Stacked UIO","zhTitle":"基于堆叠UIO的风力发电机混合故障隔离和功率控制","journal":"IEEE Transactions on Sustainable Energy","abbr":"TSE","tone":"ieee","date":"2026-10","dateFull":"2026-10-01","direction":"protection","directionLabel":"继电保护与故障诊断","authors":"Qi Yao, Kang Li, Sheng Huang, Zhonggui Li, Fang Fang, Jizhen Liu","abstract":"The stable operation of megawatt-class wind turbines directly impacts grid connection performance. As complex electromechanicald systems operating in variable environments, time-varying hybrid faults frequently occur, posing challenges for fault-tolerant control (FTC). This paper proposes novel approaches for hybrid fault diagnosis and fault-tolerant controller design. First, a collaborative architecture for a stacked unknown input observer (UIO) is constructed for integrated fault diagnosis of hybrid faults in wind turbine generators (WTGs). The designed stacked UIO strategy can decouple and separately estimate the dynamic of speed and torque, achieving effective time-varying hybrid fault diagnosis. Second, given the disturbances, uncertainties, and discrete-time nature of WTGs, the asymptotic stability of the proposed UIO is established using Lyapunov’s theorem. Finally, combining fault information, a two-degree-of-freedom model predictive control strategy is adopted to achieve FTC while also considering power stability tracking. Simulation results show that the proposed method can estimate time-varying faults in WTG actuators and sensors, and maintain reliable control performance under hybrid fault conditions, thereby verifying its effectiveness as a comprehensive FTC solution.","zhAbstract":"兆瓦级风力发电机的稳定运行直接影响并网性能。由于复杂的机电系统运行在多变的环境中，时变混合故障频繁发生，给故障容限控制（FTC）带来了挑战。本文提出了混合故障诊断和容差控制器设计的新颖方法。首先，构建了堆叠式未知输入观测器（UIO）的协作架构，用于风力涡轮发电机（WTG）混合故障的集成故障诊断。所设计的层叠式UIO策略能够解耦并分别估计转速和转矩的动态，实现有效的时变混合故障诊断。其次，考虑到扰动，不确定性和离散时间的风力发电机的性质，所提出的UIO的渐近稳定性建立使用李雅普诺夫定理。最后，结合故障信息，采用二自由度模型预测控制策略，在实现FTC的同时兼顾电力稳定跟踪。仿真结果表明，该方法能够估计风电机组执行器和传感器的时变故障，并在混合故障条件下保持可靠的控制性能，从而验证了其作为综合FTC解决方案的有效性。","keywords":"Hybrid fault; fault diagnosis; unknown input observers; wind turbine generator","url":"https://doi.org/10.1109/tste.2026.3695571","doi":"10.1109/tste.2026.3695571","brief":{"object":"风电机组复合故障诊断与容错","method":"堆叠未知输入观测器协同架构解耦转速转矩动态","finding":"时变复合故障有效诊断与渐近稳定容错控制"}},{"id":118824,"title":"Dual-time-scale predictive hierarchical electro-thermal coordination for thermal-load reshaping in heavy-duty electric-drive hybrid vehicles","zhTitle":"用于重型电驱动混合动力汽车热负荷重塑的双时间尺度预测分层电热协调","journal":"Applied Energy","abbr":"AE","tone":"elsevier","date":"2026-10","dateFull":"2026-10-12","direction":"transport","directionLabel":"电动汽车与电气化","authors":"Wei Xiong, Junqiu Li, Zengcheng Liu, Xueping Li","abstract":"Unlike passenger electric vehicles, heavy-duty electric-drive hybrid vehicles operate for long periods under high-load conditions. The continuous heat rejection of the engine-generator set through the engine high-temperature coolant loop makes fan/pump power directly interact with the direct-current (DC) bus power balance and generator–battery power split. Therefore, cooling power scheduling is part of energy management, rather than only a thermal-protection task. This paper proposes a dual-time-scale predictive hierarchical electro-thermal coordination strategy, termed DTP-HETC, for thermal-load reshaping in heavy-duty electric-drive hybrid vehicles. A shared-encoder dual-head bidirectional long short-term memory (BiLSTM) predictor is used to capture short-horizon traction fluctuations and long-horizon engine-loop thermal evolution. The predicted thermal risk is quantified as thermal debt and converted into thermal buffer intensity B T k , which further adapts the thermal-load-shaping weights and the control-grid resolution of dynamic programming-based model predictive control (DP-MPC). By using this information, DTP-HETC advances part of the cooling effort from boundary-triggered response to thermal-risk formation intervals, smoothing cooling-induced DC-bus disturbances and coordinating fan/pump power with generator–battery power allocation. Simulation and hardware-in-the-loop tests on a 220-ton series hybrid mining truck show that, under sustained heavy-load uphill operation, DTP-HETC reduces equivalent fuel consumption by 12.16% and lowers peak engine-loop coolant temperature by 2.53 °C compared with a rule-based baseline. The mean execution time is 33.7 ms, confirming controller-level real-time feasibility. These results indicate that DTP-HETC provides an effective thermal-load reshaping approach for improving energy efficiency and thermal reliability in heavy-duty electric-drive hybrid vehicles.","zhAbstract":"与乘用车电动汽车不同，重型电驱动混合动力汽车在高负载条件下长时间运行。发动机-发电机组通过发动机高温冷却剂回路的持续散热使风扇/泵功率直接与直流（DC）母排功率平衡和发电机-电池功率分配相互作用。因此，冷却功率调度是能源管理的一部分，而不仅仅是热保护任务。本文提出了一种双时间尺度预测分层电热协调策略（DTP-HETC），用于重型电驱动混合动力汽车的热负荷重塑。共享编码器双头双向长短期记忆（BiLSTM）预测器用于捕获短期牵引力波动和长期发动机回路热演变。预测的热风险被量化为热债务，并转换为热缓冲强度BT k，这进一步适应基于动态规划的模型预测控制（DP-MPC）的热负荷整形权重和控制网格分辨率。通过使用这些信息，DTP-HETC将部分冷却工作从边界触发响应推进到热风险形成间隔，平滑冷却引起的直流公交干扰，并协调风扇/泵功率与发电机-电池功率分配。对220吨系列混合动力矿山卡车进行的模拟和硬件在环测试表明，与基于规则的基线相比，在持续重载上坡运行下，DTP-HETC将等效燃油消耗量降低了12.16%，并将发动机回路冷却剂峰值温度降低了2.53 °C。平均执行时间为33.7 ms，证实了管理员级实时可行性。这些结果表明，DTP-HETC为提高重型电动混合动力汽车的能源效率和热可靠性提供了一种有效的热负荷重塑方法。","keywords":"Heavy-duty electric-drive hybrid vehicle; Predictive energy management; Hierarchical electro-thermal coordination; Thermal-load reshaping; Model predictive control; Hardware-in-the-loop","url":"https://doi.org/10.1016/j.apenergy.2026.129015","doi":"10.1016/j.apenergy.2026.129015","brief":{"object":"重型电驱混合动力车辆","method":"共享编码器双头 BiLSTM 预测＋双时间尺度 MPC 分层","finding":"冷却功率纳入能量管理实现热负荷重塑，经 HiL 验证"}},{"id":63109,"title":"Design and Verification of Novel Self-Voltage Sharing Vacuum Interrupter for Multi-Break VCBs in GIS","zhTitle":"用于地理信息系统多断点VCB的新型自压均压真空灭弧器的设计与验证","journal":"IEEE Transactions on Power Delivery","abbr":"TPW","tone":"ieee","date":"2026-10","dateFull":"2026-10-01","direction":"hv","directionLabel":"高电压与绝缘","authors":"Hui Chen, Xian Cheng, Guowei Ge, Shuai Du, Yuanxin Yao, Gaochen Huo, Runfeng Zhang","abstract":"A key challenge for multi-break vacuum circuit breakers (VCBs) in gas-insulated switchgear (GIS) is the design of compact voltage grading solutions for vacuum interrupters (VIs). This paper addresses the non-uniform voltage distribution across VI shields and series-connected breaks in VCBs that is caused by the significantly increased stray capacitances in GIS. To address these issues, we propose a novel self-voltage sharing capacitor pattern (SSCP), and the equivalent circuit of the VI with SSCP is analyzed. Simulations of the SSCP and the conventional grading capacitor pattern (CGCP) were conducted, and the maximum external electric field strength of the VI with SSCP was reduced by 53.6%, while the temperature rise was also decreased by 33.9%. A 40.5-kV VI prototype with SSCP was developed based on ring capacitors, external shields, and integrated encapsulation. Experimental results for series-connected VIs with SSCP demonstrate that the potential distributions among the shields and breaks approach the ideal values. The withstand voltage of series-connected VIs with SSCP is increased by 12.5%, and the temperature rise is decreased by 32.2%. The feasibility of the VI with SSCP has been verified, providing a compact voltage-sharing design reference for ultra-high-voltage multi-break VCBs in GIS.","zhAbstract":"气体绝缘开关设备（GIS）中多断点真空断路器（VCB）的一个关键挑战是为真空灭弧室（VI）设计紧凑的电压分级解决方案。本文解决了由于地理信息系统中杂散电容显着增加而引起的VI屏蔽和VCB中串联断路器之间电压分布不均匀的问题。为了解决这些问题，我们提出了一种新型的自电压共享电容模式（SSCP），并分析了具有SSCP的VI的等效电路。对SSCP和传统分级电容模式（CGCP）进行了模拟，采用SSCP的VI的最大外电场强度降低了53.6%，而升温也降低了33.9%。基于环形电容器、外屏蔽和集成封装开发了具有SSCP的40.5-kV VI原型。具有SSCP的串联VI的实验结果表明，屏蔽层和断点之间的势分布接近理想值。具有SSCP的串联VI的耐受电压提高12.5%，升温降低32.2%。采用SSCP的VI的可行性得到了验证，为地理信息系统中超高压多断点VCB提供了紧凑的均压设计参考。","keywords":"Vacuum circuit breaker; vacuum interrupter; self-voltage sharing capacitor pattern; compact voltage grading; experimental research","url":"https://doi.org/10.1109/tpwrd.2026.3690609","doi":"10.1109/tpwrd.2026.3690609","brief":{"object":"多断口真空断路器自均压真空灭弧室（VI）","method":"自均压电容布置（SSCP）等效电路分析＋40.5kV 样机试验","finding":"最大外电场降低 53.6%、温升降低 33.9%，紧凑均压方案获设计验证"}},{"id":119605,"title":"Adsorption-based compressed CO2 energy storage system using commercial adsorbent pellets: Experimental screening and thermodynamic-economic assessment","zhTitle":"使用商用吸附剂颗粒的基于吸收的压缩CO2储能系统：实验筛选和热力经济评估","journal":"Energy","abbr":"ENY","tone":"elsevier","date":"2026-10","dateFull":"2026-10-12","direction":"storage","directionLabel":"储能系统","authors":"Jianbo Tang, Quanliang Liu, Kaile Xin, Yuandong Yang, Fangfang Chen, Yiqiang Zhao, Xiaoyu Zhang, Tianrun Yang, Qie Sun","abstract":"Adsorption-based compressed CO2 energy storage (AB-CCES) offers a promising route for compact low-pressure CO2 storage, however, the selection of optimal adsorbents for practical applications remains uncertain and requires further investigation. This study systematically screened five commercial adsorbent pellets and evaluated the performance of the corresponding AB-CCES system by integrating material characterization, CO2 adsorption-desorption experiments, ad-desorption kinetics, thermodynamic simulation, and techno-economic analysis. Zeolite 4A emerged as the most promising candidate because it combined high CO2 uptake with favorable kinetics, regenerability, and cyclic stability under the special conditions of AB-CCES. The experimentally derived adsorption model was incorporated into the system simulation, demonstrating a substantial reduction in low-pressure tank volume and an approximately 36 times increase in volumetric energy density over conventional CCES while maintaining competitive energy and exergy efficiencies. Lower adsorption temperatures could reduce the storage-tank volume and increased energy density, whereas higher desorption temperatures enhance power output but reduce exergy efficiency. Further techno-economic analysis indicates that AB-CCES achieves lower equipment-related and land-related costs, resulting in a lower LCOE value of 0.1237 $/kWh and a dynamic payback period of approximately 11.2 years. Economic sensitivity analysis further suggests that the desorption temperature should be maintained at 200-250 °C to balance thermodynamic performance and cost-effectiveness.","zhAbstract":"基于吸收的压缩CO2储能（AB-CCES）为紧凑型低压CO2储能提供了一条有前途的途径，但实际应用的最佳吸收剂的选择仍然不确定，需要进一步研究。本研究系统筛选了五种商用吸附剂颗粒，并通过综合材料特性、CO2吸附-脱附实验、脱附动力学、热力学模拟和技术经济分析来评价相应AB-CCES系统的性能。4A分子筛成为最有希望的候选物，因为它将高CO2吸收与AB-CCES特殊条件下良好的动力学、再生性和循环稳定性结合在一起。将实验推导出的吸收模型纳入系统模拟中，证明低压罐体积大幅减少，体积能量密度比传统CCES增加约36倍，同时保持有竞争力的能源和有用效率。较低的吸收温度可能会减少储罐体积并增加能量密度，而较高的脱附温度会增强功率输出，但会降低有效能。进一步的技术经济分析表明，AB-CCES实现了较低的设备相关和土地相关成本，导致LCOE值较低，为0.1237美元/kWh，动态投资回收期约为11.2年。经济敏感性分析进一步表明，脱附温度应保持在200-250 °C，以平衡热力学性能和成本效益。","keywords":"Compressed CO2 energy storage; CO2 ad-desorption; Commercial adsorbent pellets; Thermodynamic analysis; Techno-economic analysis","url":"https://doi.org/10.1016/j.energy.2026.142597","doi":"10.1016/j.energy.2026.142597","brief":{"object":"吸附式压缩 CO2 储能系统","method":"五种商用吸附剂实验筛选＋热力学技经评估","finding":"沸石 4A 兼得高吸附量、动力学与循环稳定性"}},{"id":63108,"title":"Discrimination of Tree-Contact High-Impedance and Flame Faults in Distribution Networks via Zero-Sequence Voltage Monitoring","zhTitle":"通过零序电压监测识别配电网树木接触高阻和火焰故障","journal":"IEEE Transactions on Power Delivery","abbr":"TPW","tone":"ieee","date":"2026-10","dateFull":"2026-10-01","direction":"protection","directionLabel":"继电保护与故障诊断","authors":"Ze Yang, Jiangling Tan, Kang Yuan, Tianxiang Chen, Zhuofeng Jiang, Hong Gu, Yankai Xing, Dongsheng Cai","abstract":"Tree-contact high-impedance faults (THIF) and flame faults are common fault types in the forest area. Their mitigation and prevention are crucial to the management of distribution network faults. However, the signals of these faults are so weak that existing zero-sequence protection methods cannot ensure effectiveness and accuracy during the early fault stage. To address this issue, this paper investigates the electro-thermal coupling mechanism during the fault evolution process. Fault resistance models are established for different fault types. Experiments on 10 kV and 35 kV distribution systems verify that the proposed models can effectively capture the time-varying characteristics of the faults. Then electrical characteristics are investigated during discharges by applying Fast Fourier Transform (FFT) to the zero-sequence voltage. Feature parameters are obtained including Total Harmonic Distortion (THD), Power Spectral Entropy (PSE), Skewness (SKE) and Kurtosis (KUR) of the sub-fundamental spectral components. Statistical analysis is employed to mitigate the influence of individual sample variability. From the experimental results, the frequency domain characteristics of both THIF and flame faults are independent of voltage levels. THD of flame fault is significantly higher than that of THIF due to the unstable discharge path in the flame. Conversely, THIF shows higher SKE and KUR because of low-frequency turbulence in the flame. The combined unstable discharge channel and turbulence cause PSE to be significantly higher in flame fault than in THIF. This research provides a methodological basis for fault classification and prevention for both 10 kV and 35 kV distribution lines.","zhAbstract":"树木接触高阻断层（THIF）和火焰断层是林区常见的断层类型。它们的缓解和预防对于配电网故障的管理至关重要。然而，这些故障的信号非常弱，现有的无息保护方法无法保证早期故障阶段的有效性和准确性。为了解决这个问题，本文研究了故障演变过程中的电-热耦合机制。建立了不同故障类型的故障电阻模型。在10 kV和35 kV配电网上的实验结果表明，该模型能有效地捕捉故障的时变特征。通过对零序电压进行快速傅里叶变换，研究了放电过程中的电气特性。得到了次基波分量的总谐波失真（THD）、功率谱熵（PSE）、偏度（SKE）和峰度（KUR）等特征参数。采用统计分析来减轻个体样本变异性的影响。从实验结果来看，THIF和火焰故障的频域特征与电压水平无关。由于火焰中放电路径不稳定，火焰故障的THD明显高于THIF。相反，由于火焰中的低频湍流，THIF显示出更高的SKE和Kur。不稳定的放电通道和湍流导致火焰故障中的PSE明显高于THIF中的PSE。该研究为10 kV和35 kV配电线路的故障分类和预防提供了方法论基础。","keywords":"Distribution lines; tree-contact high-impedance fault; flame fault; resistance models; zero-sequence voltage","url":"https://doi.org/10.1109/tpwrd.2026.3697506","doi":"10.1109/tpwrd.2026.3697506","brief":{"object":"配电网树触高阻故障（THIF）与火焰故障判别","method":"电-热耦合机理分析＋分类型故障电阻模型＋FFT 放电特征","finding":"模型有效捕捉时变故障特性，实现早期弱信号下两类故障准确判别"}},{"id":105382,"title":"Fluid flow, temperature, and cell voltage non-uniformity in high-power PEMFC stacks induced by scaling-up: Development of a high-precision model and a case study","zhTitle":"放大引起的大功率PEMFC堆中的流体流动、温度和电池电压不均匀性：高精度模型的开发和案例研究","journal":"Renewable Energy","abbr":"REN","tone":"elsevier","date":"2026-10","dateFull":"2026-10-08","direction":"ies","directionLabel":"综合能源系统","authors":"Huawei Chang, Pengcheng Yue, Yuan Huang, Zhengkai Tu","abstract":"The integration of proton exchange membrane fuel cells (PEMFCs) with renewable energy systems has emerged as a core solution to address the challenges of energy supply intermittency in the transition to low-carbon energy. As PEMFCs are evolving toward higher current density and power output, the non-uniformity induced by stack scaling-up has emerged as a critical factor impeding the further advancement of PEMFCs. In this study, a comprehensive model integrating the flow network, voltage, and thermal network models is developed for high-power PEMFC stacks. The model is validated against the experimental data from a commercial stack consisting of 260 single cells, with stack voltage and temperature errors of 4.0% and 1.96%, respectively. Moreover, the simulated cell voltage distribution shows a high degree of consistency with the experimental results, confirming the model's high precision. A case study based on this model is performed on a high-power PEMFC stack to investigate the impacts of current density and cell number on the fluid flow characteristics, temperature consistency, and cell voltage uniformity. The results are conducive to further improving the current density and stack power of commercial PEMFC stacks, and also facilitate the rapid determination of the maximum cell number in a stack.","zhAbstract":"质子交换膜燃料电池（PEMFC）与可再生能源系统的集成已成为解决向低碳能源转型中能源供应间歇性挑战的核心解决方案。随着PEMFC向更高的电流密度和功率输出发展，堆放大引起的不均匀性已成为阻碍PEMFC进一步发展的关键因素。在本研究中，为大功率PEMFC电堆开发了集成流网络、电压和热网络模型的综合模型。该模型根据由260个单电池组成的商业电堆的实验数据进行了验证，电堆电压和温度误差分别为4.0%和1.96%。此外，模拟的电池电压分布与实验结果具有高度一致性，证实了模型的高精度。基于该模型对大功率PEMFC电堆进行了案例研究，以研究电流密度和电池数量对流体流动特性、温度一致性和电池电压均匀性的影响。研究结果有利于进一步提高商用PEMFC电堆的电流密度和电堆功率，也有利于快速确定电堆中最大电池数量。","keywords":"High-power PEMFC stack; Flow characteristic; Temperature consistency; Voltage uniformity; Flow network; Thermal network","url":"https://doi.org/10.1016/j.renene.2026.126528","doi":"10.1016/j.renene.2026.126528","brief":{"object":"大功率 PEMFC 电堆","method":"流网络＋电压＋热网络耦合高精度模型","finding":"260 节商用堆验证，电压误差 4.0%、温度 1.96%"}},{"id":118819,"title":"A probability-box framework for quantifying office building air conditioning flexibility under multi-source uncertainty","zhTitle":"多源不确定性下量化办公楼空调灵活性的概率箱框架","journal":"Applied Energy","abbr":"AE","tone":"elsevier","date":"2026-10","dateFull":"2026-10-12","direction":"microgrid","directionLabel":"微电网与虚拟电厂","authors":"Yan Ding, Bangtai Zhai, Shengze Lu, Cheng Fan, Huilong Wang, Wei Tian, Yifan Liu","abstract":"Air conditioning systems are important flexible resources in buildings. However, their flexibility potential is highly uncertain due to unpredictable load disturbances caused by weather and occupancy variations. These uncertainties often lead to inconsistent load reduction outcomes, even when identical operating strategies are applied. To address the challenge of accurate quantification, this study proposes a probability box (P-box) model to characterize such potential under uncertainty. After defining the perturbation ranges and probability distributions of uncertain parameters, a stochastic load scenario generation method is employed, combining Monte Carlo sampling with Savitzky-Golay filtering to simulate multi-source disturbance conditions. The proposed P-box model is then evaluated for its prediction accuracy and adaptability based on these scenarios. The method is demonstrated using a calibrated office-building model in Tianjin under summer cooling conditions. Results show that under temperature reset and precooling strategies, the P-box model yields remarkably low prediction errors, the Wasserstein-based prediction achieves relative errors of 9.22% and 4.58% with respect to load reduction simulated under field-measured inputs, compared with 16.98% and 7.90% for the traditional deterministic methods. Moreover, the 100% P-box interval enveloped all evaluated samples, while narrower confidence intervals provided risk-dependent coverage, which accurately delineates the adjustable load range of buildings under multi-source disturbance conditions. This provides a reliable representation method for flexible resource scheduling and demand response strategy formulation.","zhAbstract":"空调系统是建筑物中重要的灵活资源。然而，由于天气和占用率变化引起的不可预测的负载干扰，它们的灵活性潜力高度不确定。即使应用相同的操作策略，这些不确定性通常会导致不一致的减负荷结果。为了解决准确量化的挑战，本研究提出了一种概率盒（P-box）模型来描述不确定性下的这种潜力。在定义了不确定参数的扰动范围和概率分布后，采用随机负荷情景生成方法，结合蒙特卡罗抽样和Savitzky-Golay过滤来模拟多源扰动条件。然后根据这些场景评估提出的P盒模型的预测准确性和适应性。该方法在夏季降温条件下使用天津市经过校准的办公楼模型进行了验证。结果表明，在温度重置和预冷策略下，P-box模型的预测误差非常低，基于Wasserstein的预测对于现场测量输入下模拟的负荷降低的相对误差为9.22%和4.58%，而传统确定性方法的相对误差为16.98%和7.90%。此外，100%的P盒区间涵盖所有评估的样本，而更窄的置信区间提供了风险依赖的覆盖范围，准确地描绘了多源干扰条件下的建筑物的可调负荷范围。这为柔性资源调度和需求响应策略的制定提供了可靠的表示方法。","keywords":"Building energy flexibility; Flexibility potential quantification; Air-conditioning demand response; P-box model; Wasserstein distance","url":"https://doi.org/10.1016/j.apenergy.2026.129030","doi":"10.1016/j.apenergy.2026.129030","brief":{"object":"办公楼空调系统柔性","method":"概率箱模型＋蒙特卡洛与 Savitzky-Golay 场景生成","finding":"刻画多源扰动下空调需求响应柔性潜力分布"}},{"id":12248,"title":"Vehicle-integrated photovoltaics in battery electric vehicles: DC–DC converter design and energy harvesting performance for main high-voltage battery integration","zhTitle":"电池电动汽车中的车载集成光伏：主要高压电池集成的DC-DC转换器设计和能量收集性能","journal":"Energy","abbr":"ENY","tone":"elsevier","date":"2026-10","dateFull":"2026-10-01","direction":"power-electronics","directionLabel":"电力电子装备","authors":"Hüseyin Ayhan Yavaşoğlu, Benjamin Shani, Ayooluwa Ajiboye, Hassan Habib Chaudhry, Alireza Khaligh","abstract":"Vehicle-integrated photovoltaic systems are gaining increasing attention as a promising approach to enhance the energy autonomy of battery electric vehicles while mitigating their driving-range limitations and dependence on frequent fast charging. Despite these advantages, a key challenge in solar-assisted electric vehicle system design lies in effectively integrating photovoltaic sources with electrical architectures, which vary widely across manufacturers and models and typically operate at voltage levels of 400–800 V. Therefore, this paper investigates the modeling, design, and implementation of an LLC resonant DC–DC power conversion system specifically developed to interface the solar energy output with the vehicle electrical system employing various voltage architectures. The LLC resonant tank is optimized to minimize system losses across a wide battery electric vehicle operating range, while frequency-modulated control is employed to achieve full soft switching, enabling high-efficiency operation and reduced thermal management requirements. In this regard, a loss-minimization-based LLC design methodology is introduced. Steady-state experimental results obtained from a 540 W hardware prototype validate the proposed modeling framework and design approach. Furthermore, various photovoltaic panel integration strategies, including roof, hood, and trunk placements, are investigated to maximize energy harvesting. To provide a realistic and representative case study, a daily usage scenario incorporating driving cycles based on the Worldwide Harmonized Light Vehicles Test Cycle is simulated. The results demonstrate that full utilization of the available upper vehicle surface for solar energy integration can yield up to 6 kWh of energy per day.","zhAbstract":"车辆集成光伏系统作为一种有前途的方法，正在获得越来越多的关注，以增强电池电动汽车的能源自主性，同时减轻其行驶里程限制和对频繁快速充电的依赖。尽管有这些优势，太阳能辅助电动汽车系统设计中的一个关键挑战在于有效地将光伏电源与电气架构集成，电气架构因制造商和型号而异，通常在400-800V的电压水平下运行。因此，本文研究了LLC谐振DC-DC功率转换系统的建模、设计和实现，该系统专门开发用于将太阳能输出与采用各种电压架构的车辆电气系统连接起来。LLC谐振储罐经过优化，可最大限度地减少宽电池电动汽车工作范围内的系统损耗，同时采用调频控制实现完全软开关，实现高效运行并降低热管理要求。在这方面，介绍了loss-minimization-basedLLC设计方法论。从540 W硬件原型获得的稳态实验结果验证了所提出的建模框架和设计方法。此外，还研究了各种光伏电池板集成策略，包括车顶、引擎盖和行李箱放置，以最大限度地收集能量。为了提供一个现实和有代表性的案例研究，模拟了一个基于全球协调轻型汽车测试周期的包含驾驶周期的日常使用场景。结果表明，充分利用可用的车辆上部表面进行太阳能集成每天可以产生高达6 kWh的能量。","keywords":"Vehicle integrated photovoltaic (VIPV); Battery electric vehicles (BEV); Photovoltaic (PV) panel; LLC DC-DC converter; resonant tank; Drive cycle; Energy harvesting; Soft-switching; Efficiency","url":"https://doi.org/10.1016/j.energy.2026.141978","doi":"10.1016/j.energy.2026.141978","brief":{"object":"车载光伏高压电池集成变换器","method":"LLM谐振DC-DC设计适配400-800V架构＋驱动循环实测","finding":"软开关高效实现车载光伏能量收集"}},{"id":63157,"title":"A Unified Probability Model for Multi-Type Power Quality Disturbances Based on Operating States Identification","zhTitle":"基于运行状态识别的多种电能质量扰动统一概率模型","journal":"IEEE Transactions on Power Delivery","abbr":"TPW","tone":"ieee","date":"2026-10","dateFull":"2026-10-01","direction":"power-quality","directionLabel":"电能质量","authors":"Ying Wang, Juan Wang, Shunyi Li, Peng Zhang, Ran Chen","abstract":"The Grid-connected inverter (GCI) inevitably generates the multi-type power quality disturbances at the same time; for example, it not only emits harmonic currents but also causes voltage fluctuations. Building one model to describe the multi-type disturbances is necessary for disturbance source tracing, disturbance prediction, mitigation decision, and so on. This study proposes a unified probability model for multi-type power quality disturbances for GCI based on operating states identification. Firstly, it proposes an operating states identification algorithm considering multi-type disturbances, to facilitate the construction of the disturbance model for different operating states. Secondly, the unified probability model for multi-type power quality disturbances is developed, which includes the edge probability model and unified probability model, to analyze the occurrence probability and coupling relationship of multi-type disturbances. Finally, the accuracy and validity of the proposed method are verified by using the real recorded data of photovoltaic (PV) GCI in practice.","zhAbstract":"并网逆变器（GCI）不可避免地会同时产生多种类型的电能质量干扰，例如它不仅发出和谐电流，还会引起电压波动。建立一个模型来描述多种类型干扰是干扰源追踪、干扰预测、缓解决策等的必要条件。本研究提出了一种基于运行状态识别的GCI多种类型电能质量干扰的统一概率模型。首先，提出了一种考虑多种干扰的运行状态识别算法，以方便构建不同运行状态的干扰模型。其次，建立了多种类型电能质量扰动的统一概率模型，包括边缘概率模型和统一概率模型，分析多种类型扰动的发生概率和耦合关系。最后，通过实际记录的太阳能（PV）GCI数据验证了所提方法的准确性和有效性。","keywords":"Power quality disturbance; fundamental voltage; harmonic current; operating state; multi-type disturbances unified probability model","url":"https://doi.org/10.1109/tpwrd.2026.3682501","doi":"10.1109/tpwrd.2026.3682501","brief":{"object":"并网逆变器（GCI）多类型电能质量扰动","method":"计及多类型扰动的运行状态辨识算法＋统一概率扰动模型构建","finding":"单一模型同时描述谐波电流与电压波动等多类扰动，服务溯源与治理决策"}},{"id":29982,"title":"Optimization of wind-PV-storage aggregated inertia coefficient using physics-informed neural network to suppress frequency oscillations in hydropower-dominated power systems","zhTitle":"基于物理信息神经网络的风光储组合惯性系数优化抑制水电主导电力系统频率振荡","journal":"Renewable Energy","abbr":"REN","tone":"elsevier","date":"2026-10","dateFull":"2026-10-01","direction":"stability","directionLabel":"电力系统稳定性","authors":"Guangxue Wang, Hongchun Shu, Botao Shi, Shunji Luo, Shunguang Lei","abstract":"Low-frequency oscillations can severely threaten frequency stability of hydropower-dominated power systems. Although such oscillations can be mitigated by adjusting the proportional-integral-derivative parameters of hydro turbine governors, this adjustment compromises the primary frequency regulation capability of hydro units. Wind, photovoltaic and energy storage systems are increasingly being integrated into hydropower delivery networks, and the fast regulation capabilities of these renewable sources offer an alternative solution to suppress both hydro unit power swings and system frequency oscillations. To make use of these capabilities, this paper proposes a novel coordinated control strategy for wind-photovoltaic-energy storage systems to suppress frequency oscillations in hydropower-dominated power grids. The key innovation of the proposed strategy lies in the use of a physics-informed neural network to dynamically optimize the aggregated virtual inertia coefficient of the wind-photovoltaic-energy storage system. This enables adaptive allocation of active power among wind, photovoltaic and energy storage units under different frequency deviation deadbands. Importantly, the proposed method achieves effective oscillation damping without modifying the existing hydro turbine governors. The performance of the proposed strategy is validated through real-time simulations on an RTLAB-based wind-photovoltaic-hydro-energy storage delivery system model. The corresponding results demonstrate that the proposed approach effectively suppresses power oscillations in the multi-source system and significantly enhances the primary frequency regulation performance, confirming its potential for practical implementation.","zhAbstract":"低频振荡可能严重威胁以水力发电为主的电力系统的频率稳定性。尽管可以通过调整水力涡轮机调节器的比例积分求导参数来减轻这种振荡，但这种调整会损害水力发电机组的一次频率调节能力。风能、太阳能和储能系统越来越多地集成到水力发电网络中，这些可再生能源的快速调节能力提供了抑制水力发电机组功率波动和系统频率振荡的替代解决方案。为了利用这些能力，本文提出了一种新型的风能-太阳能存储系统协调控制策略，以抑制水力发电为主的电网中的频率振荡。该策略的关键创新在于使用物理信息神经网络来动态优化风能-光电-储能系统的总虚拟惯性系数。这使得在不同频率偏差死区下，能够在风能、太阳能和储能单元之间自适应地分配有效功率。重要的是，所提出的方法在不修改现有的水力涡轮机调节器的情况下实现了有效的振动衰减。通过对基于RTLAB的风-光-水-储能传输系统模型的实时仿真验证了所提出策略的性能。相应的结果表明，所提出的方法有效地抑制了多源系统中的功率振荡，并显着提高了一次频率调节性能，证实了其实际实施的潜力。","keywords":"Wind-PV-Hydro-storage coordinated control; PINN; Aggregated virtual inertia control; Power oscillation suppression; Primary frequency regulation","url":"https://doi.org/10.1016/j.renene.2026.126199","doi":"10.1016/j.renene.2026.126199","brief":{"object":"水电主导系统风光储虚拟惯量","method":"物理信息神经网络优化聚合惯量系数协调控制","finding":"抑制水电机组功率振荡与系统频率振荡"}},{"id":118782,"title":"Bridging deterministic and stochastic scheduling: Learning risk-aware forecast adjustments for PV-BESS operation","zhTitle":"连接确定性和随机调度：学习PV-BESS操作的风险感知预测调整","journal":"Applied Energy","abbr":"AE","tone":"elsevier","date":"2026-10","dateFull":"2026-10-12","direction":"market","directionLabel":"电力市场与机制","authors":"Adriano Valle, Domenico Borello, Ricardo J. Bessa","abstract":"The participation of hybrid photovoltaic (PV) and battery energy storage system (BESS) installations in electricity markets requires modeling multi-temporal forecast uncertainty via temporal trajectories and integrating this information into bidding optimization frameworks. Most state-of-the-art approaches rely on stochastic or robust optimization methods, which are computationally intensive and offer limited interpretability to decision-makers. Consequently, deterministic optimization approaches remain the industry standard in practical market applications. To bridge this gap, this paper proposes a novel learning-to-optimize framework that combines a deterministic mixed-integer linear programming formulation with a context-aware artificial neural network policy trained through reinforcement learning. The policy operates as a learned cost function approximation, translating probabilistic forecast metrics into time-dependent multiplicative forecast adjustment parameters. This approach preserves the simplicity and industry acceptance of deterministic optimization while effectively embedding information related to forecast uncertainty and risk-awareness into the day-ahead bidding and scheduling process for hybrid PV-BESS systems. For a real-world electric vehicle charging station case study in Portugal, equipped with 375 kWp of PV generation and a 1.258 MWh BESS, the proposed learning-to-optimize framework substantially outperforms the deterministic baseline. Specifically, it captures 39.27% and 27.26% of the maximum theoretical cost-saving potential achievable under perfect forecasts during autumn and summer peak periods, respectively. At the intraday level, the learned policy effectively mitigates systematic forecast errors, reducing the cumulative daily negative imbalance volume by 48.22% under standard operating conditions. Moreover, the framework maintains a robust operational safety margin, reducing imbalance exposure by 10.02% during large unforeseen PV generation drops caused by clouds.","zhAbstract":"混合光电（PV）和电池储能系统（BESS）装置参与电力市场需要通过时间轨迹对多时段预测不确定性进行建模，并将此信息集成到投标优化框架中。大多数最先进的方法都依赖于随机或稳健的优化方法，这些方法计算密集型，并且为决策者提供有限的解释性。因此，确定性优化方法仍然是实际市场应用中的行业标准。为了弥合这一差距，本文提出了一种新型的学习优化框架，该框架将确定性混合整元线性规划公式与通过强化学习训练的上下文感知人工神经网络策略相结合。该策略作为学习成本函数逼近来运行，将概率预测指标转化为时间相关的相乘预测调整参数。这种方法保留了确定性优化的简单性和行业接受度，同时有效地将与预测不确定性和风险意识相关的信息嵌入到混合PV-BESS系统的前一天竞标和调度过程中。对于葡萄牙的现实电动汽车充电站案例研究，配备375 kWp的太阳能发电量和1.258 MWh的BESS，拟议的学习优化框架大大优于确定性基线。具体来说，它分别捕捉到了秋季和夏季高峰期完美预测下可实现的最大理论成本节省潜力的39.27%和27.26%。盘中层面，学到的政策有效缓解了系统性预测误差，使标准操作条件下累计每日负失衡成交量减少了48.22%。此外，该框架保持了强大的运营安全裕度，在云导致的不可预见的太阳能发电量大幅下降期间将不平衡风险减少10.02%。","keywords":"Energy storage; Reinforcement learning; Bidding optimization; Parametric cost function approximation; Forecast uncertainty","url":"https://doi.org/10.1016/j.apenergy.2026.128975","doi":"10.1016/j.apenergy.2026.128975","brief":{"object":"参与市场交易的光伏-储能电站","method":"确定性 MILP＋强化学习参数化成本函数近似","finding":"学习风险感知预测调整，兼顾可解释性与竞价决策"}},{"id":116683,"title":"Dynamic simulation and coordinated control of Carnot battery energy storage system integrated with LNG cold energy","zhTitle":"集成液化天然气冷能的卡诺电池储能系统动态模拟与协调控制","journal":"Energy","abbr":"ENY","tone":"elsevier","date":"2026-10","dateFull":"2026-10-11","direction":"storage","directionLabel":"储能系统","authors":"Jiahao Ni, Yilin Lu, Luopeng Yu, Zifeng Huang, Tao Jin, Tianbiao He","abstract":"Carnot batteries are promising for long-duration energy storage by converting electricity into thermal energy during charging and regenerating electricity during discharging. Integrating liquefied natural gas (LNG) cold energy can lower the heat sink temperature and promote low-grade thermal resource utilization. However, the dynamic behavior of LNG-assisted Carnot batteries under variable loads remains insufficiently understood. This study develops a dynamic model to investigate transient responses, heat transfer matching, storage state evolution, energy performance, and component exergy characteristics under step change ratios (SCRs) of ±2%, ±4%, ±6%, and ±8%. Coordinated regulation of working fluid and storage medium flow rates enables compressor input and expander output to track imposed load changes. For tolerance bands of 1%, 0.5%, and 0.1%, the controlled power response times are 2.80–5.57, 3.03–7.30, and 4.33–10.77 min, respectively. Thermal responses lag flow responses, while the logarithmic mean and minimum terminal temperature differences exhibit different trends, indicating that the overall heat-transfer driving force and terminal temperature approach should be jointly assessed. SCR variations alter storage inventory and subsequent operating duration, changing discharging by +3.7/−4.0 min after charging variations and charging by +6.13/−5.7 min after discharging variations. Across SCR = −8% to +8%, P2P efficiency decreases by 1.65 and 3.14 percentage points for charging and discharging variations, respectively. Exergy analysis shows that the components with the greatest cumulative exergy destruction do not necessarily exhibit the largest relative variations under SCR changes. These findings clarify the coupled effects of load variation, heat transfer, storage inventory, and component irreversibility in LNG-assisted Carnot batteries.","zhAbstract":"卡诺电池有望通过在充电过程中将电力转化为热能并在放电过程中再生电力来实现长期能量存储。整合液化天然气（LNG）冷能可以降低热沉温度，促进低品位热资源利用。然而，液化天然气辅助卡诺电池在可变负载下的动态行为仍然不够了解。本研究开发了一个动态模型，以研究阶跃变化比（SRC）为± 2%、± 4%、± 6%和± 8%下的瞬时响应、热传递匹配、存储状态演变、能量性能和部件有用特性。工作流体和存储媒体流量的协调调节使压缩机输入和膨胀机输出能够跟踪施加的负载变化。对于1%、0.5%和0.1%的容差带，受控功率响应时间分别为2.80-5.57、3.03-7.30和4.33-10.77分钟。热响应滞后于流量响应，而对数值平均值和最小末端温度差则表现出不同的趋势，这表明应联合评估整体热传递驱动力和末端温度方法。可控硅变化会改变存储库存和随后的运行持续时间，充电变化后放电变化+3.7/-4.0分钟，放电变化后充电变化+6.13/-5.7分钟。在SR =-8%至+8%范围内，充电和放电变化的P2P效率分别降低1.65和3.14个百分点。火用分析表明，累积火用破坏最大的部件在可控硅变化下不一定表现出最大的相对变化。这些发现澄清了LNG辅助卡诺电池中负载变化、热传递、储存库存和组件不可逆性的耦合影响。","keywords":"Carnot battery; LNG cold energy; Dynamic simulation; Off-design operation; Exergy destruction; Component exergy response","url":"https://doi.org/10.1016/j.energy.2026.142615","doi":"10.1016/j.energy.2026.142615","brief":{"object":"LNG 冷能辅助卡诺电池","method":"动态模型＋±2%~8% 阶跃变负荷仿真","finding":"协调工质与储介质流量实现变工况跟踪与㶲损定位"}}]};
+const TONES = {
+  ieee:     { mark: "#3f5d93" },
+  elsevier: { mark: "#a07846" },
+  cn:       { mark: "#4f857c" },
+  other:    { mark: "#6d7683" }
+};
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+const splitKw = (s) => String(s || "").split(/[;；]/).map((t) => t.trim()).filter(Boolean);
+
+let idx = 0;
+let view = "brief";
+const favSet = new Set();
+const readSet = new Set();
+
+function renderCard() {
+  const s = DATA.samples[idx];
+  if (!s) return;
+  const tone = TONES[s.tone] || TONES.other;
+  const head = `
+    <div class="card-head">
+      <span class="mark" style="background:${tone.mark}">${esc(s.abbr)}</span>
+      <span class="card-journal" title="${esc(s.journal)}">${esc(s.journal)}</span>
+      <span class="card-date">${esc(s.date)}</span>
+    </div>`;
+  const titleBlock = view === "en"
+    ? `<h2 class="card-title">${esc(s.zhTitle || s.title)}</h2><p class="card-en-title">${esc(s.title)}</p>`
+    : `<h2 class="card-title">${esc(s.zhTitle || s.title)}</h2>${s.zhTitle ? `<p class="card-en-title">${esc(s.title)}</p>` : ""}`;
+
+  let body = "";
+  if (view === "brief") {
+    const b = s.brief || {};
+    body = `
+      <div class="brief-block">
+        <div class="brief-row"><span class="brief-label">研究对象</span><span class="brief-value">${esc(b.object) || "—"}</span></div>
+        <div class="brief-row"><span class="brief-label">研究方法</span><span class="brief-value">${esc(b.method) || "—"}</span></div>
+        <div class="brief-row"><span class="brief-label">核心结论</span><span class="brief-value">${esc(b.finding) || "—"}</span></div>
+      </div>
+      <div class="brief-topic">${esc(s.directionLabel)}</div>`;
+  } else if (view === "zh") {
+    const kws = splitKw(s.keywords).slice(0, 8);
+    body = `
+      <div class="sec-label">中文摘要</div>
+      <p class="abs-text">${esc(s.zhAbstract) || "（暂无中文摘要）"}</p>
+      ${kws.length ? `<div class="kw-row">${kws.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}`;
+  } else {
+    const kws = splitKw(s.keywords).slice(0, 8);
+    body = `
+      <p class="authors">${esc(s.authors) || "（作者信息缺失）"}</p>
+      <div class="sec-label">Abstract</div>
+      <p class="abs-text en">${esc(s.abstract) || "（暂无摘要）"}</p>
+      ${kws.length ? `<div class="kw-row">${kws.map((k) => `<span class="kw">${esc(k)}</span>`).join("")}</div>` : ""}`;
+  }
+
+  const card = $("rdCard");
+  card.innerHTML = head + titleBlock + body;
+  card.classList.remove("enter");
+  void card.offsetWidth;
+  card.classList.add("enter");
+  card.scrollTop = 0;
+
+  $("rdIdx").textContent = String(idx + 1);
+  $("rdTotal").textContent = String(DATA.samples.length);
+  $("rdBar").style.width = `${((idx + 1) / DATA.samples.length) * 100}%`;
+  $("rdPrev").disabled = idx === 0;
+  $("rdNext").disabled = idx === DATA.samples.length - 1;
+
+  const fav = favSet.has(s.id);
+  const read = readSet.has(s.id);
+  $("rdFav").classList.toggle("on-fav", fav);
+  $("rdFav").innerHTML = `<span class="ico">${fav ? "★" : "☆"}</span>${fav ? "已收藏" : "收藏"}`;
+  $("rdRead").classList.toggle("on-read", read);
+  $("rdRead").innerHTML = `<span class="ico">${read ? "✓" : "○"}</span>${read ? "已读" : "标记已读"}`;
+}
+
+function go(step) {
+  const next = Math.min(Math.max(idx + step, 0), DATA.samples.length - 1);
+  if (next === idx) return;
+  idx = next;
+  renderCard();
+}
+
+function setView(nextView) {
+  if (view === nextView) return;
+  view = nextView;
+  document.querySelectorAll(".rd-views button").forEach((b) => {
+    const on = b.dataset.view === view;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-selected", String(on));
+  });
+  renderCard();
+}
+
+$("rdPrev").addEventListener("click", () => go(-1));
+$("rdNext").addEventListener("click", () => go(1));
+$("rdFav").addEventListener("click", () => {
+  const id = DATA.samples[idx].id;
+  favSet.has(id) ? favSet.delete(id) : favSet.add(id);
+  renderCard();
+});
+$("rdRead").addEventListener("click", () => {
+  const id = DATA.samples[idx].id;
+  readSet.has(id) ? readSet.delete(id) : readSet.add(id);
+  renderCard();
+});
+document.querySelectorAll(".rd-views button").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); go(-1); }
+  else if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); go(1); }
+  else if (e.key === "1") setView("brief");
+  else if (e.key === "2") setView("zh");
+  else if (e.key === "3") setView("en");
+  else if (e.key === "f" || e.key === "F") $("rdFav").click();
+  else if (e.key === "r" || e.key === "R") $("rdRead").click();
+});
+
+renderCard();
+</script>
+</body>
+</html>
