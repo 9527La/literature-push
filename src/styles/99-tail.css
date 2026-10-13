@@ -2843,6 +2843,8 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
 .reports-group-cardread:hover { background: #e2e9fa; border-color: var(--accent-primary); }
 .reports-cardread-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid #d9e2f8; background: var(--accent-light); color: var(--accent-primary); border-radius: 999px; padding: 4px 14px; font-size: 12.5px; font-weight: 700; font-family: inherit; cursor: pointer; transition: background .15s, border-color .15s; }
 .reports-cardread-btn:hover { background: #e2e9fa; border-color: var(--accent-primary); }
+/* 主题聚类底部：卡片阅读入口 + 继续加载（并排居中，2026-10-13） */
+.reports-cluster-more { gap: 10px; flex-wrap: wrap; }
 
 /* 文献库工具栏：时间范围 / 阅读状态快捷筛选（2026-10-13 需求；与筛选面板共用同一批 filter 状态）
    视觉与右侧「显示内容」盒完全一致：白底圆角容器的等尺寸胶囊 chip，选中实底蓝。

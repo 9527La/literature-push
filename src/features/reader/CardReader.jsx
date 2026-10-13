@@ -108,11 +108,15 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
   const briefMap = useMemo(() => new Map((briefs || []).map((brief) => [brief.id, brief])), [briefs]);
   const idsKey = (ids || []).join(",");
   const orderKey = order.join(",");
-  // 范围指纹：标题 + 条数 + 首尾 id（同一范围重开可续读；换范围即视为新会话）
-  const scopeKey = order.length ? `${title}|${order.length}|${order[0]}|${order[order.length - 1]}` : "";
+  // 范围指纹：标题 + 原始批次条数 + 首尾 id（同一范围重开可续读；换范围即视为新会话）。
+  // 用 props 的原始 ids 而非可变 order——相关文献插入会改变 order，指纹必须保持稳定。
+  const scopeKey = ids.length ? `${title}|${ids.length}|${ids[0]}|${ids[ids.length - 1]}` : "";
 
-  // 外部 ids 变化 → 重建批次（并清空进度游标与筛选）
+  // 外部 ids 变化 → 重建批次（并清空进度游标与筛选）。
+  // 注意：关闭态父组件会把 ids 置空——此时必须保持内部状态不动，
+  // 否则重开会把游标重置为 0 并覆盖断点续读进度（2026-10-13 实测踩坑）。
   useEffect(() => {
+    if (!idsKey) return;
     const next = (ids || []).filter((id) => Number.isInteger(id) && id > 0);
     setOrder(next);
     setCursor(0);

@@ -612,6 +612,17 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
       briefs
     });
   }
+  // 主题聚类（专题）级卡片阅读（2026-10-13 用户需求）：读该聚类下的全部速评文献
+  function openClusterReader(cluster, reviewIds) {
+    if (!reviewIds.length) return;
+    const idSet = new Set(reviewIds);
+    const briefs = (current?.stats?.paperBriefs || []).filter((brief) => idSet.has(brief.id));
+    setCardReader({
+      title: `${directionLabel(current.direction)} · ${cluster.name} · ${kind === "weekly" ? "周报" : "月报"} ${current.period_start}`,
+      ids: reviewIds,
+      briefs
+    });
+  }
   function openDirectionReader(report) {
     const briefs = report?.stats?.paperBriefs || [];
     if (!briefs.length) return;
@@ -1128,19 +1139,28 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                             ) : (
                               <p className="reports-filter-hint">本聚类 {cluster.reviews.length} 条速评已按「来源期刊」筛选隐藏，点信息条期刊 chip 或「全部显示」即可恢复。</p>
                             )}
-                            {moreCount > 0 && (
+                            {remainingReviews.length > 0 && (
                               <div className="reports-cluster-more">
                                 <button
                                   type="button"
-                                  className="secondary compact"
-                                  onClick={() => setExpandedClusterReviews((current) => {
-                                    const next = new Set(current);
-                                    next.add(cluster.name);
-                                    return next;
-                                  })}
+                                  className="reports-group-cardread"
+                                  onClick={() => openClusterReader(cluster, remainingReviews.map((review) => review.id))}
                                 >
-                                  继续加载全部 {remainingReviews.length} 条速评（还有 {moreCount} 条）
+                                  <BookOpenCheck size={13} aria-hidden="true" /> 卡片阅读 · {remainingReviews.length} 篇
                                 </button>
+                                {moreCount > 0 && (
+                                  <button
+                                    type="button"
+                                    className="secondary compact"
+                                    onClick={() => setExpandedClusterReviews((current) => {
+                                      const next = new Set(current);
+                                      next.add(cluster.name);
+                                      return next;
+                                    })}
+                                  >
+                                    继续加载全部 {remainingReviews.length} 条速评（还有 {moreCount} 条）
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
