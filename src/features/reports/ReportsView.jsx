@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarRange, Check, ChevronDown, GripVertical, Plus, RotateCcw, Settings2, Sparkles, Star, X } from "lucide-react";
+import { BookOpenCheck, CalendarRange, Check, ChevronDown, GripVertical, Plus, RotateCcw, Settings2, Sparkles, Star, X } from "lucide-react";
+import CardReader from "../reader/CardReader.jsx";
 import { api } from "../../lib/api.js";
 import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 import { journalAbbr, journalGroup } from "../../lib/journal.js";
@@ -72,7 +73,7 @@ function linkifyJournals(markdown, journalNames) {
 }
 
 /** 报告正文结构化解析：固定结构 contentMd → 模块，供卡片化渲染（v1/v2 格式通用）。 */
-function parseReportContent(markdown) {
+export function parseReportContent(markdown) {
   const result = { intro: "", insights: [], reviews: [], clusters: [], keywords: "", textCards: [] };
   if (!markdown) return result;
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
@@ -298,7 +299,7 @@ function InsightGrid({ insights }) {
 }
 
 /** 方向分组手风琴（研究速览 v2 分类浏览核心）：默认全展开，组头可折叠。 */
-function DirectionGroup({ group, open, onToggle, onPreviewOpen, onViewAll }) {
+function DirectionGroup({ group, open, onToggle, onPreviewOpen, onViewAll, onCardRead }) {
   const composition = group.composition || [];
   const compositionTotal = composition.reduce((sum, item) => sum + item.count, 0);
   return (
@@ -355,6 +356,11 @@ function DirectionGroup({ group, open, onToggle, onPreviewOpen, onViewAll }) {
           <p className="reports-group-hint">该方向本期暂无方向专报，可点击上方方向 chips 查看，或直接浏览本期全部文献。</p>
         )}
         <div className="reports-group-foot">
+          {(group.report?.stats?.paperBriefs?.length || 0) > 0 && (
+            <button type="button" className="reports-group-cardread" onClick={onCardRead}>
+              <BookOpenCheck size={13} aria-hidden="true" /> 卡片阅读 · {group.report.stats.paperBriefs.length} 篇
+            </button>
+          )}
           <button type="button" className="reports-group-more" onClick={onViewAll}>
             查看该方向全部 {group.count} 篇 ›
           </button>
@@ -687,6 +693,27 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
     return () => { cancelled = true; };
   }, [refIds.join("|")]);
 
+  // 卡片阅读（2026-10-13）：分组 / 方向专报 → 全屏逐条阅读（含速评、支持跳过已读）
+  const [cardReader, setCardReader] = useState(null);
+  function openGroupReader(group) {
+    const briefs = group.report?.stats?.paperBriefs || [];
+    if (!briefs.length) return;
+    setCardReader({
+      title: `${group.label} · ${kind === "weekly" ? "周报" : "月报"} ${group.report.period_start}`,
+      ids: briefs.map((brief) => brief.id),
+      briefs
+    });
+  }
+  function openDirectionReader(report) {
+    const briefs = report?.stats?.paperBriefs || [];
+    if (!briefs.length) return;
+    setCardReader({
+      title: `${directionLabel(report.direction)} · ${kind === "weekly" ? "周报" : "月报"} ${report.period_start}`,
+      ids: briefs.map((brief) => brief.id),
+      briefs
+    });
+  }
+
   function switchKind(nextKind) {
     setKind(nextKind);
     setSelectedDirection((currentValue) => ({ ...currentValue, [nextKind]: null }));
@@ -870,6 +897,15 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
 
   return (
     <section className="reports-view" aria-labelledby="reports-title">
+      <CardReader
+        open={Boolean(cardReader)}
+        onClose={() => setCardReader(null)}
+        title={cardReader?.title || ""}
+        ids={cardReader?.ids || []}
+        briefs={cardReader?.briefs || []}
+        canPersonalize={canPersonalize}
+        onArticleUpdated={onArticleUpdated}
+      />
       <div className="reports-head">
         <div className="reports-head-main">
           <h1 id="reports-title">
@@ -1056,6 +1092,11 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                 )}
                 {!!current.stats?.unclassified && <span>其中 <strong>{current.stats.unclassified}</strong> 篇待方向标注</span>}
                 <span>生成时间 {String(current.generated_at || "").slice(0, 10)}</span>
+                {!isOverview && (current.stats?.paperBriefs?.length || 0) > 0 && (
+                  <button type="button" className="reports-cardread-btn" onClick={() => openDirectionReader(current)}>
+                    <BookOpenCheck size={13} aria-hidden="true" /> 卡片阅读 · {current.stats.paperBriefs.length} 篇
+                  </button>
+                )}
                 {!isOverview && journalEntries.length > 0 && (
                   <div className="reports-meta-journals" role="group" aria-label="来源期刊筛选">
                     <span className="reports-meta-journals-label">
@@ -1134,6 +1175,7 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                         onToggle={() => toggleGroup(group.key)}
                         onPreviewOpen={openArticleById}
                         onViewAll={() => openGroupAll(group)}
+                        onCardRead={() => openGroupReader(group)}
                       />
                     ))}
                   </div>

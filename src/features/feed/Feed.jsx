@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownUp, ArrowUp, BookOpen, CalendarDays, Check, ChevronDown, Compass, Download, Eye, EyeOff, Filter, RefreshCw, RotateCcw, Search, Star, Tag, X } from "lucide-react";
+import { ArrowDownUp, ArrowUp, BookOpen, BookOpenCheck, CalendarDays, Check, ChevronDown, Compass, Download, Eye, EyeOff, Filter, RefreshCw, RotateCcw, Search, Star, Tag, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { ARTICLE_PAGE_SIZE, DEFAULT_FILTERS } from "../../lib/constants.js";
 import { downloadTextFile, toBibtex, toRis } from "../../lib/export.js";
@@ -9,6 +9,8 @@ import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.j
 import ArticleCard from "../../components/ArticleCard.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
 import ArticleDialog from "./ArticleDialog.jsx";
+import ReaderSetup from "./ReaderSetup.jsx";
+import CardReader from "../reader/CardReader.jsx";
 import useCollapsedGroups from "../../hooks/useCollapsedGroups.js";
 
 /** 时间快捷区间（甲-2）：按本地时区生成 YYYY-MM-DD，与站内业务日口径一致。 */
@@ -82,6 +84,15 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
   const [selectedArticle, setSelectedArticle] = useState(null);
   // 筛选面板默认收起（需求 2）：文献库首屏让位给文献列表，需要时点「打开筛选」。
   const [filterOpen, setFilterOpen] = useState(false);
+  // 文献库双子模块（2026-10-13）：文献总览 / 卡片阅读（范围选择 → 目录 → 全屏卡片阅读）
+  const [feedMode, setFeedMode] = useState(() => {
+    try { return localStorage.getItem("feedMode") === "reader" ? "reader" : "overview"; } catch { return "overview"; }
+  });
+  const [readerSession, setReaderSession] = useState(null);
+  function switchFeedMode(mode) {
+    setFeedMode(mode);
+    try { localStorage.setItem("feedMode", mode); } catch { /* 忽略隐私模式写入失败 */ }
+  }
   // 折叠分组状态（S4：与期刊小节、研究速览分组共用同一 hook）
   const { isCollapsed: isFilterGroupCollapsed, toggle: toggleFilterGroup } = useCollapsedGroups({
     search: true,
@@ -396,7 +407,7 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
     + (filters.unread ? 1 : 0) + (filters.read ? 1 : 0) + (filters.favorite ? 1 : 0);
 
   return (
-    <div className={`content-layout ${filterOpen ? "filters-open" : "filters-closed"}`}>
+    <div className={`content-layout ${filterOpen ? "filters-open" : "filters-closed"}${feedMode === "reader" ? " feed-reader-mode" : ""}`}>
       {filterOpen && <div className="filter-scrim" aria-hidden="true" onClick={() => setFilterOpen(false)} />}
       <aside className="filter-panel" id="feed-filters">
         <div className="filter-panel-header">
@@ -660,6 +671,9 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
         {/* A3：每视图一个 h1。文献库的页面标题此前缺失（只有筛选面板的 h2），
             屏幕阅读器无法按标题导航；用 sr-only 保持视觉不变。 */}
         <h1 className="sr-only">文献库</h1>
+        {feedMode === "reader" && (
+          <ReaderSetup journals={journals} onStart={(session) => setReaderSession(session)} onExit={() => switchFeedMode("overview")} />
+        )}
         <div className="feed-toolbar">
           {/* Two equal columns instead of two free-floating buttons: the pair
               used to share one flex row with the display toggles and collapsed
@@ -668,6 +682,10 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
             <button className="secondary filter-toggle" type="button" aria-expanded={filterOpen} aria-controls="feed-filters" onClick={() => setFilterOpen((current) => !current)}>
               <Filter size={15} /> {filterOpen ? "收起筛选" : "打开筛选"}
               {activeFilterCount > 0 && <span className="filter-count-badge">{activeFilterCount}</span>}
+            </button>
+            {/* 卡片阅读入口（2026-10-13）：与「打开筛选」并排的第二列 */}
+            <button className="secondary feed-cardread-entry" type="button" title="按范围逐条卡片式阅读文献" onClick={() => switchFeedMode("reader")}>
+              <BookOpenCheck size={15} /> 卡片阅读
             </button>
           </div>
         {/* 2026-10-13：工具栏快捷筛选——时间范围（与面板快捷区间同源）与阅读状态（按用户） */}
@@ -891,6 +909,15 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
         </button></div>}
       </section>
       <BackToTop />
+      <CardReader
+        open={Boolean(readerSession)}
+        onClose={() => setReaderSession(null)}
+        title={readerSession?.title || ""}
+        ids={readerSession?.ids || []}
+        briefs={readerSession?.briefs || []}
+        canPersonalize={canPersonalize}
+        onArticleUpdated={onArticleUpdated}
+      />
       {selectedArticle && (
         <ArticleDialog
           article={selectedArticle}
