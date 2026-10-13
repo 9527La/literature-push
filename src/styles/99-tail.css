@@ -2535,23 +2535,28 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
 .fav-dchip:hover { border-color: var(--dir-key, var(--accent-primary)); }
 .fav-dchip.on { border-color: var(--dir-key, var(--accent-primary)); color: var(--dir-key, var(--accent-primary)); background: color-mix(in srgb, var(--dir-key, var(--accent-primary)) 8%, transparent); font-weight: 600; }
 .favorites-tools-meta { border-top: 1px dashed var(--border-color); padding-top: 7px; }
-.favorites-tools-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-tertiary); }
+.favorites-tools-sort { display: inline-flex; align-items: center; gap: 6px; flex: none; white-space: nowrap; font-size: 12px; color: var(--text-tertiary); }
 .favorites-tools-sort select { border: 1px solid var(--border-color); border-radius: 8px; background: var(--surface); color: var(--text-primary); font-size: 12px; padding: 2px 6px; font-family: inherit; }
 .favorites-tools-count { margin-left: auto; font-size: 12px; color: var(--text-tertiary); }
 .favorites-tools-count strong { color: var(--text-primary); }
 .favorites-tools-reset { border: 1px solid var(--border-color); background: var(--surface); color: var(--accent-primary); border-radius: 999px; padding: 1px 12px; font-size: 12px; font-family: inherit; cursor: pointer; }
 .favorites-tools-reset:hover { border-color: var(--accent-primary); }
 
-/* 收藏 · 备注折叠（乙-2） */
-.favorite-card-meta { display: flex; flex-direction: column; gap: 8px; }
-.favorite-group-field { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-tertiary); }
-.favorite-group-field select { border: 1px solid var(--border-color); border-radius: 8px; background: var(--surface); color: var(--text-primary); font-size: 12.5px; padding: 2px 8px; font-family: inherit; }
-.favorite-note-preview { display: flex; align-items: center; gap: 10px; border: 1px dashed var(--border-color); border-radius: 8px; background: var(--surface-subtle); padding: 4px 10px; }
+/* 收藏 · 备注折叠（乙-2；2026-10-13 重排：分组与备注并排为单行页脚，消除卡片下方空白）
+   注意：95-theme 的旧规则（display:grid / align-items:end / label 竖排 / select 全宽 40px）
+   需用更高优先级覆盖，故选择器带 .favorite-card-meta 前缀。 */
+.favorite-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.favorite-card-meta .favorite-group-field { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: none; color: var(--text-tertiary); font-size: 12px; font-weight: 600; }
+.favorite-card-meta .favorite-group-field select { width: auto; min-width: 96px; max-width: 240px; min-height: 30px; padding: 3px 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--surface); color: var(--text-primary); font-size: 12.5px; font-family: inherit; }
+.favorite-card-meta .favorite-group-field select:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-glow); }
+.favorite-note-preview { flex: 1 1 260px; min-width: 180px; display: flex; align-items: center; gap: 10px; border: 1px dashed var(--border-color); border-radius: 8px; background: var(--surface-subtle); padding: 2px 10px; min-height: 30px; }
 .favorite-note-text { flex: 1; min-width: 0; font-size: 12.5px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .favorite-note-text.is-empty { color: var(--text-tertiary); }
 .favorite-note-toggle { flex: none; }
-.favorite-note-edit { display: flex; flex-direction: column; gap: 6px; }
-.favorite-note-edit textarea { width: 100%; border: 1px solid var(--border-color); border-radius: 8px; padding: 7px 10px; font-family: inherit; font-size: 12.5px; color: var(--text-primary); resize: vertical; min-height: 52px; }
+.favorite-note-preview .favorite-note-toggle { min-height: 26px; padding: 2px 10px; font-size: 12px; border-radius: 999px; }
+.favorite-note-edit { flex: 1 1 100%; display: flex; flex-direction: column; gap: 6px; }
+.favorite-note-edit textarea { width: 100%; min-height: 52px; padding: 7px 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--surface); color: var(--text-primary); font-size: 12.5px; font-family: inherit; resize: vertical; line-height: 1.5; }
+.favorite-note-edit textarea:focus { outline: none; border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-glow); }
 .favorite-note-actions { display: flex; align-items: center; gap: 10px; }
 .favorite-note-hint { margin-right: auto; font-size: 11.5px; color: var(--text-tertiary); }
 
