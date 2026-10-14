@@ -133,6 +133,15 @@ app.set("trust proxy", "loopback");
 
 app.use(cors({ origin: config.clientOrigin }));
 app.use(express.json());
+
+// GET /api/* 允许浏览器缓存并带 ETag 复验（命中即 304，无响应体）：
+// 来回切换视图 / 重访页面时省掉重复传输，同时保证已读/收藏等状态不会读到旧值。
+app.use((req, res, next) => {
+  if (req.method === "GET" && req.path.startsWith("/api/")) {
+    res.setHeader("Cache-Control", "private, no-cache");
+  }
+  next();
+});
 app.use(compression({ threshold: 1024 }));
 
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);

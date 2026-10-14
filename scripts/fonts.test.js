@@ -20,7 +20,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const FONTS_CSS = join(ROOT, "src", "fonts.css");
+// 2026-10-14：字体 @font-face 由 src/fonts.css 移到 public/font-face.css（异步加载，不占首屏阻塞 CSS）
+const FONTS_CSS = join(ROOT, "public", "font-face.css");
 const FONT_DIR = join(ROOT, "public", "fonts", "noto-serif-sc");
 
 /* 与 trim-fonts.mjs 保持一致的保留区定义。 */
