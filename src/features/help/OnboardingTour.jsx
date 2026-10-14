@@ -324,10 +324,52 @@ const STEPS = [
   {
     key: "reports",
     page: "#reports",
-    resolve: () => firstVisible(".reports-group-cardread", ".reports-group-head", ".reports-view"),
-    title: "研究速览",
-    body: "AI 每周（月报每月 1 日凌晨）自动生成：总览各方向动态 + 每个方向一份专报，逐篇给出三段式速评。",
-    hint: "每组底部的「卡片阅读 · N 篇」可以按该方向整组阅读；点「下一步」继续。"
+    resolve: () => firstVisible(".reports-toolbar", ".reports-main", ".reports-view"),
+    title: "研究速览：页面结构",
+    body: "由 AI 每周日晚（月报为每月 1 日凌晨）基于当期入库文献自动生成，所有数字取自数据库统计。顶部是「一周速览 / 月度趋势」切换 + 期次选择 + 方向 chips，主体是各方向的分组内容。",
+    hint: "下面逐步介绍每一块，点「下一步」继续。"
+  },
+  {
+    key: "reports-tabs",
+    resolve: () => firstVisible(".reports-tabs", ".reports-period-select"),
+    title: "① 一周速览 / 月度趋势",
+    body: "「一周速览」是每周生成的周报；「月度趋势」是每月 1 日凌晨生成的月报，内容更聚合。右侧下拉可切换历史期次，回看任意一周/一月。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "reports-groups",
+    resolve: () => firstVisible(".reports-group-head", ".reports-group-body"),
+    title: "② 总览按方向分组",
+    body: "每个研究方向一张分组卡：显示本期篇数与环比、本期主题一句话、3 张速评卡预览，组头还有该组的期刊构成（期刊缩写色标）；点「查看该方向全部 N 篇」可按本期时间窗列出完整清单。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "reports-brief",
+    resolve: () => firstVisible(".reports-brief-card", ".reports-brief-fields"),
+    title: "③ 三段式速评卡",
+    body: "每篇精选文献一张卡，固定给出「研究对象 / 研究方法 / 核心结论」三段；点卡片直接打开该文献详情。卡片配色随期刊出版社（IEEE 蓝 / 爱思唯尔棕 / 中文刊青 / 其他灰）。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "reports-direction",
+    resolve: () => firstVisible(".reports-dir-chip", ".reports-cluster", ".reports-cluster-head"),
+    title: "④ 方向专报与主题聚类",
+    body: "点方向 chips 进入单个方向的深度报告：周报方向专报为逐篇速评；月报方向专报按主题聚类（专题）组织——聚类头可展开/收起，聚类内速评卡默认先显示一行，点「继续加载全部」看其余条目。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "reports-journal-filter",
+    resolve: () => firstVisible(".reports-journal-chip", ".reports-meta-journals"),
+    title: "⑤ 来源期刊筛选",
+    body: "方向专报信息条里的期刊 chips 可点选隐藏 / 显示某一来源的速评卡，方便只看某个期刊的内容；仅影响当前报告的浏览，不改变数据。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "reports-cardread",
+    resolve: () => firstVisible(".reports-group-cardread", ".reports-group-head"),
+    title: "⑥ 卡片阅读入口与个性化",
+    body: "方向分组底部、方向专报信息条、主题聚类底部都提供「卡片阅读 · N 篇」，按该范围逐条阅读。方向 chips 支持拖拽排序与隐藏（存本机浏览器）；点期刊名可看该刊最近文献，主题词可一键搜索。",
+    hint: "这一步只看不点，看完点「下一步」。"
   },
   {
     key: "news",
