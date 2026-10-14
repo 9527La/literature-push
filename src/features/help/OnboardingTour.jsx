@@ -289,9 +289,13 @@ const STEPS = [
     key: "reader-catalog",
     resolve: () => byText(".reader-setup button", "生成文献目录"),
     title: "第七步：生成文献目录",
-    body: "先给出这批文献的目录（标题 / 期刊 / 日期 / 已读状态），确认无误再开始阅读。",
-    hint: "请点击「生成文献目录」。",
-    perform: () => clickIf(() => byText(".reader-setup button", "生成文献目录")),
+    body: "点「生成文献目录」会按当前条件查一批文献并列出目录（标题 / 期刊 / 日期 / 已读状态）。为避免条件太细导致查不到文献，教程会**先「重置条件」**（无条件＝全部期刊 / 全部方向 / 不限时间），保证目录里一定有文献；你之后可以再按需筛选。",
+    hint: "请点击「生成文献目录」（教程会先清空筛选条件）。",
+    // 用户可能把条件选得过细 → 生成前先重置条件（无条件），确保一定能出结果、能继续下一步
+    perform: () => {
+      clickIf(() => byText(".reader-setup-foot button", "重置条件"));
+      setTimeout(() => clickIf(() => byText(".reader-setup button", "生成文献目录")), 240);
+    },
     advance: () => visible(".reader-catalog-row")
   },
   {
