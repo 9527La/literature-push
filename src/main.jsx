@@ -747,10 +747,11 @@ function App() {
         onClose={() => setFavoritePicker(null)}
       />
 
-      {/* 新手教程：首次访问自动弹出一次；使用说明页可随时重播 */}
+      {/* 新手教程：首次访问自动弹出一次；使用说明页可随时重播。
+          enabled 里带上 !versionInfo —— 更新通知弹窗未关闭前不弹教程，避免两个弹窗打架。 */}
       {gateAuthenticated && !initialLoading && (
         <Suspense fallback={null}>
-          <OnboardingTour enabled={gateAuthenticated && !initialLoading} />
+          <OnboardingTour enabled={gateAuthenticated && !initialLoading && !versionInfo} />
         </Suspense>
       )}
 

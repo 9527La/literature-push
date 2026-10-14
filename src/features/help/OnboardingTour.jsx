@@ -31,6 +31,26 @@ function prefetchPages() {
   for (const load of PAGE_CHUNKS) load().catch(() => { /* 预热失败不影响教程 */ });
 }
 
+/** 依次尝试多个选择器/取值器，返回第一个命中且可见的元素（页面在不同身份/数据下结构不同） */
+const firstVisible = (...getters) => {
+  for (const get of getters) {
+    try {
+      const el = typeof get === "function" ? get() : document.querySelector(get);
+      if (!el) continue;
+      const box = el.getBoundingClientRect();
+      if (box.width > 0 && box.height > 0) return el;
+    } catch { /* 忽略单个取值器异常 */ }
+  }
+  return null;
+};
+
+/** 展开筛选面板里的某个分组（教程介绍该分组时自动展开，让用户看到全部选项） */
+const expandFilterGroup = (key) => {
+  const content = document.getElementById(`feed-filter-group-${key}`);
+  if (!content || !content.hidden) return;
+  content.previousElementSibling?.querySelector(".filter-group-toggle")?.click();
+};
+
 /* ── DOM 小工具 ─────────────────────────────────────────────── */
 const has = (selector) => Boolean(document.querySelector(selector));
 /** 存在且可见（面板/弹窗常驻 DOM，靠 CSS 显隐，判定必须看可见性） */
@@ -90,6 +110,62 @@ const STEPS = [
     advance: () => visible(".filter-panel")
   },
   {
+    key: "filter-search",
+    resolve: () => document.getElementById("feed-filter-group-search"),
+    enter: () => expandFilterGroup("search"),
+    title: "筛选①：搜索",
+    body: "在标题、作者、摘要与关键词中做全文匹配，命中内容会在列表中高亮显示。已知关键词或作者时用它最快。",
+    hint: "这一步只看不点，看完点「下一步」继续。"
+  },
+  {
+    key: "filter-journal",
+    resolve: () => document.getElementById("feed-filter-group-journal"),
+    enter: () => expandFilterGroup("journal"),
+    title: "筛选②：期刊",
+    body: "按出版社分组列出全部期刊（IEEE / 爱思唯尔 / 中文期刊 / 其他），每组可整体展开收起，可多选；每本刊后附当前命中篇数。",
+    hint: "这一步只看不点，看完点「下一步」继续。"
+  },
+  {
+    key: "filter-direction",
+    resolve: () => document.getElementById("feed-filter-group-direction"),
+    enter: () => expandFilterGroup("direction"),
+    title: "筛选③：研究方向",
+    body: "AI 为每篇文献标注的研究方向（15 个，含「其他/交叉」之外的常用方向），每个方向附篇数，可多选；“其他/交叉”类文献不进入文献库列表。",
+    hint: "这一步只看不点，看完点「下一步」继续。"
+  },
+  {
+    key: "filter-date",
+    resolve: () => document.getElementById("feed-filter-group-date"),
+    enter: () => expandFilterGroup("date"),
+    title: "筛选④：时间范围",
+    body: "填写开始 / 结束日期限定文献日期（按首次公开日期计），只填一端即为开区间；面板外的「时间范围」快捷项与它联动。",
+    hint: "这一步只看不点，看完点「下一步」继续。"
+  },
+  {
+    key: "filter-flags",
+    resolve: () => document.getElementById("feed-filter-group-flags"),
+    enter: () => expandFilterGroup("flags"),
+    title: "筛选⑤：阅读与收藏状态",
+    body: "「仅未读」只看还没读过的文献，「仅收藏」只看自己收藏过的文献；游客也能看到这两项，但收藏需要登录个人账户。",
+    hint: "这一步只看不点，看完点「下一步」继续。"
+  },
+  {
+    key: "filter-keyword",
+    resolve: () => document.getElementById("feed-filter-group-keyword"),
+    enter: () => expandFilterGroup("keyword"),
+    title: "筛选⑥：关键词",
+    body: "列出文献的原文关键词标签（带篇数），点一个即可筛出含该关键词的文献，可多选。",
+    hint: "这一步只看不点，看完点「下一步」继续。"
+  },
+  {
+    key: "filter-sort",
+    resolve: () => document.getElementById("feed-filter-group-sort"),
+    enter: () => expandFilterGroup("sort"),
+    title: "筛选⑦：排序",
+    body: "最新优先 / 最早优先 / 相关性三种排序；相关性按标题、关键词与摘要中的匹配程度计算。",
+    hint: "这一步只看不点，看完点「下一步」继续。"
+  },
+  {
     key: "feed-quick",
     page: "#feed",
     target: ".feed-quick-group",
@@ -118,11 +194,12 @@ const STEPS = [
   },
   {
     key: "reader-period",
-    target: ".reader-chip--period",
-    title: "第一步：选期次",
-    body: "范围有两种选法：① 按速览期（周报 / 月报）② 自定义筛选（期刊 / 方向 / 时间 / 阅读状态 / 数量上限，含无上限）。这里走「按速览期」。",
-    hint: "请点选一个期次。",
-    advance: () => has(".reader-chip--period.on")
+    // 有速览期就选期次；本期文献很少（或本机没有报告数据）时改走「自定义筛选」
+    resolve: () => firstVisible(".reader-chip--period", () => byText('.reader-mode-tabs [role="tab"]', "自定义筛选")),
+    title: "第一步：选范围方式",
+    body: "范围有两种选法：① 按速览期（周报 / 月报 → 期次 → 方向 → 专题）② 自定义筛选（期刊 / 方向 / 时间 / 阅读状态 / 数量上限）。某一期文献很少时，用「自定义筛选」更容易凑够一批。",
+    hint: "请点选一个期次；若本期文献很少，可改点「自定义筛选」。",
+    advance: () => has(".reader-chip--period.on") || Boolean(byText('.reader-mode-tabs [role="tab"]', "自定义筛选")?.classList.contains("on"))
   },
   {
     key: "reader-direction",
@@ -133,9 +210,22 @@ const STEPS = [
     advance: () => has(".reader-chip--dir.on")
   },
   {
+    key: "reader-limit",
+    resolve: () => firstVisible(() => byText(".reader-chip", "无上限")?.closest(".reader-chip-row"), ".reader-limit-custom"),
+    // 按速览期模式下没有「数量上限」→ 自动跳过
+    autoSkipIfMissing: true,
+    optional: true,
+    title: "第三步（自定义筛选）：数量上限",
+    body: "自定义模式下可限定本批数量：50 / 100 / 200 / 自定义（1–300）/ 无上限。选大一些就能一次读更多文献。",
+    hint: "点一个上限（如 100），或直接点「下一步」。",
+    advance: () => [...document.querySelectorAll(".reader-chip.on")].some((el) => /^(50|100|200|无上限)$/.test(el.textContent.trim()))
+  },
+  {
     key: "reader-topic",
     target: ".reader-chip--topic",
-    title: "第三步：选专题（可选）",
+    // 自定义筛选模式下没有「专题」→ 自动跳过
+    autoSkipIfMissing: true,
+    title: "第三步（按速览期）：选专题",
     body: "月度方向专报按主题聚类组织，可以只读某一个专题；保持「全部专题」也可以。",
     hint: "点一个专题，或直接点「下一步」。",
     optional: true,
@@ -208,7 +298,7 @@ const STEPS = [
   {
     key: "reports",
     page: "#reports",
-    target: ".reports-group-cardread",
+    resolve: () => firstVisible(".reports-group-cardread", ".reports-group-head", ".reports-view"),
     title: "研究速览",
     body: "AI 每周（月报每月 1 日凌晨）自动生成：总览各方向动态 + 每个方向一份专报，逐篇给出三段式速评。",
     hint: "每组底部的「卡片阅读 · N 篇」可以按该方向整组阅读；点「下一步」继续。"
@@ -216,7 +306,7 @@ const STEPS = [
   {
     key: "news",
     page: "#news",
-    resolve: () => document.querySelector(".daily-news h1, .daily-news h2, .daily-news header") || document.querySelector(".daily-news"),
+    resolve: () => firstVisible(".daily-rail", ".daily-content", ".daily-news"),
     title: "每日资讯",
     body: "每天凌晨汇总前一天的政策、标准与重点新闻：左侧按日期，右侧内容可按分类筛选、查找，点导读直达详情。",
     hint: "点「下一步」继续。"
@@ -235,7 +325,7 @@ const STEPS = [
   {
     key: "favorites",
     page: "#favorites",
-    resolve: () => document.querySelector(".favorites-layout h1, .favorites-layout h2, .favorites-view h1, .favorites-view h2") || document.querySelector(".favorites-layout"),
+    resolve: () => firstVisible(".favorites-sidebar", ".favorites-layout", ".favorites-view"),
     title: "收藏文献",
     body: "星标收藏后在这里按分组管理，还能记备注、按来源期刊与研究方向轻筛选；卡片阅读里记的备注也会同步过来。",
     hint: "点「下一步」继续。"
@@ -243,7 +333,7 @@ const STEPS = [
   {
     key: "stats",
     page: "#stats",
-    resolve: () => document.querySelector(".stats-view h1, .stats-view h2") || document.querySelector(".stats-view"),
+    resolve: () => firstVisible(".stats-filters", ".stats-view h2", ".stats-view"),
     title: "关键词统计",
     body: "汇总一段时间、指定期刊内的关键词分布，支持列表 / 词云 / 共现三种视图，点击关键词可查看对应文献。",
     hint: "点「下一步」继续。"
@@ -251,15 +341,71 @@ const STEPS = [
   {
     key: "push",
     page: "#settings",
-    resolve: () => document.querySelector(".settings-view h1, .settings-view h2") || document.querySelector(".settings-view"),
-    title: "文献推送",
-    body: "填写邮箱、选择推送频率（每天 / 每周 / 每月）与推送范围；可按研究方向偏好推送，邮件正文按方向分组展示。另有微信公众号「电气前沿速递」每日推送。",
-    hint: "点「下一步」继续。"
+    resolve: () => firstVisible(".settings-left", ".settings-section", ".settings-view"),
+    title: "文献推送：页面结构",
+    body: "左栏是「我的周报邮箱」，右栏是「推送计划」——上面是当前计划概览，下面是可编辑的推送设置。另有微信公众号「电气前沿速递」每日推送。",
+    hint: "下面逐步介绍每个设置项，点「下一步」继续。"
+  },
+  {
+    key: "push-email",
+    resolve: () => firstVisible(".email-row", ".saved-email-status"),
+    title: "① 我的周报邮箱",
+    body: "填写接收邮箱后点「保存」；点「发送测试邮箱」可确认地址是否可用（测试邮件或正式推送没收到时，先核对邮箱再联系管理员）。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "push-summary",
+    resolve: () => firstVisible(".push-summary", ".push-settings"),
+    title: "② 当前推送计划概览",
+    body: "这里汇总当前生效的配置：推送频率、推送期刊、研究方向偏好。改设置并保存后，概览会同步更新。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "push-frequency",
+    resolve: () => firstVisible(".push-frequency"),
+    title: "③ 推送频率",
+    body: "每天 / 每周 / 每月三选一：每周需再选星期几，每月需再选日期；配合发送时间即可确定推送节奏。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "push-time",
+    resolve: () => firstVisible(".push-time-selector"),
+    title: "④ 发送时间",
+    body: "选择小时与分钟（按服务器时间）；设置完成后需要点「保存推送设置」，计划才会真正生效。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "push-content",
+    resolve: () => firstVisible(".push-content-options"),
+    title: "⑤ 邮件内容",
+    body: "可分别开关：附件文件、摘要、关键词、中文翻译。只勾选需要的部分，邮件会更精简。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "push-journals",
+    resolve: () => firstVisible(".push-journal-filter"),
+    title: "⑥ 推送期刊范围",
+    body: "按出版社分组选择要推送的期刊，可整组勾选或逐本挑选；不选即默认全部期刊。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "push-directions",
+    resolve: () => firstVisible(".push-direction-list"),
+    title: "⑦ 推送研究方向",
+    body: "只推送选定的研究方向；邮件正文按方向分组展示，分组顺序与这里的点选顺序一致（标签上带顺序编号，取消后重新点选即可调整顺序）。",
+    hint: "这一步只看不点，看完点「下一步」。"
+  },
+  {
+    key: "push-actions",
+    resolve: () => firstVisible(".push-actions"),
+    title: "⑧ 保存与立即发送",
+    body: "点「保存推送设置」才会让计划生效；「立即发送」可以不等到计划时间，马上发一封当前摘要邮件（可用于试收）。",
+    hint: "这一步只看不点，看完点「下一步」。"
   },
   {
     key: "discussion",
     page: "#feedback",
-    resolve: () => document.querySelector(".feedback-layout h1, .feedback-layout h2, .feedback-hero h1, .feedback-hero h2") || document.querySelector(".feedback-layout"),
+    resolve: () => firstVisible(".feedback-hero", ".feedback-layout h1", ".feedback-layout"),
     title: "公共讨论",
     body: "面向访问者公开展示的交流区：登录后可发主题、评论与点赞，每个账户每小时最多发起 1 个主题。",
     hint: "点「下一步」继续。"
@@ -267,7 +413,7 @@ const STEPS = [
   {
     key: "account",
     page: "#account",
-    resolve: () => document.querySelector(".account-grid h1, .account-grid h2") || document.querySelector(".account-grid"),
+    resolve: () => firstVisible(".account-grid", ".account-auth-card"),
     title: "账户与个性设置",
     body: "网页通行证用于进入站点；个人账户用于保存阅读、收藏、推送与讨论数据。个性设置可本机保存，也可上传到账户在别的设备载入。",
     hint: "点「下一步」完成教程。"
@@ -359,8 +505,15 @@ export default function OnboardingTour({ enabled = true }) {
         missSince = missSince || Date.now();
         lastKey = "";
         stableCount = 0;
-        if (Date.now() - missSince > 400) setRect(null);
-        if (Date.now() - missSince > 5000) setStuck(true);
+        const missed = Date.now() - missSince;
+        if (missed > 400) setRect(null);
+        if (missed > 5000) setStuck(true);
+        // 该步在当前模式下不存在（如自定义筛选没有"专题"）→ 自动跳过，不卡住用户
+        if (step.autoSkipIfMissing && missed > 2200 && !advancing) {
+          advancing = true;
+          setFlash(true);
+          setTimeout(() => go(1), 420);
+        }
         return;
       }
       missSince = 0;
