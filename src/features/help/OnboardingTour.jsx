@@ -209,19 +209,47 @@ const STEPS = [
     advance: () => visible(".reader-setup")
   },
   {
-    key: "reader-period",
-    // 有速览期就选期次；本期文献很少（或本机没有报告数据）时改走「自定义筛选」
-    resolve: () => firstVisible(".reader-chip--period", () => byText('.reader-mode-tabs [role="tab"]', "自定义筛选")),
-    title: "第一步：选范围方式",
-    body: "范围有两种选法：① 按速览期（周报 / 月报 → 期次 → 方向 → 专题）② 自定义筛选（期刊 / 方向 / 时间 / 阅读状态 / 数量上限）。某一期文献很少时，用「自定义筛选」更容易凑够一批。",
-    hint: "请点选一个期次；若本期文献很少，可改点「自定义筛选」。",
-    perform: () => { if (!has(".reader-chip--period.on") && !customModeOn()) clickIf(() => document.querySelector(".reader-chip--period") || byText('.reader-mode-tabs [role="tab"]', "自定义筛选")); },
-    advance: () => has(".reader-chip--period.on") || customModeOn()
+    key: "reader-mode-intro",
+    resolve: () => firstVisible(".reader-mode-tabs"),
+    title: "第一步：两种选范围方式",
+    body: "① 按速览期：周报 / 月报 → 期次 → 研究方向 → 专题（主题聚类），适合“把这一期这个方向读一遍”；② 自定义筛选：来源期刊 / 研究方向 / 时间范围 / 阅读状态 / 数量上限，自由组合。",
+    hint: "两种方式都了解一下，下面用「自定义筛选」实际走一遍。"
+  },
+  {
+    key: "reader-custom",
+    resolve: () => firstVisible(() => byText('.reader-mode-tabs [role="tab"]', "自定义筛选")),
+    title: "第二步：切到「自定义筛选」",
+    body: "自定义筛选不依赖报告数据，按期刊、方向、时间与数量自由圈定一批文献；文献较少或想跨期阅读时更好用。",
+    hint: "请点击「自定义筛选」。",
+    perform: () => { if (!customModeOn()) clickIf(() => byText('.reader-mode-tabs [role="tab"]', "自定义筛选")); },
+    advance: () => customModeOn()
+  },
+  {
+    key: "reader-journals",
+    resolve: () => firstVisible(() => byText(".reader-field", "来源期刊")?.querySelector(".reader-chip-row")),
+    autoSkipIfMissing: true,
+    optional: true,
+    title: "第三步：来源期刊（可选）",
+    body: "按出版社分组选择要读的期刊，可多选；不选即全部期刊。",
+    hint: "点几本期刊，或直接点「下一步」用全部期刊。",
+    perform: () => { if (!has(".reader-chip.on-solid")) clickIf(() => byText(".reader-chip", "IEEE Transactions on Smart Grid") || document.querySelector(".reader-field .reader-chip")); },
+    advance: () => has(".reader-chip.on-solid")
+  },
+  {
+    key: "reader-time",
+    resolve: () => firstVisible(() => byText(".reader-field", "时间范围")?.querySelector(".reader-chip-row")),
+    autoSkipIfMissing: true,
+    optional: true,
+    title: "第四步：时间范围与阅读状态（可选）",
+    body: "时间范围决定取哪段时间的文献（近 7 日 / 近 30 日 / 本月 / 自定义）；阅读状态可选全部 / 未读 / 已读。",
+    hint: "选一个时间范围，或直接点「下一步」用默认。",
+    perform: () => { const field = byText(".reader-field", "时间范围"); const chip = field?.querySelector(".reader-chip"); if (chip) chip.click(); },
+    advance: () => { const field = byText(".reader-field", "时间范围"); return Boolean(field?.querySelector(".reader-chip.on")); }
   },
   {
     key: "reader-direction",
     target: ".reader-chip--dir",
-    title: "第二步：选研究方向",
+    title: "第五步：选研究方向",
     body: "每个方向后面标注的是本期该方向的文献篇数。",
     hint: "请点选一个研究方向。",
     perform: () => { if (!has(".reader-chip--dir.on")) clickIf(".reader-chip--dir"); },
@@ -233,28 +261,16 @@ const STEPS = [
     // 按速览期模式下没有「数量上限」→ 自动跳过
     autoSkipIfMissing: true,
     optional: true,
-    title: "第三步（自定义筛选）：数量上限",
+    title: "第六步：数量上限",
     body: "自定义模式下可限定本批数量：50 / 100 / 200 / 自定义（1–300）/ 无上限。选大一些就能一次读更多文献。",
     hint: "点一个上限（如 100），或直接点「下一步」。",
     perform: () => { if (!limitOn()) clickIf(() => byText(".reader-chip", "100") || byText(".reader-chip", "无上限")); },
     advance: () => limitOn()
   },
   {
-    key: "reader-topic",
-    target: ".reader-chip--topic",
-    // 自定义筛选模式下没有「专题」→ 自动跳过
-    autoSkipIfMissing: true,
-    title: "第三步（按速览期）：选专题",
-    body: "月度方向专报按主题聚类组织，可以只读某一个专题；保持「全部专题」也可以。",
-    hint: "点一个专题，或直接点「下一步」。",
-    perform: () => { if (visible(".reader-chip--topic")) clickIf(".reader-chip--topic"); },
-    optional: true,
-    advance: () => [...document.querySelectorAll(".reader-chip--topic.on")].some((el) => !el.textContent.includes("全部专题"))
-  },
-  {
     key: "reader-catalog",
     resolve: () => byText(".reader-setup button", "生成文献目录"),
-    title: "第四步：生成文献目录",
+    title: "第七步：生成文献目录",
     body: "先给出这批文献的目录（标题 / 期刊 / 日期 / 已读状态），确认无误再开始阅读。",
     hint: "请点击「生成文献目录」。",
     perform: () => clickIf(() => byText(".reader-setup button", "生成文献目录")),
@@ -263,7 +279,7 @@ const STEPS = [
   {
     key: "reader-start",
     resolve: () => byText("button", "开始卡片阅读"),
-    title: "第五步：开始阅读",
+    title: "第八步：开始阅读",
     body: "目录确认无误后进入全屏卡片阅读；阅读中随时可以「返回调整」重新选范围。",
     hint: "请点击「开始卡片阅读」。",
     perform: () => clickIf(() => byText("button", "开始卡片阅读")),

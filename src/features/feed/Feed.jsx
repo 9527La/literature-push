@@ -137,7 +137,12 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
   const enterStartRef = useRef(0);
   const prevVisibleCountRef = useRef(0);
 
+  // 关键词 / 方向计数只用于筛选面板展示 → 面板首次打开时才请求，
+  // 不再占用启动带宽与往返（首屏少 2 个请求）。
+  const panelMetaLoadedRef = useRef(false);
   useEffect(() => {
+    if (!filterOpen || panelMetaLoadedRef.current) return;
+    panelMetaLoadedRef.current = true;
     api.get("/api/keyword-stats").then((data) => {
       setTopKeywords(data.keywords || []);
     }).catch(() => {});
@@ -145,7 +150,7 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
     api.get("/api/directions").then((data) => {
       setDirectionCounts(data.directions || []);
     }).catch(() => {});
-  }, []);
+  }, [filterOpen]);
 
   // Reset pagination (and any batch selection) only when the *query* changes.
   // Depending on the `filters` object reset the list on every keystroke,

@@ -6,6 +6,9 @@
     <meta name="description" content="电力与能源领域文献速递、AI 研究速览与每日资讯" />
     <meta name="theme-color" content="#3157d5" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- 字体 @font-face 异步加载：不阻塞首屏（font-display: swap，正文先用回退字体渲染） -->
+    <link rel="preload" as="style" href="/font-face.css" onload="this.rel='stylesheet';this.removeAttribute('onload')" />
+    <noscript><link rel="stylesheet" href="/font-face.css" /></noscript>
     <title>电气前沿速递</title>
   </head>
   <body>

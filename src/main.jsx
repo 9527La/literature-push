@@ -1,6 +1,6 @@
 import React, { StrictMode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import "./fonts.css";
+// 字体 @font-face 已移到 public/font-face.css，用非阻塞 <link> 加载（不占首屏阻塞 CSS）
 import "./styles.css";
 import ErrorBoundary from "./components/ErrorBoundary.jsx";
 import SkeletonList from "./components/SkeletonCard.jsx";
