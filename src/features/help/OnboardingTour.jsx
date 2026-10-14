@@ -44,6 +44,16 @@ const firstVisible = (...getters) => {
   return null;
 };
 
+/** 触发一次真实点击（用于「用户直接点下一步」时替用户完成该步操作） */
+const clickIf = (getter) => {
+  try {
+    const el = typeof getter === "function" ? getter() : document.querySelector(getter);
+    if (el && !el.disabled) el.click();
+  } catch { /* 忽略 */ }
+};
+const customModeOn = () => Boolean(byText('.reader-mode-tabs [role="tab"]', "自定义筛选")?.classList.contains("on"));
+const limitOn = () => [...document.querySelectorAll(".reader-chip.on")].some((el) => /^(50|100|200|无上限)$/.test(el.textContent.trim()));
+
 /** 展开筛选面板里的某个分组（教程介绍该分组时自动展开，让用户看到全部选项） */
 const expandFilterGroup = (key) => {
   const content = document.getElementById(`feed-filter-group-${key}`);
@@ -89,6 +99,7 @@ const STEPS = [
     title: "文献库：打开一篇文献",
     body: "站点收录期刊的最新论文都在这里。卡片左上角色标 = 出版社色系，彩色标签 = AI 标注的研究方向。",
     hint: "请点击这篇文献的标题（或摘要图标）打开详情。",
+    perform: () => clickIf(() => document.querySelector(".article-list .title-button")),
     advance: () => visible(".article-dialog")
   },
   {
@@ -98,6 +109,7 @@ const STEPS = [
     title: "文献详情弹窗",
     body: "这里能看到 DOI、卷期、作者、关键词、中英文摘要与原文链接；底部是 3 篇相关文献（可点击切换），顶部按钮可一键复制 GB/T 7714 引用。",
     hint: "看完请点右上角 ✕ 关闭弹窗。",
+    perform: () => clickIf('[aria-label="关闭文献摘要"]'),
     advance: () => !visible(".article-dialog")
   },
   {
@@ -107,6 +119,7 @@ const STEPS = [
     title: "筛选：先打开面板",
     body: "筛选面板默认收起，不会长期占用阅读区域。",
     hint: "请点击「打开筛选」。",
+    perform: () => { if (!visible(".filter-panel")) clickIf(".filter-toggle"); },
     advance: () => visible(".filter-panel")
   },
   {
@@ -172,6 +185,7 @@ const STEPS = [
     title: "工具栏快捷筛选",
     body: "面板之外，工具栏还提供「时间范围」（近 7 日 / 近 30 日 / 本月）与「阅读状态」（全部 / 未读 / 已读），两者与面板双向联动。",
     hint: "请点一下「近 7 日」。",
+    perform: () => { if (!isOnText(".feed-quick-chip", "近 7 日")) clickIf(() => [...document.querySelectorAll(".feed-quick-chip")].find((el) => el.textContent.includes("近 7 日"))); },
     advance: () => isOnText(".feed-quick-chip", "近 7 日")
   },
   {
@@ -181,6 +195,7 @@ const STEPS = [
     title: "收起筛选面板",
     body: "面板内可按标题、作者、摘要、关键词、期刊、研究方向、日期、已读与收藏状态组合筛选：同一条件内多选为「或」，不同条件之间为「且」。",
     hint: "请点击「收起筛选」。",
+    perform: () => { if (visible(".filter-panel")) clickIf(".filter-toggle"); },
     advance: () => !visible(".filter-panel")
   },
   {
@@ -190,6 +205,7 @@ const STEPS = [
     title: "进入卡片阅读",
     body: "「卡片阅读」把一批文献变成一张张卡片逐条翻阅，免去反复开关弹窗。",
     hint: "请点击「卡片阅读」按钮。",
+    perform: () => { if (!visible(".reader-setup")) clickIf(".feed-cardread-entry"); },
     advance: () => visible(".reader-setup")
   },
   {
@@ -199,7 +215,8 @@ const STEPS = [
     title: "第一步：选范围方式",
     body: "范围有两种选法：① 按速览期（周报 / 月报 → 期次 → 方向 → 专题）② 自定义筛选（期刊 / 方向 / 时间 / 阅读状态 / 数量上限）。某一期文献很少时，用「自定义筛选」更容易凑够一批。",
     hint: "请点选一个期次；若本期文献很少，可改点「自定义筛选」。",
-    advance: () => has(".reader-chip--period.on") || Boolean(byText('.reader-mode-tabs [role="tab"]', "自定义筛选")?.classList.contains("on"))
+    perform: () => { if (!has(".reader-chip--period.on") && !customModeOn()) clickIf(() => document.querySelector(".reader-chip--period") || byText('.reader-mode-tabs [role="tab"]', "自定义筛选")); },
+    advance: () => has(".reader-chip--period.on") || customModeOn()
   },
   {
     key: "reader-direction",
@@ -207,6 +224,7 @@ const STEPS = [
     title: "第二步：选研究方向",
     body: "每个方向后面标注的是本期该方向的文献篇数。",
     hint: "请点选一个研究方向。",
+    perform: () => { if (!has(".reader-chip--dir.on")) clickIf(".reader-chip--dir"); },
     advance: () => has(".reader-chip--dir.on")
   },
   {
@@ -218,7 +236,8 @@ const STEPS = [
     title: "第三步（自定义筛选）：数量上限",
     body: "自定义模式下可限定本批数量：50 / 100 / 200 / 自定义（1–300）/ 无上限。选大一些就能一次读更多文献。",
     hint: "点一个上限（如 100），或直接点「下一步」。",
-    advance: () => [...document.querySelectorAll(".reader-chip.on")].some((el) => /^(50|100|200|无上限)$/.test(el.textContent.trim()))
+    perform: () => { if (!limitOn()) clickIf(() => byText(".reader-chip", "100") || byText(".reader-chip", "无上限")); },
+    advance: () => limitOn()
   },
   {
     key: "reader-topic",
@@ -228,6 +247,7 @@ const STEPS = [
     title: "第三步（按速览期）：选专题",
     body: "月度方向专报按主题聚类组织，可以只读某一个专题；保持「全部专题」也可以。",
     hint: "点一个专题，或直接点「下一步」。",
+    perform: () => { if (visible(".reader-chip--topic")) clickIf(".reader-chip--topic"); },
     optional: true,
     advance: () => [...document.querySelectorAll(".reader-chip--topic.on")].some((el) => !el.textContent.includes("全部专题"))
   },
@@ -237,6 +257,7 @@ const STEPS = [
     title: "第四步：生成文献目录",
     body: "先给出这批文献的目录（标题 / 期刊 / 日期 / 已读状态），确认无误再开始阅读。",
     hint: "请点击「生成文献目录」。",
+    perform: () => clickIf(() => byText(".reader-setup button", "生成文献目录")),
     advance: () => visible(".reader-catalog-row")
   },
   {
@@ -245,6 +266,7 @@ const STEPS = [
     title: "第五步：开始阅读",
     body: "目录确认无误后进入全屏卡片阅读；阅读中随时可以「返回调整」重新选范围。",
     hint: "请点击「开始卡片阅读」。",
+    perform: () => clickIf(() => byText("button", "开始卡片阅读")),
     advance: () => visible(".card-reader")
   },
   {
@@ -253,6 +275,7 @@ const STEPS = [
     title: "翻页",
     body: "顶部显示「第 N / M 条」，进度条可点击或拖动跳转；默认开启「读即标记」——翻过去就自动标记已读。",
     hint: "请点「下一条」，或直接按键盘 → / 空格。",
+    perform: () => clickIf(".cr-nav--primary"),
     enter: () => readerIndex(),
     // 只有 1 篇（下一条禁用）时无页可翻 → 自动继续，避免卡住
     advance: (baseline) => readerIndex() > (baseline || 0) || !document.querySelector(".cr-nav--primary:not([disabled])")
@@ -263,6 +286,7 @@ const STEPS = [
     title: "切换卡片版本",
     body: "速评版（研究对象 / 研究方法 / 核心结论）、中文摘要版（完整摘要，可展开英文对照）、原文版；默认版本会自动记忆。",
     hint: "请点击「中文摘要版」（也可以按键盘 2）。",
+    perform: () => { if (!visible(".cr-abstract")) clickIf(() => document.querySelectorAll(".cr-views button")[1]); },
     advance: () => visible(".cr-abstract")
   },
   {
@@ -271,6 +295,7 @@ const STEPS = [
     title: "目录抽屉",
     body: "这里能看全批清单、点击序号直达，也能在阅读中改范围（仅未读 / 仅有速评 / 按期刊）。",
     hint: "请点击目录按钮（或按 D）。",
+    perform: () => { if (!visible(".cr-drawer")) clickIf(() => document.querySelector(".cr-head-right .cr-icon-btn")); },
     advance: () => visible(".cr-drawer")
   },
   {
@@ -293,6 +318,7 @@ const STEPS = [
     title: "退出卡片阅读",
     body: "同一范围下次再打开时，会自动回到上次读到的位置（断点续读）。",
     hint: "请点击右上角 ✕ 退出阅读。",
+    perform: () => clickIf(".cr-close"),
     advance: () => !visible(".card-reader")
   },
   {
@@ -435,11 +461,16 @@ export default function OnboardingTour({ enabled = true }) {
   const [flash, setFlash] = useState(false);
   // 目标长时间找不到（如本地环境缺该功能的数据）→ 提示可跳过，避免用户卡住
   const [stuck, setStuck] = useState(false);
+  // flash 提示文案（用户手动完成 → "操作完成"；点下一步由教程代劳 → "已帮你完成"）
+  const [flashText, setFlashText] = useState("操作完成，继续下一步");
   const autoOpened = useRef(false);
   const baselineRef = useRef(null);
   const scrolledRef = useRef("");
+  const indexRef = useRef(0);
   const total = STEPS.length;
   const step = STEPS[index];
+
+  useEffect(() => { indexRef.current = index; }, [index]);
 
   const close = useCallback(() => {
     try { localStorage.setItem(SEEN_KEY, "1"); } catch { /* 忽略 */ }
@@ -450,6 +481,19 @@ export default function OnboardingTour({ enabled = true }) {
     setFlash(false);
     setIndex((current) => Math.min(Math.max(current + delta, 0), total - 1));
   }, [total]);
+
+  /** 「下一步」：若本步需要操作，则先替用户完成该步的真实点击（避免直接跳过导致页面状态不对） */
+  const handleNext = useCallback(() => {
+    if (step?.perform) {
+      setFlashText("已帮你完成这一步，正在继续…");
+      setFlash(true);
+      try { step.perform(); } catch { /* 忽略 */ }
+      const at = indexRef.current;
+      setTimeout(() => { if (indexRef.current === at) go(1); }, 1400);
+      return;
+    }
+    go(1);
+  }, [go, step]);
 
   const start = useCallback(() => {
     prefetchPages();
@@ -511,8 +555,9 @@ export default function OnboardingTour({ enabled = true }) {
         // 该步在当前模式下不存在（如自定义筛选没有"专题"）→ 自动跳过，不卡住用户
         if (step.autoSkipIfMissing && missed > 2200 && !advancing) {
           advancing = true;
+          setFlashText("当前模式下没有这一步，已自动跳过");
           setFlash(true);
-          setTimeout(() => go(1), 420);
+          setTimeout(() => go(1), 520);
         }
         return;
       }
@@ -549,6 +594,7 @@ export default function OnboardingTour({ enabled = true }) {
     const checkAdvance = () => {
       if (!advancing && step.advance && step.advance(baselineRef.current)) {
         advancing = true;
+        setFlashText("操作完成，继续下一步");
         setFlash(true);
         setTimeout(() => go(1), 520);
       }
@@ -670,7 +716,7 @@ export default function OnboardingTour({ enabled = true }) {
           <h2 className="tour-tip-title">{step.title}</h2>
           <p className="tour-tip-text">{step.body}</p>
           <p className={`tour-tip-hint${flash ? " is-ok" : ""}`}>
-            {flash ? <><Check size={14} aria-hidden="true" /> 操作完成，继续下一步</> : <><MousePointerClick size={14} aria-hidden="true" /> {step.hint}</>}
+            {flash ? <><Check size={14} aria-hidden="true" /> {flashText}</> : <><MousePointerClick size={14} aria-hidden="true" /> {step.hint}</>}
           </p>
           {!rect && !step.center && (
             <p className={`tour-tip-wait${stuck ? " is-stuck" : ""}`}>
@@ -685,7 +731,7 @@ export default function OnboardingTour({ enabled = true }) {
               <ChevronLeft size={14} aria-hidden="true" />上一步
             </button>
             {index < total - 1 ? (
-              <button type="button" className="tour-next" onClick={() => go(1)}>
+              <button type="button" className="tour-next" onClick={handleNext}>
                 下一步<ChevronRight size={14} aria-hidden="true" />
               </button>
             ) : (
