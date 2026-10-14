@@ -237,7 +237,12 @@ const STEPS = [
   },
   {
     key: "reader-time",
-    resolve: () => firstVisible(() => byText(".reader-field", "时间范围")?.querySelector(".reader-chip-row")),
+    // 自定义模式下时间范围/阅读状态两个字段都在这一块，给多候选避免偶发解析失败被跳过
+    resolve: () => firstVisible(
+      () => byText(".reader-field", "时间范围")?.querySelector(".reader-chip-row"),
+      () => byText(".reader-field", "阅读状态")?.querySelector(".reader-chip-row"),
+      () => byText(".reader-field", "时间范围")
+    ),
     autoSkipIfMissing: true,
     optional: true,
     title: "第四步：时间范围与阅读状态（可选）",
