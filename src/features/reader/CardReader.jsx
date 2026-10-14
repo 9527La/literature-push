@@ -104,6 +104,14 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
   const cardRef = useRef(null);
   const loadedKeyRef = useRef("");
   const hintTimerRef = useRef(null);
+  /** 元数据加载失败提示 + 重试计数（重试时清掉已加载标记，见下方加载 effect） */
+  const [loadError, setLoadError] = useState("");
+  const [loadNonce, setLoadNonce] = useState(0);
+  const retryLoad = useCallback(() => {
+    loadedKeyRef.current = "";
+    setLoadError("");
+    setLoadNonce((n) => n + 1);
+  }, []);
 
   const briefMap = useMemo(() => new Map((briefs || []).map((brief) => [brief.id, brief])), [briefs]);
   const idsKey = (ids || []).join(",");
@@ -134,6 +142,7 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
     loadedKeyRef.current = orderKey;
     let cancelled = false;
     setLoading(true);
+    setLoadError("");
     const chunks = [];
     for (let index = 0; index < order.length; index += 100) chunks.push(order.slice(index, index + 100));
     Promise.all(chunks.map((chunk) => api.get(`/api/articles?ids=${chunk.join(",")}&limit=100&full=1`)))
@@ -143,10 +152,16 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
         for (const data of results) for (const article of data.articles || []) map.set(article.id, article);
         setArticleMap((prev) => new Map([...prev, ...map]));
       })
-      .catch(() => { /* 失败保持空态 */ })
+      .catch(() => {
+        if (cancelled) return;
+        // 关键：失败时必须清掉已加载标记，否则同一批再也不会重试，
+        // 阅读器会永久停在"正在加载文献…"（用户感知就是"进不去卡片阅读"）。
+        loadedKeyRef.current = "";
+        setLoadError("文献内容加载失败，请检查网络后重试");
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [open, orderKey, order]);
+  }, [open, orderKey, order, loadNonce]);
 
   // 打开时取收藏备注（备注存在收藏记录上；仅登录个人账户可用）
   useEffect(() => {
@@ -588,7 +603,21 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
 
       <main className="cr-stage">
         {loading || !article ? (
-          <div className={`cr-card cr-card--loading${cardWide ? " cr-card--wide" : ""} tone-${tone}`}><p className="cr-loading">{order.length ? "正在加载文献…" : "此范围内没有可阅读的文献。"}</p></div>
+          <div className={`cr-card cr-card--loading${cardWide ? " cr-card--wide" : ""} tone-${tone}`}>
+            <p className="cr-loading">
+              {order.length
+                ? (loadError || (loading ? "正在加载文献…" : "这一条暂时取不到内容"))
+                : "此范围内没有可阅读的文献。"}
+            </p>
+            {order.length > 0 && !loading && (!article) && (
+              <div className="cr-load-actions">
+                <button type="button" className="cr-retry" onClick={retryLoad}>重新加载</button>
+                {total > 1 && (
+                  <button type="button" className="cr-retry is-ghost" onClick={() => step(1)}>跳过这一条</button>
+                )}
+              </div>
+            )}
+          </div>
         ) : (
           <article className={`cr-card${cardWide ? " cr-card--wide" : ""} tone-${tone}`} ref={cardRef} aria-live="polite">
             <div className="cr-card-head">

@@ -16,6 +16,7 @@ import {
   getArticleForUser,
   getStatus,
   getKeywordStats,
+  listArticlesByKeyword,
   getKeywordCooccurrence,
   listArticles,
   listArticlePage,
@@ -643,6 +644,16 @@ app.get("/api/journals", (req, res) => {
 
 app.get("/api/keyword-stats", (req, res) => {
   res.json(getKeywordStats(req.query));
+});
+
+// 某关键词下的文献（统计页"点关键词看文献"按需分页；替代此前 keyword-stats 内嵌全量文献）
+app.get("/api/keyword-articles", (req, res) => {
+  const keyword = req.query.keyword;
+  if (!String(keyword || "").trim()) {
+    res.status(400).json({ error: "缺少 keyword 参数" });
+    return;
+  }
+  res.json(listArticlesByKeyword(keyword, req.query, getPrincipalId(req)));
 });
 
 app.get("/api/keyword-cooccurrence", (req, res) => {

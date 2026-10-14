@@ -1833,10 +1833,10 @@ export function markTranslationAttempts(articleIds, field = "title", targetLangu
   return updated;
 }
 
-export function getKeywordStats(filters = {}) {
+/** 关键词统计的公共筛选条件（统计列表与"某关键词下的文献"必须完全一致）。 */
+function keywordStatsClauses(filters = {}) {
   const clauses = ["keywords IS NOT NULL", "keywords != ''", "is_non_research_title(title) = 0", EXCLUDE_OTHER_PLAIN];
   const params = {};
-
   if (filters.journal) {
     clauses.push("journal = @journal");
     params.journal = filters.journal;
@@ -1849,48 +1849,128 @@ export function getKeywordStats(filters = {}) {
     clauses.push(`${displayDateSql("articles")} <= @to`);
     params.to = filters.to;
   }
+  return { where: `WHERE ${clauses.join(" AND ")}`, params };
+}
 
-  const where = `WHERE ${clauses.join(" AND ")}`;
+/** 关键词按 ; / ； 切分后的规范化集合（小写去重），与统计口径逐字一致。 */
+function keywordSetOf(raw) {
+  const set = new Set();
+  for (const term of String(raw || "").split(/[;；]/)) {
+    const key = term.trim().toLowerCase();
+    if (key) set.add(key);
+  }
+  return set;
+}
+
+export function getKeywordStats(filters = {}) {
+  const { where, params } = keywordStatsClauses(filters);
   const articles = db.prepare(`
-    SELECT id, title, journal, published_at, ${displayDateSql("articles")} AS display_date, keywords, url, doi
+    SELECT id, keywords
     FROM articles
     ${where}
     ORDER BY ${displayDateSql("articles")} DESC
   `).all(params);
 
-  // Aggregate keyword frequencies and track which articles contain each keyword
+  // Aggregate keyword frequencies.
+  // P0（2026-10-14）：响应只回 {keyword, count}——此前每个关键词内嵌全部文献对象，
+  // 单次响应 4.5 MB（gzip 后 668 KB），而三个消费方里只有"点开某个关键词"才需要文献，
+  // 现在改由 /api/keyword-articles 按需分页拉取（见 listArticlesByKeyword）。
   const keywordMap = new Map();
-
   for (const article of articles) {
-    const terms = article.keywords.split(/[;；]/).map((t) => t.trim()).filter(Boolean);
-    const seen = new Set();
-    for (const term of terms) {
-      const key = term.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (!keywordMap.has(key)) {
-        keywordMap.set(key, { keyword: term, count: 0, articles: [] });
-      }
+    const seen = keywordSetOf(article.keywords);
+    for (const key of seen) {
       const entry = keywordMap.get(key);
-      entry.count += 1;
-      entry.articles.push({
-        id: article.id,
-        title: article.title,
-        journal: article.journal,
-        published_at: article.published_at,
-        // 统计页/导出与列表页保持一致：都用统一口径算出来的日期。
-        display_date: article.display_date,
-        url: article.url,
-        doi: article.doi
-      });
+      if (entry) entry.count += 1;
+      else keywordMap.set(key, { keyword: key, count: 1, label: null });
+    }
+  }
+  // 显示名沿用原文大小写（取首次出现的写法）
+  const labelByKey = new Map();
+  for (const article of articles) {
+    for (const term of String(article.keywords || "").split(/[;；]/)) {
+      const key = term.trim().toLowerCase();
+      if (key && !labelByKey.has(key)) labelByKey.set(key, term.trim());
     }
   }
 
-  const stats = [...keywordMap.values()].sort((a, b) => b.count - a.count);
+  const stats = [...keywordMap.values()]
+    .map(({ keyword, count }) => ({ keyword: labelByKey.get(keyword) || keyword, count }))
+    .sort((a, b) => b.count - a.count);
+
   return { totalArticles: articles.length, keywords: stats };
 }
 
+/**
+ * 某个关键词下的文献（精确匹配：按 ; / ； 切分后逐词比较，与统计口径一致）。
+ * 供统计页"点关键词看文献"按需分页使用——取代此前内嵌在 /api/keyword-stats 里的
+ * 全量文献数组（那是单次响应 4.5 MB 的来源）。
+ */
+export function listArticlesByKeyword(keyword, filters = {}, userId) {
+  const key = String(keyword || "").trim().toLowerCase();
+  if (!key) return { articles: [], total: 0, hasMore: false, limit: 0, offset: 0 };
+  const limit = normalizeArticlePageLimit(filters.limit ?? 100);
+  const offset = normalizeArticlePageOffset(filters.offset ?? 0);
+
+  // 与 getKeywordStats 同一套筛选条件，但这里表带别名 a（有 JOIN，SQLite 不允许再用原表名）
+  const clauses = ["a.keywords IS NOT NULL", "a.keywords != ''", "is_non_research_title(a.title) = 0", EXCLUDE_OTHER_PLAIN];
+  const params = {};
+  if (filters.journal) {
+    clauses.push("a.journal = @journal");
+    params.journal = filters.journal;
+  }
+  if (filters.from) {
+    clauses.push(`${displayDateSql("a")} >= @from`);
+    params.from = filters.from;
+  }
+  if (filters.to) {
+    clauses.push(`${displayDateSql("a")} <= @to`);
+    params.to = filters.to;
+  }
+  // 关键词是分号分隔的自由文本，SQL 侧无法表达"精确一词"，故先按子串粗筛再在 JS 侧精确过滤。
+  clauses.push("a.keywords LIKE @kw ESCAPE '\\'");
+  params.kw = `%${escapeLike(String(keyword).trim())}%`;
+
+  const interactionJoins = userId
+    ? `
+      LEFT JOIN user_interactions ui_read ON ui_read.article_id = a.id AND ui_read.user_id = @userId AND ui_read.is_read = 1
+      LEFT JOIN user_interactions ui_fav ON ui_fav.article_id = a.id AND ui_fav.user_id = @userId AND ui_fav.is_favorite = 1
+    `
+    : "";
+  const interactionFields = userId
+    ? "COALESCE(ui_read.is_read, 0) AS is_read, COALESCE(ui_fav.is_favorite, 0) AS is_favorite"
+    : "0 AS is_read, 0 AS is_favorite";
+
+  const rows = db.prepare(`
+    SELECT
+      a.id, a.title, a.authors, a.journal, a.year, a.volume, a.issue, a.doi,
+      substr(a.abstract, 1, 320) AS abstract,
+      a.url, a.published_at,
+      ${displayDateSql("a")} AS display_date,
+      a.keywords, a.research_direction, a.research_direction_secondary,
+      a.direction_confidence, a.direction_source, a.direction_reason,
+      ${interactionFields},
+      zh.title AS translated_title,
+      substr(zh.abstract, 1, 320) AS translated_abstract
+    FROM articles a
+    LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
+    ${interactionJoins}
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY ${displayDateSql("a")} DESC, a.id DESC
+  `).all({ ...params, ...(userId ? { userId } : {}) });
+
+  const matched = rows.filter((row) => keywordSetOf(row.keywords).has(key));
+  const page = matched.slice(offset, offset + limit);
+  return {
+    articles: page,
+    total: matched.length,
+    hasMore: offset + limit < matched.length,
+    limit,
+    offset
+  };
+}
+
 export function getKeywordCooccurrence(filters = {}) {
+  // 口径与改前一致（不引入新的排除条件，避免改变既有共现结果）
   const clauses = ["keywords IS NOT NULL", "keywords != ''", EXCLUDE_OTHER_PLAIN];
   const params = {};
 
@@ -1909,28 +1989,19 @@ export function getKeywordCooccurrence(filters = {}) {
 
   const where = `WHERE ${clauses.join(" AND ")}`;
   const articles = db.prepare(`
-    SELECT id, title, journal, published_at, ${displayDateSql("articles")} AS display_date, keywords, url, doi
+    SELECT id, keywords
     FROM articles
     ${where}
     ORDER BY ${displayDateSql("articles")} DESC
   `).all(params);
 
-  // Build keyword frequency map
-  const keywordMap = new Map();
+  // 只需要共现对，不需要单词频次（后者不再回传）
   const cooccurrenceMap = new Map();
 
   for (const article of articles) {
     const terms = article.keywords.split(/[;；]/).map((t) => t.trim().toLowerCase()).filter(Boolean);
     const uniqueTerms = [...new Set(terms)];
-    
-    // Count individual keywords
-    for (const term of uniqueTerms) {
-      if (!keywordMap.has(term)) {
-        keywordMap.set(term, { keyword: term, count: 0 });
-      }
-      keywordMap.get(term).count += 1;
-    }
-    
+
     // Count co-occurrences
     for (let i = 0; i < uniqueTerms.length; i++) {
       for (let j = i + 1; j < uniqueTerms.length; j++) {
@@ -1943,12 +2014,13 @@ export function getKeywordCooccurrence(filters = {}) {
     }
   }
 
-  const keywords = [...keywordMap.values()].sort((a, b) => b.count - a.count);
   const cooccurrences = [...cooccurrenceMap.values()]
     .sort((a, b) => b.count - a.count)
     .slice(0, 100); // Limit to top 100 co-occurrences
 
-  return { keywords, cooccurrences };
+  // P1（2026-10-14）：不再回传关键词频次全量表——前端只消费 cooccurrences
+  // （CooccurrenceView 取前 30 对），那份表占了响应体的绝大部分（300 KB → ≈60 KB）。
+  return { cooccurrences };
 }
 
 // ── User Emails ──
@@ -2686,7 +2758,12 @@ function parseReportRow(row) {
   if (row.stats_json) {
     try { stats = JSON.parse(row.stats_json); } catch { stats = null; }
   }
-  return { ...row, stats_json: undefined, stats };
+  // briefCount：速评条数。meta 模式在 SQL 层剥掉了 paperBriefs，所以由 brief_count 列带回——
+  // 卡片阅读「按速览期」要靠它判断某方向本期到底有没有可读的速评（2026-10-14）。
+  const briefCount = Number.isFinite(Number(row.brief_count))
+    ? Number(row.brief_count)
+    : (Array.isArray(stats?.paperBriefs) ? stats.paperBriefs.length : 0);
+  return { ...row, stats_json: undefined, stats, brief_count: undefined, briefCount };
 }
 
 /**
@@ -2726,10 +2803,12 @@ export function listAiReports({ kind = "weekly", limit = 12, direction, directio
     params.periodStart = String(periodStart);
   }
   // meta 模式在 SQL 层剥 paperBriefs；json_remove 对坏 JSON 返回 NULL（parseReportRow 容错）。
+  // 同时带回 brief_count（速评条数），供「卡片阅读 · 按速览期」判断该方向本期有无速评可读。
   const statsSelect = meta ? "json_remove(stats_json, '$.paperBriefs') AS stats_json" : "stats_json";
+  const briefCountSelect = "json_array_length(COALESCE(json_extract(stats_json, '$.paperBriefs'), '[]')) AS brief_count";
   const contentSelect = meta ? "NULL AS content_md" : "content_md";
   return db.prepare(`
-    SELECT id, kind, period_start, period_end, direction, status, ${contentSelect}, ${statsSelect}, generated_at, generator
+    SELECT id, kind, period_start, period_end, direction, status, ${contentSelect}, ${statsSelect}, ${briefCountSelect}, generated_at, generator
     FROM ai_reports
     WHERE kind = @kind AND status = 'ready' ${clauses.join(" ")}
     ORDER BY period_start DESC, id DESC

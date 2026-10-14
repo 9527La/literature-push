@@ -16,22 +16,73 @@ const SEEN_KEY = "onboardingSeen";
 const TOUR_EVENT = "start-onboarding";
 const POLL_MS = 140;
 const POLL_IDLE_MS = 380;
+/** 目标从"缺失"变为"出现"后，超过这个时间仍未出现就隐藏聚光灯（避免旧位置长时间滞留） */
+const MISS_HIDE_MS = 260;
+/** 目标移动超过这个像素视为"真的换了位置"，立即落位；小于它视为抖动，需连续两次一致 */
+const MOVE_EPSILON = 8;
+/** 自动推进前的提示停留（统一节奏：手动完成 / 教程代劳 / 自动跳过） */
+const FLASH_HOLD_MS = 520;
+const FLASH_HOLD_PERFORM_MS = 1400;
+/** 兜底恢复（recover）的冷却时间：避免同一步反复触发自动修复 */
+const RECOVER_COOLDOWN_MS = 4000;
+/** 阅读器内步骤的宽限：卡片阅读没打开时，先等这么久（打开有延迟），仍没开就尝试自救/跳过 */
+const READER_GRACE_MS = 1500;
+/** 阅读器没打开时，最多替用户重试点几次「开始卡片阅读」再放弃（实测手动点一定有效） */
+const READER_RECOVER_TRIES = 2;
 
-/** 教程会依次打开这些页面：开始时预热分包，避免"跳到某页要等加载"造成的停顿 */
-const PAGE_CHUNKS = [
-  () => import("../reports/ReportsView.jsx"),
-  () => import("../news/DailyNewsView.jsx"),
-  () => import("../favorites/FavoritesView.jsx"),
-  () => import("../stats/StatsView.jsx"),
-  () => import("../settings/SettingsView.jsx"),
-  () => import("../feedback/FeedbackView.jsx"),
-  () => import("../account/AccountView.jsx")
-];
-function prefetchPages() {
-  for (const load of PAGE_CHUNKS) load().catch(() => { /* 预热失败不影响教程 */ });
+/** 推送设置步骤（key）：未登录个人账户时，设置页只渲染"游客模式"占位，
+ *  这些步骤的目标元素一个都不存在——整段跳过并说明原因，避免连续多步"正在准备页面…"。 */
+const ACCOUNT_STEP_KEYS = new Set(["push", "push-email", "push-summary", "push-frequency", "push-time", "push-content", "push-journals", "push-directions", "push-actions"]);
+/** 从 fromIndex 之后，第一个不属于推送设置段的步骤 */
+function nextStepOutsideAccount(fromIndex) {
+  for (let i = fromIndex + 1; i < STEPS.length; i += 1) {
+    if (!ACCOUNT_STEP_KEYS.has(STEPS[i].key)) return i;
+  }
+  return STEPS.length - 1;
 }
 
-/** 依次尝试多个选择器/取值器，返回第一个命中且可见的元素（页面在不同身份/数据下结构不同） */
+/** 页面分包按需预热：只预热"接下来 2 步"会去的页面。
+ *  （此前在教程启动时一次性 import 全部 7 个视图分包 ≈101 KB，与首屏数据请求
+ *   抢带宽和主线程，是"教程一弹出就卡"的主因之一。） */
+const PAGE_CHUNKS = {
+  "#reports": () => import("../reports/ReportsView.jsx"),
+  "#news": () => import("../news/DailyNewsView.jsx"),
+  "#favorites": () => import("../favorites/FavoritesView.jsx"),
+  "#stats": () => import("../stats/StatsView.jsx"),
+  "#settings": () => import("../settings/SettingsView.jsx"),
+  "#feedback": () => import("../feedback/FeedbackView.jsx"),
+  "#account": () => import("../account/AccountView.jsx")
+};
+const prefetched = new Set();
+function prefetchPages(fromIndex, lookahead = 2) {
+  const wanted = new Set();
+  for (let i = fromIndex + 1; i <= fromIndex + lookahead && i < STEPS.length; i += 1) {
+    const page = STEPS[i]?.page;
+    if (page && PAGE_CHUNKS[page]) wanted.add(page);
+  }
+  for (const page of wanted) {
+    if (prefetched.has(page)) continue;
+    prefetched.add(page);
+    PAGE_CHUNKS[page]().catch(() => { /* 预热失败不影响教程 */ });
+  }
+}
+
+/** 必须在「卡片阅读已打开」状态下才有意义的步骤（key）。
+ *  用户在阅读器里按 Esc 会关闭阅读器（教程故意把 Esc 交给底层），此时这些步骤
+ *  的目标元素全部消失——若不做处理，教程会卡在"切换卡片版本"这类步骤上
+ *  （2026-10-14 用户反馈：卡在这一步进不去卡片阅读）。 */
+const READER_STEP_KEYS = new Set(["reader-flip", "reader-view", "reader-drawer", "reader-batch", "reader-note", "reader-exit"]);
+/** 「翻页」步骤的基线：阅读器是异步加载的（先 0 条、再变成 N 条），
+ *  进入步骤时读到的索引不能当基线，否则"加载完成导致索引 0→1"会被误判成用户翻页，
+ *  这一步就被白白跳过。改为：等总条数就绪后取一次基线，之后的变化才算翻页。 */
+let flipBaseline = null;
+/** 从 fromIndex 之后，第一个不属于阅读器内的步骤（阅读器被关闭时跳到这里继续） */
+function nextStepOutsideReader(fromIndex) {
+  for (let i = fromIndex + 1; i < STEPS.length; i += 1) {
+    if (!READER_STEP_KEYS.has(STEPS[i].key)) return i;
+  }
+  return STEPS.length - 1;
+}
 const firstVisible = (...getters) => {
   for (const get of getters) {
     try {
@@ -73,6 +124,11 @@ const visible = (selector) => {
 const byText = (selector, text) => [...document.querySelectorAll(selector)].find((el) => el.textContent.trim().includes(text)) || null;
 const isOnText = (selector, text) => [...document.querySelectorAll(selector)].some((el) => el.classList.contains("on") && el.textContent.includes(text));
 const readerIndex = () => Number(document.querySelector(".cr-progress strong")?.textContent || 0);
+/** 阅读器总条数（读 "第 N / M 条" 里的 M）：为 0 说明还在加载 */
+const readerTotal = () => {
+  const match = String(document.querySelector(".cr-progress")?.textContent || "").match(/\/\s*(\d+)/);
+  return match ? Number(match[1]) : 0;
+};
 const onHash = (page) => (page ? String(window.location.hash || "").startsWith(page) : true);
 /** 是否已登录个人账户（收藏/推送/讨论/账户页需要） */
 const loggedIn = () => {
@@ -270,7 +326,8 @@ const STEPS = [
     title: "第五步：选研究方向",
     body: "每个方向后面标注的是本期该方向的文献篇数。",
     hint: "请点选一个研究方向。",
-    perform: () => { if (!has(".reader-chip--dir.on")) clickIf(".reader-chip--dir"); },
+    // 跳过「无速评」的禁用方向（选了会报错进不去阅读器）
+    perform: () => { if (!has(".reader-chip--dir.on")) clickIf(() => document.querySelector(".reader-chip--dir:not([disabled])")); },
     advance: () => has(".reader-chip--dir.on")
   },
   {
@@ -296,7 +353,28 @@ const STEPS = [
       clickIf(() => byText(".reader-setup-foot button", "重置条件"));
       setTimeout(() => clickIf(() => byText(".reader-setup button", "生成文献目录")), 240);
     },
-    advance: () => visible(".reader-catalog-row")
+    advance: () => visible(".reader-catalog-row"),
+    // 用户自己手点「生成文献目录」时不会先重置条件 → 条件过窄会得到"没有匹配的文献"，
+    // 目录不生成、也就没有「开始卡片阅读」按钮，教程会卡死在这一步（2026-10-14 修复）：
+    // 检测到该错误就自动放宽条件并重新生成，把用户带出死胡同。
+    recover: () => {
+      if (!visible(".reader-setup-error")) return null;
+      const reset = byText(".reader-setup-foot button", "重置条件");
+      if (reset && !reset.disabled) {
+        clickIf(() => byText(".reader-setup-foot button", "重置条件"));
+        setTimeout(() => clickIf(() => byText(".reader-setup button", "生成文献目录")), 240);
+        return { message: "当前条件太窄，已自动放宽条件并重新生成目录" };
+      }
+      // 按速览期：「重置条件」不可用。若报的是"该方向本期没有可阅读的速评文献"，
+      // 换一个本期真有速评的方向重试（2026-10-14 用户反馈：选到无速评的方向就进不去）。
+      const nextDir = document.querySelector(".reader-chip--dir:not([disabled]):not(.on)");
+      if (nextDir) {
+        nextDir.click();
+        setTimeout(() => clickIf(() => byText(".reader-setup button", "生成文献目录")), 700);
+        return { message: "该方向本期没有速评，已换一个有速评的方向" };
+      }
+      return null;
+    }
   },
   {
     key: "reader-start",
@@ -305,21 +383,33 @@ const STEPS = [
     body: "目录确认无误后进入全屏卡片阅读；阅读中随时可以「返回调整」重新选范围。",
     hint: "请点击「开始卡片阅读」。",
     perform: () => clickIf(() => byText("button", "开始卡片阅读")),
+    // 必须等阅读器真的打开才推进：此前「下一步」会在 1.4s 后无条件前进，
+    // 一旦这次点击没生效就会一路滑进阅读器内的步骤（2026-10-14 修复）
+    strictAdvance: true,
     advance: () => visible(".card-reader")
   },
   {
     key: "reader-flip",
+    needsReader: true,
     resolve: () => document.querySelector(".cr-nav--primary"),
     title: "翻页",
     body: "顶部显示「第 N / M 条」，进度条可点击或拖动跳转；默认开启「读即标记」——翻过去就自动标记已读。",
     hint: "请点「下一条」，或直接按键盘 → / 空格。",
     perform: () => clickIf(".cr-nav--primary"),
-    enter: () => readerIndex(),
-    // 只有 1 篇（下一条禁用）时无页可翻 → 自动继续，避免卡住
-    advance: (baseline) => readerIndex() > (baseline || 0) || !document.querySelector(".cr-nav--primary:not([disabled])")
+    // 进入时只重置基线（真正的基线在"加载完成后的第一帧"取，见 advance）
+    enter: () => { flipBaseline = null; return null; },
+    // 只有 1 篇（下一条禁用）时无页可翻 → 自动继续，避免卡住；
+    // 但"阅读器还在加载"和"加载完成导致的索引跳变"都不算翻页，否则这一步会被跳过。
+    advance: () => {
+      if (!visible(".card-reader") || readerTotal() === 0) return false;
+      const current = readerIndex();
+      if (flipBaseline === null) { flipBaseline = current; return false; }
+      return current > flipBaseline || !document.querySelector(".cr-nav--primary:not([disabled])");
+    }
   },
   {
     key: "reader-view",
+    needsReader: true,
     target: ".cr-views",
     title: "切换卡片版本",
     body: "速评版（研究对象 / 研究方法 / 核心结论）、中文摘要版（完整摘要，可展开英文对照）、原文版；默认版本会自动记忆。",
@@ -329,6 +419,7 @@ const STEPS = [
   },
   {
     key: "reader-drawer",
+    needsReader: true,
     resolve: () => document.querySelector(".cr-head-right .cr-icon-btn"),
     title: "目录抽屉",
     body: "这里能看全批清单、点击序号直达，也能在阅读中改范围（仅未读 / 仅有速评 / 按期刊）。",
@@ -338,6 +429,7 @@ const STEPS = [
   },
   {
     key: "reader-batch",
+    needsReader: true,
     target: ".cr-drawer-batch",
     title: "读完本批",
     body: "抽屉底部可以把本批剩余未读一键标记为已读（会二次确认）。现在先不用点。",
@@ -345,6 +437,7 @@ const STEPS = [
   },
   {
     key: "reader-note",
+    needsReader: true,
     target: ".cr-note-toggle",
     title: "备注 / 收藏 / 复制引用",
     body: "卡片底部可以随手记备注（存到收藏备注，未收藏会自动先收藏）；底部操作栏还有收藏（F）、标记已读（R）、复制 GB/T 7714 引用（C）。",
@@ -352,6 +445,7 @@ const STEPS = [
   },
   {
     key: "reader-exit",
+    needsReader: true,
     resolve: () => document.querySelector(".cr-close"),
     title: "退出卡片阅读",
     body: "同一范围下次再打开时，会自动回到上次读到的位置（断点续读）。",
@@ -400,11 +494,22 @@ const STEPS = [
     resolve: () => firstVisible(".reports-journal-chip", ".reports-meta-journals"),
     title: "⑤ 来源期刊筛选",
     body: "方向专报信息条里的期刊 chips 可点选隐藏 / 显示某一来源的速评卡，方便只看某个期刊的内容；仅影响当前报告的浏览，不改变数据。",
-    hint: "这一步只看不点，看完点「下一步」。"
+    hint: "这一步只看不点，看完点「下一步」。",
+    // 「来源期刊」chips 只存在于**方向专报态**（总览态不渲染）。用户若停在总览，
+    // 这一步就会没有任何高亮（2026-10-14 用户反馈）。检测到目标缺失就先替用户
+    // 点一个方向 chip 进入专报，再让聚光灯落位。
+    recover: () => {
+      if (visible(".reports-meta-journals") || visible(".reports-journal-chip")) return null;
+      const chip = document.querySelector(".reports-dir-chip:not(.overview)");
+      if (!chip) return null;
+      clickIf(() => document.querySelector(".reports-dir-chip:not(.overview)"));
+      return { message: "已切到方向专报，展示「来源期刊」筛选" };
+    }
   },
   {
     key: "reports-cardread",
-    resolve: () => firstVisible(".reports-group-cardread", ".reports-group-head"),
+    // 方向专报态下没有分组卡（总览才有），信息条上的「卡片阅读 · N 篇」是等价入口
+    resolve: () => firstVisible(".reports-group-cardread", ".reports-group-head", ".reports-cardread-btn"),
     title: "⑥ 卡片阅读入口与个性化",
     body: "方向分组底部、方向专报信息条、主题聚类底部都提供「卡片阅读 · N 篇」，按该范围逐条阅读。方向 chips 支持拖拽排序与隐藏（存本机浏览器）；点期刊名可看该刊最近文献，主题词可一键搜索。",
     hint: "这一步只看不点，看完点「下一步」。"
@@ -446,6 +551,7 @@ const STEPS = [
   },
   {
     key: "push",
+    needsAccount: true,
     page: "#settings",
     resolve: () => firstVisible(".settings-left", ".settings-section", ".settings-view"),
     title: "文献推送：页面结构",
@@ -454,6 +560,7 @@ const STEPS = [
   },
   {
     key: "push-email",
+    needsAccount: true,
     resolve: () => firstVisible(".email-row", ".saved-email-status"),
     title: "① 我的周报邮箱",
     body: "填写接收邮箱后点「保存」；点「发送测试邮箱」可确认地址是否可用（测试邮件或正式推送没收到时，先核对邮箱再联系管理员）。",
@@ -461,6 +568,7 @@ const STEPS = [
   },
   {
     key: "push-summary",
+    needsAccount: true,
     resolve: () => firstVisible(".push-summary", ".push-settings"),
     title: "② 当前推送计划概览",
     body: "这里汇总当前生效的配置：推送频率、推送期刊、研究方向偏好。改设置并保存后，概览会同步更新。",
@@ -468,13 +576,25 @@ const STEPS = [
   },
   {
     key: "push-frequency",
+    needsAccount: true,
     resolve: () => firstVisible(".push-frequency"),
     title: "③ 推送频率",
     body: "每天 / 每周 / 每月三选一：每周需再选星期几，每月需再选日期；配合发送时间即可确定推送节奏。",
-    hint: "这一步只看不点，看完点「下一步」。"
+    hint: "这一步只看不点，看完点「下一步」。",
+    // 已启用推送时设置页默认停在**概览态**（只有摘要 + 「修改推送设置」按钮），
+    // 频率/时间/内容/期刊/方向这些编辑项都不渲染 → 步骤③~⑦全都没有高亮
+    // （2026-10-14 用户反馈）。检测到目标缺失就先替用户进入编辑态。
+    recover: () => {
+      if (visible(".push-frequency")) return null;
+      const editBtn = byText(".push-actions button", "修改推送设置");
+      if (!editBtn || editBtn.disabled) return null;
+      clickIf(() => byText(".push-actions button", "修改推送设置"));
+      return { message: "已进入推送设置编辑态" };
+    }
   },
   {
     key: "push-time",
+    needsAccount: true,
     resolve: () => firstVisible(".push-time-selector"),
     title: "④ 发送时间",
     body: "选择小时与分钟（按服务器时间）；设置完成后需要点「保存推送设置」，计划才会真正生效。",
@@ -482,6 +602,7 @@ const STEPS = [
   },
   {
     key: "push-content",
+    needsAccount: true,
     resolve: () => firstVisible(".push-content-options"),
     title: "⑤ 邮件内容",
     body: "可分别开关：附件文件、摘要、关键词、中文翻译。只勾选需要的部分，邮件会更精简。",
@@ -489,6 +610,7 @@ const STEPS = [
   },
   {
     key: "push-journals",
+    needsAccount: true,
     resolve: () => firstVisible(".push-journal-filter"),
     title: "⑥ 推送期刊范围",
     body: "按出版社分组选择要推送的期刊，可整组勾选或逐本挑选；不选即默认全部期刊。",
@@ -496,6 +618,7 @@ const STEPS = [
   },
   {
     key: "push-directions",
+    needsAccount: true,
     resolve: () => firstVisible(".push-direction-list"),
     title: "⑦ 推送研究方向",
     body: "只推送选定的研究方向；邮件正文按方向分组展示，分组顺序与这里的点选顺序一致（标签上带顺序编号，取消后重新点选即可调整顺序）。",
@@ -503,6 +626,7 @@ const STEPS = [
   },
   {
     key: "push-actions",
+    needsAccount: true,
     resolve: () => firstVisible(".push-actions"),
     title: "⑧ 保存与立即发送",
     body: "点「保存推送设置」才会让计划生效；「立即发送」可以不等到计划时间，马上发一封当前摘要邮件（可用于试收）。",
@@ -547,6 +671,8 @@ export default function OnboardingTour({ enabled = true }) {
   const baselineRef = useRef(null);
   const scrolledRef = useRef("");
   const indexRef = useRef(0);
+  /** 上一步所在的页面（hash）：跨页切换时清掉旧矩形，避免聚光灯横跨整页滑动 */
+  const prevPageRef = useRef("");
   const total = STEPS.length;
   const step = STEPS[index];
 
@@ -562,21 +688,39 @@ export default function OnboardingTour({ enabled = true }) {
     setIndex((current) => Math.min(Math.max(current + delta, 0), total - 1));
   }, [total]);
 
+  /** strictAdvance 步骤（如"开始阅读"）的连续「下一步」次数：第一次只重试，第二次才放行 */
+  const strictRetryRef = useRef(0);
+
   /** 「下一步」：若本步需要操作，则先替用户完成该步的真实点击（避免直接跳过导致页面状态不对） */
   const handleNext = useCallback(() => {
     if (step?.perform) {
-      setFlashText("已帮你完成这一步，正在继续…");
+      setFlashText(step.strictAdvance ? "正在打开卡片阅读…" : "已帮你完成这一步，正在继续…");
       setFlash(true);
       try { step.perform(); } catch { /* 忽略 */ }
+      // strictAdvance：只按真实状态推进（例如"开始阅读"必须等阅读器真的打开）。
+      // ❌ 不要"连点两次就放行"——阅读器还在渲染时硬推进到阅读器内的步骤，
+      //    会让后续步骤因阅读器未打开而整段跳过（2026-10-14 用户反馈：
+      //    「生成目录后点下一步直接跳到研究速览」）。连点多次仍无进展时，
+      //    改为跳过「阅读器段」，而不是硬塞进阅读器内的步骤。
+      if (step.strictAdvance) {
+        strictRetryRef.current += 1;
+        if (strictRetryRef.current >= 3) {
+          strictRetryRef.current = 0;
+          setFlashText("卡片阅读没有打开，已跳过阅读器内的步骤");
+          const target = nextStepOutsideReader(index);
+          setTimeout(() => setIndex(target), FLASH_HOLD_MS);
+        }
+        return;
+      }
       const at = indexRef.current;
-      setTimeout(() => { if (indexRef.current === at) go(1); }, 1400);
+      setTimeout(() => { if (indexRef.current === at) go(1); }, FLASH_HOLD_PERFORM_MS);
       return;
     }
     go(1);
-  }, [go, step]);
+  }, [go, step, index]);
 
   const start = useCallback(() => {
-    prefetchPages();
+    prefetchPages(0);
     setIndex(0);
     setActive(true);
   }, []);
@@ -588,7 +732,8 @@ export default function OnboardingTour({ enabled = true }) {
     try { seen = localStorage.getItem(SEEN_KEY) || ""; } catch { seen = "1"; }
     if (seen === "1") return undefined;
     autoOpened.current = true;
-    prefetchPages();
+    // 不再一次性预热全部页面分包：只预热第 1 步之后的 2 个页面
+    prefetchPages(0);
     const timer = setTimeout(() => setActive(true), 900);
     return () => clearTimeout(timer);
   }, [enabled]);
@@ -599,12 +744,22 @@ export default function OnboardingTour({ enabled = true }) {
     return () => window.removeEventListener(TOUR_EVENT, start);
   }, [start]);
 
-  /* 步骤切换：必要时跳转页面；记录基线；把目标滚入视野 */
+  /* 步骤切换：必要时跳转页面；记录基线；按需预热后面 2 步的页面分包 */
   useEffect(() => {
     if (!active || !step) return;
+    // 有效页面 = 步骤声明的 page，未声明时沿用当前 hash（否则会被误判成"跨页"，
+    // 把气泡打回屏幕中央、正好挡住下一步要点的目标）
+    const currentPage = String(window.location.hash || "#feed").split("?")[0] || "#feed";
+    const pageKey = step.page || currentPage;
+    const pageChanged = pageKey !== prevPageRef.current;
+    prevPageRef.current = pageKey;
     if (step.page && !onHash(step.page)) {
       window.location.hash = step.page;
     }
+    // 跨页步骤：旧页面的矩形对新页面没有意义，先清掉，避免聚光灯横跨整页滑动
+    if (pageChanged) setRect(null);
+    strictRetryRef.current = 0;
+    prefetchPages(index);
     baselineRef.current = step.enter ? step.enter() : null;
     setFlash(false);
     // 滚动定位改到「目标出现的那一刻」立刻执行（见跟踪 effect），
@@ -612,32 +767,41 @@ export default function OnboardingTour({ enabled = true }) {
     scrolledRef.current = "";
   }, [active, index, step]);
 
-  /* 目标矩形跟踪 + 自动推进检测（丝滑化：矩形去重、更密轮询、缺失淡出） */
+  /* 目标矩形跟踪 + 自动推进检测
+   *  丝滑化三原则（2026-10-14 重做）：
+   *   ① 首测即落位——不再要求"连续两次测量一致"，目标一出现就立刻把聚光灯放到位，
+   *      消除"内容早已就绪、高亮还在缓慢过渡"的延迟（旧实现至少滞后 1 个轮询周期）；
+   *   ② 大位移立即响应、微抖动才去抖——位移 > MOVE_EPSILON 直接落位，小于它才要求
+   *      连续两次一致，兼顾"跟手"与"不抖"；
+   *   ③ 读布局一次算一次——每个 tick 只做一次 getBoundingClientRect，
+   *      滚动/缩放事件经 rAF 合并、passive 监听，避免滚动时每事件强制同步布局。 */
   useEffect(() => {
     if (!active || !step) return undefined;
     let advancing = false;
     let missSince = 0;
     let lastKey = "";
     let stableCount = 0;
-    let timer = null;
+    let pollTimer = null;
+    let idle = false;
+    let raf = 0;
     const measure = () => {
       const el = step.resolve ? step.resolve() : (step.target ? document.querySelector(step.target) : null);
       const box = el ? el.getBoundingClientRect() : null;
       const shown = Boolean(box && box.width > 0 && box.height > 0);
       if (!shown) {
-        // 目标暂未出现（如跨页面加载中）：先保留旧位置 400ms，之后隐藏聚光灯
+        // 目标暂未出现（如跨页面加载中）：短暂保留旧位置后隐藏聚光灯，避免旧位置滞留造成"高亮跟不上页面"
         missSince = missSince || Date.now();
         lastKey = "";
         stableCount = 0;
         const missed = Date.now() - missSince;
-        if (missed > 400) setRect(null);
+        if (missed > MISS_HIDE_MS) setRect(null);
         if (missed > 5000) setStuck(true);
         // 该步在当前模式下不存在（如自定义筛选没有"专题"）→ 自动跳过，不卡住用户
         if (step.autoSkipIfMissing && missed > 2200 && !advancing) {
           advancing = true;
           setFlashText("当前模式下没有这一步，已自动跳过");
           setFlash(true);
-          setTimeout(() => go(1), 520);
+          setTimeout(() => go(1), FLASH_HOLD_MS);
         }
         return;
       }
@@ -650,25 +814,29 @@ export default function OnboardingTour({ enabled = true }) {
         const inView = box.top >= 90 && box.top + box.height <= window.innerHeight - 90;
         if (!inView) el.scrollIntoView?.({ block: "center", behavior: "auto" });
       }
-      const key = `${Math.round(box.top)}|${Math.round(box.left)}|${Math.round(box.width)}|${Math.round(box.height)}`;
-      if (key === lastKey) stableCount += 1;
-      else { lastKey = key; stableCount = 0; }
-      // 连续两次测量一致才落位：避免页面还在布局时聚光灯来回跑（卡顿主因之一）
-      if (stableCount >= 1) {
-        setRect((prev) => (
-          prev
-          && Math.abs(prev.top - box.top) < 1
-          && Math.abs(prev.left - box.left) < 1
-          && Math.abs(prev.width - box.width) < 1
-          && Math.abs(prev.height - box.height) < 1
-            ? prev
-            : { top: box.top, left: box.left, width: box.width, height: box.height }
-        ));
-      }
+      const next = { top: box.top, left: box.left, width: box.width, height: box.height };
+      const key = `${Math.round(next.top)}|${Math.round(next.left)}|${Math.round(next.width)}|${Math.round(next.height)}`;
+      setRect((prev) => {
+        if (!prev) return next;                       // ① 首次落位：立即
+        const moved = Math.abs(prev.top - next.top) > MOVE_EPSILON
+          || Math.abs(prev.left - next.left) > MOVE_EPSILON
+          || Math.abs(prev.width - next.width) > MOVE_EPSILON
+          || Math.abs(prev.height - next.height) > MOVE_EPSILON;
+        const same = Math.abs(prev.top - next.top) < 1
+          && Math.abs(prev.left - next.left) < 1
+          && Math.abs(prev.width - next.width) < 1
+          && Math.abs(prev.height - next.height) < 1;
+        if (same) return prev;
+        // ② 大位移立即跟手；微小抖动需连续两次测量一致（去抖）
+        if (moved) { lastKey = key; stableCount = 0; return next; }
+        if (key === lastKey) stableCount += 1; else { lastKey = key; stableCount = 0; }
+        return stableCount >= 1 ? next : prev;
+      });
       // 位置稳定后降低轮询频率，减少主线程占用
-      if (stableCount === 4 && timer) {
-        clearInterval(timer);
-        timer = setInterval(tick, POLL_IDLE_MS);
+      if (!idle && key === lastKey && stableCount >= 4 && pollTimer) {
+        idle = true;
+        clearInterval(pollTimer);
+        pollTimer = setInterval(tick, POLL_IDLE_MS);
       }
     };
     const checkAdvance = () => {
@@ -676,22 +844,79 @@ export default function OnboardingTour({ enabled = true }) {
         advancing = true;
         setFlashText("操作完成，继续下一步");
         setFlash(true);
-        setTimeout(() => go(1), 520);
+        setTimeout(() => go(1), FLASH_HOLD_MS);
       }
     };
-    const tick = () => { measure(); checkAdvance(); };
+    // 本步可能因为筛选条件过窄而走不通（如"生成文献目录"为空）：给一个自动兜底，
+    // 由步骤自己决定怎么恢复，教程负责提示与冷却，避免用户卡在这一步。
+    let recoverUntil = 0;
+    const checkRecover = () => {
+      if (advancing || !step.recover || Date.now() < recoverUntil) return;
+      let outcome = null;
+      try { outcome = step.recover(); } catch { outcome = null; }
+      if (!outcome) return;
+      recoverUntil = Date.now() + RECOVER_COOLDOWN_MS;
+      setFlashText(outcome.message || "已自动调整并重试");
+      setFlash(true);
+    };
+    // 阅读器内步骤的守卫：卡片阅读被关闭（例如用户按 Esc —— 教程故意把 Esc 交给底层）
+    // 时，这些步骤的目标元素全部消失。处理顺序：先替用户重试打开阅读器（实测手动点
+    // 「开始卡片阅读」一定有效），重试仍失败才整段跳过并明确告知。
+    let readerMissSince = 0;
+    let readerRecoverCount = 0;
+    const checkReaderGuard = () => {
+      if (!step.needsReader || advancing) return;
+      if (visible(".card-reader")) { readerMissSince = 0; return; }
+      readerMissSince = readerMissSince || Date.now();
+      if (Date.now() - readerMissSince < READER_GRACE_MS) return;
+      const startBtn = byText("button", "开始卡片阅读");
+      if (startBtn && !startBtn.disabled && readerRecoverCount < READER_RECOVER_TRIES) {
+        readerRecoverCount += 1;
+        readerMissSince = 0;
+        clickIf(() => byText("button", "开始卡片阅读"));
+        setFlashText("正在打开卡片阅读…");
+        setFlash(true);
+        return;
+      }
+      advancing = true;
+      setFlashText("卡片阅读已关闭，已跳过阅读器内的步骤（想重看可点「上一步」）");
+      setFlash(true);
+      const target = nextStepOutsideReader(index);
+      setTimeout(() => setIndex(target), FLASH_HOLD_MS);
+    };
+    // 推送设置段的守卫：未登录个人账户时设置页是"游客模式"占位，该段所有目标都不存在
+    let accountMissSince = 0;
+    const checkAccountGuard = () => {
+      if (!step.needsAccount || advancing) return;
+      if (loggedIn()) { accountMissSince = 0; return; }
+      accountMissSince = accountMissSince || Date.now();
+      if (Date.now() - accountMissSince < READER_GRACE_MS) return;
+      advancing = true;
+      setFlashText("未登录个人账户，已跳过推送设置（注册后可在使用说明页重看教程）");
+      setFlash(true);
+      const target = nextStepOutsideAccount(index);
+      setTimeout(() => setIndex(target), FLASH_HOLD_MS);
+    };
+    const tick = () => { if (document.hidden) return; measure(); checkAdvance(); checkReaderGuard(); checkAccountGuard(); checkRecover(); };
+    /** 滚动/缩放等高频事件：合并到一帧只跑一次，且监听器为 passive */
+    const schedule = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; tick(); });
+    };
     tick();
-    const raf1 = requestAnimationFrame(tick);
-    const raf2 = requestAnimationFrame(() => requestAnimationFrame(tick));
-    timer = setInterval(tick, POLL_MS);
-    window.addEventListener("resize", tick);
-    window.addEventListener("scroll", tick, true);
+    raf = requestAnimationFrame(() => { raf = 0; tick(); });
+    pollTimer = setInterval(tick, POLL_MS);
+    window.addEventListener("resize", schedule, { passive: true });
+    window.addEventListener("scroll", schedule, { passive: true, capture: true });
+    window.addEventListener("hashchange", schedule);
+    document.addEventListener("visibilitychange", schedule);
     return () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(raf2);
-      if (timer) clearInterval(timer);
-      window.removeEventListener("resize", tick);
-      window.removeEventListener("scroll", tick, true);
+      if (raf) cancelAnimationFrame(raf);
+      if (pollTimer) clearInterval(pollTimer);
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("hashchange", schedule);
+      document.removeEventListener("visibilitychange", schedule);
     };
   }, [active, index, step, go]);
 
@@ -767,19 +992,26 @@ export default function OnboardingTour({ enabled = true }) {
 
   if (!active || !step) return null;
 
+  // 聚光灯矩形：无目标（跨页加载中 / 居中步）时退化为"整屏遮罩"（顶条铺满、其余为 0），
+  // 四块遮罩条**始终挂载**——这样"挖孔"是平滑开合，而不是 dim ↔ 四条之间的硬切换（闪一下）。
+  const hole = rect && !step.center ? rect : null;
+  const viewportW = typeof window === "undefined" ? 0 : window.innerWidth;
+  const viewportH = typeof window === "undefined" ? 0 : window.innerHeight;
+
   return (
     <div className="tour" role="dialog" aria-modal="false" aria-label="新手教程">
-      {rect && !step.center ? (
-        // 四块纯色遮罩条（比"超大面积 box-shadow 挖孔"便宜：位移/缩放只重绘几块小矩形）
-        <>
-          <div className="tour-band" style={{ left: 0, top: 0, width: "100%", height: `${Math.max(0, rect.top)}px` }} aria-hidden="true" />
-          <div className="tour-band" style={{ left: 0, top: `${rect.top + rect.height}px`, width: "100%", height: `${Math.max(0, window.innerHeight - rect.top - rect.height)}px` }} aria-hidden="true" />
-          <div className="tour-band" style={{ left: 0, top: `${rect.top}px`, width: `${Math.max(0, rect.left)}px`, height: `${rect.height}px` }} aria-hidden="true" />
-          <div className="tour-band" style={{ left: `${rect.left + rect.width}px`, top: `${rect.top}px`, width: `${Math.max(0, window.innerWidth - rect.left - rect.width)}px`, height: `${rect.height}px` }} aria-hidden="true" />
-          <div className="tour-ring" style={{ left: `${rect.left - 5}px`, top: `${rect.top - 5}px`, width: `${rect.width + 10}px`, height: `${rect.height + 10}px` }} aria-hidden="true" />
-        </>
-      ) : (
+      {step.center ? (
         <div className="tour-dim" aria-hidden="true" />
+      ) : (
+        <>
+          <div className="tour-band" style={{ left: 0, top: 0, width: "100%", height: `${hole ? Math.max(0, hole.top) : viewportH}px` }} aria-hidden="true" />
+          <div className="tour-band" style={{ left: 0, top: `${hole ? hole.top + hole.height : viewportH}px`, width: "100%", height: `${hole ? Math.max(0, viewportH - hole.top - hole.height) : 0}px` }} aria-hidden="true" />
+          <div className="tour-band" style={{ left: 0, top: `${hole ? hole.top : 0}px`, width: `${hole ? Math.max(0, hole.left) : 0}px`, height: `${hole ? hole.height : 0}px` }} aria-hidden="true" />
+          <div className="tour-band" style={{ left: `${hole ? hole.left + hole.width : viewportW}px`, top: `${hole ? hole.top : 0}px`, width: `${hole ? Math.max(0, viewportW - hole.left - hole.width) : 0}px`, height: `${hole ? hole.height : 0}px` }} aria-hidden="true" />
+          {hole && (
+            <div className="tour-ring" style={{ left: `${hole.left - 5}px`, top: `${hole.top - 5}px`, width: `${hole.width + 10}px`, height: `${hole.height + 10}px` }} aria-hidden="true" />
+          )}
+        </>
       )}
 
       {/* key={index}：每步重新挂载 → 直接在新位置淡入，避免气泡横跨屏幕滑动造成的"卡顿感" */}
@@ -798,7 +1030,7 @@ export default function OnboardingTour({ enabled = true }) {
           <p className={`tour-tip-hint${flash ? " is-ok" : ""}`}>
             {flash ? <><Check size={14} aria-hidden="true" /> {flashText}</> : <><MousePointerClick size={14} aria-hidden="true" /> {step.hint}</>}
           </p>
-          {!rect && !step.center && (
+          {!hole && !step.center && (
             <p className={`tour-tip-wait${stuck ? " is-stuck" : ""}`}>
               {stuck ? "这一步的功能在你当前环境暂无数据，可直接点「下一步」跳过。" : "正在准备页面…"}
             </p>

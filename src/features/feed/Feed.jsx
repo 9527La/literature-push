@@ -13,6 +13,9 @@ import ReaderSetup from "./ReaderSetup.jsx";
 import CardReader from "../reader/CardReader.jsx";
 import useCollapsedGroups from "../../hooks/useCollapsedGroups.js";
 
+/** 筛选面板关键词 chips 每批渲染条数（面板打开时不再一次性渲染全部关键词） */
+const KEYWORD_CHIP_PAGE = 60;
+
 /** 时间快捷区间（甲-2）：按本地时区生成 YYYY-MM-DD，与站内业务日口径一致。 */
 function dateInputValue(date) {
   const y = date.getFullYear();
@@ -120,6 +123,9 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
   });
   const { isCollapsed: isJournalGroupCollapsed, toggle: toggleJournalGroup } = useCollapsedGroups();
   const [topKeywords, setTopKeywords] = useState([]);
+  // P0（2026-10-14）：面板关键词 chips 渐进渲染——此前一次性渲染全部（实测 6556 个），
+  // 面板一打开就是一次长任务。默认 60 个，点「显示更多」递增。
+  const [visibleKeywordChips, setVisibleKeywordChips] = useState(KEYWORD_CHIP_PAGE);
   const [directionCounts, setDirectionCounts] = useState(null);
   const [visibleCount, setVisibleCount] = useState(50);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -145,6 +151,7 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
     panelMetaLoadedRef.current = true;
     api.get("/api/keyword-stats").then((data) => {
       setTopKeywords(data.keywords || []);
+      setVisibleKeywordChips(KEYWORD_CHIP_PAGE);
     }).catch(() => {});
     // 方向计数只用于筛选面板展示，失败时面板退化为无计数 chips。
     api.get("/api/directions").then((data) => {
@@ -650,7 +657,7 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
           })}
           <div className="filter-group-content" id="feed-filter-group-keyword" hidden={isFilterGroupCollapsed("keyword")}>
             <div className="keyword-filter-list">
-              {topKeywords.map((item) => (
+              {topKeywords.slice(0, visibleKeywordChips).map((item) => (
                 <button
                   key={item.keyword}
                   className={`keyword-filter-chip ${filters.keyword.includes(item.keyword) ? "active" : ""}`}
@@ -667,6 +674,15 @@ function Feed({ articles, articlesTotal = 0, subscribedJournals, journals, filte
                 </button>
               ))}
               {topKeywords.length === 0 && <span style={{ fontSize: 12, color: "var(--text-muted)" }}>暂无数据</span>}
+              {topKeywords.length > visibleKeywordChips && (
+                <button
+                  type="button"
+                  className="link-button keyword-filter-more"
+                  onClick={() => setVisibleKeywordChips((count) => count + KEYWORD_CHIP_PAGE)}
+                >
+                  显示更多（已显示 {visibleKeywordChips} / {topKeywords.length}）
+                </button>
+              )}
             </div>
           </div>
         </div>

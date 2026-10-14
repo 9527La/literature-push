@@ -3011,3 +3011,155 @@ table.mini td.num { text-align: right; font-variant-numeric: tabular-nums; color
 @media (max-width: 720px) {
   .tour-tip { left: 12px !important; right: 12px; width: auto !important; }
 }
+
+/* ══ 新手教程动画统一层（2026-10-14）══════════════════════════════════════
+   一处定义时长与缓动，四类动效共用同一节奏，消除"各动各的"造成的割裂感：
+     · 遮罩开合（.tour-band，四块纯色条）
+     · 高亮描边环（.tour-ring + 呼吸脉冲）
+     · 提示气泡（.tour-tip 入场 / 步内位置微调）
+     · 进度条（.tour-tip-bar i）
+   缓动取 ease-out-quad 型曲线（起步快、收尾稳）：位移在 60% 时长内已走完约 90%，
+   观感上"立刻到位"，不会出现线性匀速那种"慢慢蹭过去"的迟滞。
+   时长 220ms：短于 200ms 显得生硬，长于 260ms 在快速连点「下一步」时会拖影。
+   prefers-reduced-motion 下全部瞬时完成（保留功能，去掉动效）。 */
+.tour {
+  --tour-dur: 220ms;
+  --tour-dur-fast: 150ms;
+  --tour-ease: cubic-bezier(.22, .61, .36, 1);
+}
+.tour-band {
+  transition:
+    top var(--tour-dur) var(--tour-ease),
+    left var(--tour-dur) var(--tour-ease),
+    width var(--tour-dur) var(--tour-ease),
+    height var(--tour-dur) var(--tour-ease);
+}
+.tour-ring {
+  transition:
+    top var(--tour-dur) var(--tour-ease),
+    left var(--tour-dur) var(--tour-ease),
+    width var(--tour-dur) var(--tour-ease),
+    height var(--tour-dur) var(--tour-ease);
+  transform: translateZ(0); /* 描边环独立合成层：脉冲不牵动遮罩条重绘 */
+}
+.tour-ring::after {
+  animation: tour-ring 1.7s var(--tour-ease) infinite;
+}
+.tour-dim {
+  animation: tour-fade var(--tour-dur) var(--tour-ease);
+}
+/* 气泡：入场只做淡入+微位移（避免跨屏滑动）；步内目标位移时平滑跟随 */
+.tour-tip {
+  animation: tour-pop var(--tour-dur-fast) var(--tour-ease);
+  transition:
+    left var(--tour-dur) var(--tour-ease),
+    top var(--tour-dur) var(--tour-ease),
+    box-shadow var(--tour-dur-fast) var(--tour-ease);
+}
+.tour-tip.is-center { transition: none; }
+.tour-tip-bar i { transition: width var(--tour-dur) var(--tour-ease); }
+
+/* 降级：系统开启"减少动态效果"时全部瞬时完成，避免前庭不适与低端设备掉帧 */
+@media (prefers-reduced-motion: reduce) {
+  .tour { --tour-dur: 1ms; --tour-dur-fast: 1ms; }
+  .tour-band, .tour-ring, .tour-tip, .tour-tip-bar i { transition: none; }
+  .tour-tip, .tour-dim { animation: none; }
+  .tour-ring::after { animation: none; opacity: 0; }
+  .tour-band, .tour-ring { will-change: auto; }
+}
+
+/* ══ 渐进渲染的「显示更多」（2026-10-14）══════════════════════════════════
+   统计页关键词列表 / 关键词文献面板 / 筛选面板关键词 chips 三处同款语言：
+   一行次要说明 + 内联链接按钮，与词云「显示更多」保持同一视觉。 */
+.keyword-freq-more,
+.keyword-articles-more {
+  margin: 10px 0 2px;
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.keyword-freq-more .link-button,
+.keyword-articles-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+button.keyword-articles-more {
+  width: 100%;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent-primary);
+  background: var(--accent-light);
+  border: 1px dashed #c9d4f0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+button.keyword-articles-more:hover:not(:disabled) { background: #e2e9fa; border-color: var(--accent-primary); }
+button.keyword-articles-more:disabled { opacity: .6; cursor: default; }
+/* 筛选面板关键词 chips 的「显示更多」：撑满一行，避免被 flex-wrap 挤成半宽 */
+.keyword-filter-more {
+  flex: 1 0 100%;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+/* 目录生成失败时的一键放宽入口（挂在错误提示内，跟随其红色语言） */
+.reader-setup-error-action {
+  margin-left: 8px;
+  padding: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #b42318;
+  text-decoration: underline;
+}
+.reader-setup-error-action:hover { color: #7a1a11; }
+
+/* 卡片阅读「按速览期」：本期没有速评的方向不可选（选了必然报错，且该模式没有「重置条件」可救） */
+.reader-chip.is-empty {
+  opacity: .55;
+  cursor: not-allowed;
+}
+.reader-chip.is-empty .reader-chip-count { color: var(--text-tertiary); }
+.reader-chip-note {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9a6a2f;
+  background: #fdf4e7;
+  border: 1px solid #f0dcc0;
+  border-radius: 999px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+/* 卡片阅读：元数据加载失败 / 某条取不到内容时的重试出口（此前只显示"正在加载文献…"永不恢复） */
+.cr-load-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.cr-retry {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent-primary);
+  border: 1px solid var(--accent-primary);
+  border-radius: 9px;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.cr-retry:hover { background: #2b4bbd; }
+.cr-retry.is-ghost {
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+  border-color: var(--border-color);
+}
+.cr-retry.is-ghost:hover { color: var(--accent-primary); background: var(--surface-raised); }

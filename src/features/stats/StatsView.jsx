@@ -38,6 +38,10 @@ const DIRECTION_WINDOWS = [
   { key: "30", label: "近 30 日" },
   { key: "365", label: "全部" }
 ];
+/** 关键词列表每次渲染的条数（P0-2：此前 6556 个按钮一次性进 DOM，是首屏长任务主因） */
+const KEYWORD_LIST_PAGE = 100;
+/** 关键词文献面板每批条数 */
+const KEYWORD_ARTICLES_PAGE = 100;
 const MATRIX_GROUPS = [
   { key: "ieee", label: "IEEE" },
   { key: "elsevier", label: "爱思唯尔" },
@@ -50,6 +54,10 @@ function StatsView({ journals, markRead, toggleFavorite }) {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedKeyword, setSelectedKeyword] = useState(null);
+  // 选中关键词下的文献（按需分页拉取，见 loadKeywordArticles）
+  const [keywordArticles, setKeywordArticles] = useState({ items: [], total: 0, hasMore: false, loading: false });
+  // 列表模式的渐进渲染条数
+  const [visibleKeywordCount, setVisibleKeywordCount] = useState(KEYWORD_LIST_PAGE);
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [keywordSearch, setKeywordSearch] = useState("");
   const [viewMode, setViewMode] = useState("list");
@@ -63,22 +71,51 @@ function StatsView({ journals, markRead, toggleFavorite }) {
   async function fetchStats() {
     setLoading(true);
     setSelectedKeyword(null);
+    setKeywordArticles({ items: [], total: 0, hasMore: false, loading: false });
     try {
       const params = new URLSearchParams();
       if (filters.journal) params.set("journal", filters.journal);
       if (filters.from) params.set("from", filters.from);
       if (filters.to) params.set("to", filters.to);
-      const result = await api.get(`/api/keyword-stats?${params}`);
+      // P1（2026-10-14）：两个统计接口并行——此前串行 await，第二个请求要等
+      // 第一个（4.5 MB）解析 + 渲染完才发出，白白多等约 0.5 s。
+      const [result, coResult] = await Promise.all([
+        api.get(`/api/keyword-stats?${params}`),
+        api.get(`/api/keyword-cooccurrence?${params}`)
+      ]);
       setStats(result);
-      setAnimKey((key) => key + 1);
-      
-      const coResult = await api.get(`/api/keyword-cooccurrence?${params}`);
       setCooccurrenceData(coResult);
+      setAnimKey((key) => key + 1);
     } catch {
       setStats(null);
       setCooccurrenceData(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  /** 关键词文献面板「加载更多」：按当前已加载条数续拉下一页 */
+  async function loadMoreKeywordArticles() {
+    if (!selectedKeyword || keywordArticles.loading || !keywordArticles.hasMore) return;
+    const params = new URLSearchParams({
+      keyword: selectedKeyword,
+      limit: String(KEYWORD_ARTICLES_PAGE),
+      offset: String(keywordArticles.items.length)
+    });
+    if (filters.journal) params.set("journal", filters.journal);
+    if (filters.from) params.set("from", filters.from);
+    if (filters.to) params.set("to", filters.to);
+    setKeywordArticles((current) => ({ ...current, loading: true }));
+    try {
+      const result = await api.get(`/api/keyword-articles?${params}`);
+      setKeywordArticles((current) => ({
+        items: [...current.items, ...(result.articles || [])],
+        total: Number(result.total) || current.total,
+        hasMore: Boolean(result.hasMore),
+        loading: false
+      }));
+    } catch {
+      setKeywordArticles((current) => ({ ...current, loading: false }));
     }
   }
 
@@ -127,6 +164,44 @@ function StatsView({ journals, markRead, toggleFavorite }) {
     const search = keywordSearch.toLowerCase();
     return stats.keywords.filter((item) => item.keyword.toLowerCase().includes(search));
   }, [stats?.keywords, keywordSearch]);
+
+  // P0-2：列表模式渐进渲染——搜索词变化时回到首页数量，避免"筛完还渲染几千条"
+  useEffect(() => {
+    setVisibleKeywordCount(KEYWORD_LIST_PAGE);
+  }, [keywordSearch, stats]);
+
+  const visibleKeywords = useMemo(
+    () => filteredKeywords.slice(0, visibleKeywordCount),
+    [filteredKeywords, visibleKeywordCount]
+  );
+
+  // 选中关键词 → 拉取该关键词下的文献（首屏只发 1 个轻量请求，不再是 4.5 MB 大包）
+  useEffect(() => {
+    if (!selectedKeyword) {
+      setKeywordArticles({ items: [], total: 0, hasMore: false, loading: false });
+      return undefined;
+    }
+    let active = true;
+    const params = new URLSearchParams({ keyword: selectedKeyword, limit: String(KEYWORD_ARTICLES_PAGE), offset: "0" });
+    if (filters.journal) params.set("journal", filters.journal);
+    if (filters.from) params.set("from", filters.from);
+    if (filters.to) params.set("to", filters.to);
+    setKeywordArticles({ items: [], total: 0, hasMore: false, loading: true });
+    api.get(`/api/keyword-articles?${params}`)
+      .then((result) => {
+        if (!active) return;
+        setKeywordArticles({
+          items: result.articles || [],
+          total: Number(result.total) || 0,
+          hasMore: Boolean(result.hasMore),
+          loading: false
+        });
+      })
+      .catch(() => {
+        if (active) setKeywordArticles({ items: [], total: 0, hasMore: false, loading: false });
+      });
+    return () => { active = false; };
+  }, [selectedKeyword, filters.journal, filters.from, filters.to]);
 
   return (
     <div className="stats-view">
@@ -241,23 +316,37 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                     description="换一个期刊或放宽时间范围，通常会带回可统计的关键词。"
                   />
                 ) : (
-                  filteredKeywords.map((item, i) => (
-                    <button
-                      key={item.keyword}
-                      className={`keyword-freq-item ${selectedKeyword === item.keyword ? "selected" : ""}`}
-                      onClick={() => setSelectedKeyword(selectedKeyword === item.keyword ? null : item.keyword)}
-                    >
-                      <span className="keyword-freq-rank">{i + 1}</span>
-                      <span className="keyword-freq-name">{item.keyword}</span>
-                      <div className="keyword-freq-bar-wrap">
-                        <div
-                          className="keyword-freq-bar"
-                          style={{ width: `${(item.count / maxCount) * 100}%` }}
-                        />
-                      </div>
-                      <span className="keyword-freq-count">{item.count}</span>
-                    </button>
-                  ))
+                  <>
+                    {visibleKeywords.map((item, i) => (
+                      <button
+                        key={item.keyword}
+                        className={`keyword-freq-item ${selectedKeyword === item.keyword ? "selected" : ""}`}
+                        onClick={() => setSelectedKeyword(selectedKeyword === item.keyword ? null : item.keyword)}
+                      >
+                        <span className="keyword-freq-rank">{i + 1}</span>
+                        <span className="keyword-freq-name">{item.keyword}</span>
+                        <div className="keyword-freq-bar-wrap">
+                          <div
+                            className="keyword-freq-bar"
+                            style={{ width: `${(item.count / maxCount) * 100}%` }}
+                          />
+                        </div>
+                        <span className="keyword-freq-count">{item.count}</span>
+                      </button>
+                    ))}
+                    {filteredKeywords.length > visibleKeywords.length && (
+                      <p className="keyword-freq-more">
+                        已显示前 {visibleKeywords.length} 个，共 {filteredKeywords.length} 个关键词。
+                        <button
+                          type="button"
+                          className="link-button"
+                          onClick={() => setVisibleKeywordCount((count) => count + KEYWORD_LIST_PAGE)}
+                        >
+                          <RefreshCw size={12} /> 显示更多
+                        </button>
+                      </p>
+                    )}
+                  </>
                 )
               )}
             </div>
@@ -267,14 +356,16 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                 <div className="keyword-articles-header">
                   <h2>{selectedKeyword}</h2>
                   <span className="keyword-articles-count">
-                    {(stats.keywords.find((k) => k.keyword === selectedKeyword)?.articles || []).length} 篇文献
+                    {keywordArticles.loading && !keywordArticles.items.length
+                      ? "加载中…"
+                      : `${keywordArticles.total} 篇文献`}
                   </span>
                   <button className="icon-button" aria-label="关闭关键词文献列表" onClick={() => setSelectedKeyword(null)}>
                     <X size={18} />
                   </button>
                 </div>
                 <div className="keyword-articles-list">
-                  {(stats.keywords.find((k) => k.keyword === selectedKeyword)?.articles || []).map((article) => (
+                  {keywordArticles.items.map((article) => (
                     /* A button may not contain a link: split the card into a
                        "open abstract" button plus a separate source link. */
                     <div className="keyword-article-card" key={article.id}>
@@ -299,6 +390,16 @@ function StatsView({ journals, markRead, toggleFavorite }) {
                       )}
                     </div>
                   ))}
+                  {keywordArticles.hasMore && (
+                    <button
+                      type="button"
+                      className="keyword-articles-more"
+                      disabled={keywordArticles.loading}
+                      onClick={loadMoreKeywordArticles}
+                    >
+                      {keywordArticles.loading ? "加载中…" : `加载更多（已显示 ${keywordArticles.items.length} / ${keywordArticles.total}）`}
+                    </button>
+                  )}
                 </div>
               </div>
             )}

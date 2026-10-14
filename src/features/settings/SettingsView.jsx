@@ -451,8 +451,11 @@ function SettingsEditor({ settings, availableJournals, status, onSave }) {
                   </div>
 
                   {/* 研究方向偏好移到左列（需求 2）：与频率/时间/邮件内容同列，
-                      右列留给期刊范围大块，两侧高度与空间利用均衡 */}
-                  <div className="push-journal-filter">
+                      右列留给期刊范围大块，两侧高度与空间利用均衡。
+                      注意：类名必须与右列的「推送期刊范围」块区分——此前这里沿用了
+                      push-journal-filter，导致教程「⑥ 推送期刊范围」按类名取到的
+                      其实是本块（研究方向），高亮套错（2026-10-14 用户反馈）。 */}
+                  <div className="push-direction-filter">
                     <span className="settings-label"><Compass size={13} aria-hidden="true" /> 推送研究方向</span>
                     <p className="field-hint">选择推送的研究方向，不选择则推送全部方向；邮件正文按下方选择顺序分组展示（点选先后即顺序，「其他」默认不在推送范围，显式选择后仅推送其他）</p>
                     <div className="keyword-filter-list direction-filter-list push-direction-list">

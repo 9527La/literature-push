@@ -52,6 +52,8 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
   const [mode, setMode] = useState("period");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** 一键放宽条件后需要重新生成目录：置位后等 React 用新条件重渲染，再在新闭包里生成 */
+  const [pendingRebuild, setPendingRebuild] = useState(false);
 
   // ── 方式一：按速览选 ──
   const [reportRows, setReportRows] = useState({ weekly: [], monthly: [] });
@@ -100,7 +102,13 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
   const directionOptions = useMemo(() => {
     if (!periodStart) return [];
     const rows = (reportRows[kind] || []).filter((row) => row.period_start === periodStart && row.direction);
-    return rows.map((row) => ({ key: row.direction, count: row.stats?.total || 0 }));
+    // briefCount：该方向本期速评条数。为 0 表示没有可读速评——按速览期阅读读的就是速评，
+    // 选它必然报"没有可阅读的速评文献"且本模式没有「重置条件」可救（2026-10-14 用户反馈）。
+    return rows.map((row) => ({
+      key: row.direction,
+      count: row.stats?.total || 0,
+      briefCount: Number.isFinite(Number(row.briefCount)) ? Number(row.briefCount) : null
+    }));
   }, [reportRows, kind, periodStart]);
 
   // 选定期 + 方向后预取报告详情：供「专题（主题聚类）」选项与生成目录共用
@@ -228,6 +236,15 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
     }
   }
 
+  // 一键放宽条件（错误提示旁的按钮）→ 重置条件后重新生成目录。
+  // 必须等重置后的新 state 生效再生成，否则 buildCatalog 读到的还是旧的窄条件。
+  useEffect(() => {
+    if (!pendingRebuild) return;
+    setPendingRebuild(false);
+    buildCatalog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingRebuild]);
+
   function beginReading() {
     if (!catalog) return;
     onStart?.({
@@ -333,13 +350,26 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
             <div className="reader-field">
               <span className="reader-field-label">研究方向（主题）</span>
               <div className="reader-chip-row">
-                {directionOptions.map((item) => (
-                  <button key={item.key} type="button" className={`reader-chip reader-chip--dir${direction === item.key ? " on" : ""}`} style={{ "--dir-key": directionVar(item.key) }} aria-pressed={direction === item.key} onClick={() => setDirection(item.key)}>
-                    <span className="direction-dot" aria-hidden="true" />
-                    {directionLabel(item.key)}
-                    <span className="reader-chip-count">{item.count}</span>
-                  </button>
-                ))}
+                {directionOptions.map((item) => {
+                  const noBriefs = item.briefCount === 0;
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`reader-chip reader-chip--dir${direction === item.key ? " on" : ""}${noBriefs ? " is-empty" : ""}`}
+                      style={{ "--dir-key": directionVar(item.key) }}
+                      aria-pressed={direction === item.key}
+                      disabled={noBriefs}
+                      title={noBriefs ? `本期「${directionLabel(item.key)}」没有生成速评；卡片阅读按速评阅读，换一个有速评的方向即可` : undefined}
+                      onClick={() => setDirection(item.key)}
+                    >
+                      <span className="direction-dot" aria-hidden="true" />
+                      {directionLabel(item.key)}
+                      <span className="reader-chip-count">{item.count}</span>
+                      {noBriefs && <span className="reader-chip-note">无速评</span>}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -480,7 +510,22 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
         </div>
       )}
 
-      {error && <p className="reader-setup-error" role="alert">{error}</p>}
+      {error && (
+        <p className="reader-setup-error" role="alert">
+          {error}
+          {/* 条件过窄导致"没有匹配的文献"时，给一个一键放宽的出口（自定义模式下才有意义）：
+              此前只能靠用户自己逐项取消筛选，否则进不去卡片阅读。 */}
+          {mode === "custom" && (
+            <button
+              type="button"
+              className="link-button reader-setup-error-action"
+              onClick={() => { setError(""); resetCustom(); setPendingRebuild(true); }}
+            >
+              <RotateCcw size={12} /> 重置条件并重新生成
+            </button>
+          )}
+        </p>
+      )}
 
       <div className="reader-setup-foot">
         <button type="button" className="secondary" onClick={resetCustom} disabled={mode === "period"}><RotateCcw size={14} /> 重置条件</button>

@@ -237,6 +237,7 @@
 .push-frequency,
 .push-content-options,
 .push-journal-filter,
+.push-direction-filter,
 .push-time-selector {
   display: flex;
   flex-direction: column;
