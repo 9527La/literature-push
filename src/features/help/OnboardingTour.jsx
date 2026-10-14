@@ -248,8 +248,21 @@ const STEPS = [
     title: "第四步：时间范围与阅读状态（可选）",
     body: "时间范围决定取哪段时间的文献（近 7 日 / 近 30 日 / 本月 / 自定义）；阅读状态可选全部 / 未读 / 已读。",
     hint: "选一个时间范围，或直接点「下一步」用默认。",
-    perform: () => { const field = byText(".reader-field", "时间范围"); const chip = field?.querySelector(".reader-chip"); if (chip) chip.click(); },
-    advance: () => { const field = byText(".reader-field", "时间范围"); return Boolean(field?.querySelector(".reader-chip.on")); }
+    // 时间范围默认已选中 → 用「进入时的选择」做基线，必须真正改选一次才推进，
+    // 否则该步会被默认值瞬间满足、一闪而过看不到。
+    enter: () => byText(".reader-field", "时间范围")?.querySelector(".reader-chip.on")?.textContent?.trim() || "",
+    perform: () => {
+      const field = byText(".reader-field", "时间范围");
+      if (!field) return;
+      const chips = [...field.querySelectorAll(".reader-chip")];
+      const current = field.querySelector(".reader-chip.on")?.textContent?.trim() || "";
+      const target = chips.find((chip) => chip.textContent.trim() !== current) || chips[0];
+      if (target && !target.disabled) target.click();
+    },
+    advance: (baseline) => {
+      const current = byText(".reader-field", "时间范围")?.querySelector(".reader-chip.on")?.textContent?.trim() || "";
+      return Boolean(current) && current !== (baseline || "");
+    }
   },
   {
     key: "reader-direction",
