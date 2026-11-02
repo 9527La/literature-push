@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Copy, Globe, Heart, Languages, Quote, Star, X } from "lucide-react";
 import { api } from "../../lib/api.js";
 import { copyText } from "../../lib/clipboard.js";
@@ -18,6 +18,24 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
   const [savingDirection, setSavingDirection] = useState(false);
   const [directionError, setDirectionError] = useState("");
   const [related, setRelated] = useState([]);
+
+  // 全文深度分析（2026-10-16）：后端 articles.deep_analysis 存 JSON 字符串，
+  // 由 AI 作业基于 PDF 全文生成。解析失败 / 结构不符 / 无数据 → 整块不渲染，
+  // 弹窗保持旧版布局不变（历史文献天然没有该字段）。
+  const deepInsight = useMemo(() => {
+    const raw = detail?.deep_analysis;
+    if (!raw) return null;
+    try {
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return Array.isArray(parsed?.innovations) && parsed.innovations.length ? parsed : null;
+    } catch {
+      return null;
+    }
+  }, [detail?.deep_analysis]);
+  // figure_path 形如 "figures/137603.png"（相对数据目录），静态路由挂在 /figures
+  const deepFigureUrl = detail?.figure_path
+    ? `/${String(detail.figure_path).replace(/^\/+/, "")}`
+    : "";
 
   // 相关文献推荐（A3-3）：与详情并行请求，失败静默整块隐藏，绝不阻塞主内容。
   useEffect(() => {
@@ -73,7 +91,14 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
     const optimistic = detail.is_read ? 0 : 1;
     setDetail((current) => ({ ...current, is_read: optimistic }));
     try {
-      await markRead(detail.id, detail);
+      const result = await markRead(detail.id, detail);
+      if (result?.ok) {
+        const next = { ...detail, is_read: result.is_read };
+        setDetail(next);
+        onArticleUpdated?.(next);
+      } else {
+        setDetail((current) => ({ ...current, is_read: detail.is_read }));
+      }
     } catch (error) {
       setActionError(error.message);
       setDetail((current) => ({ ...current, is_read: detail.is_read }));
@@ -82,28 +107,37 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
 
   async function handleToggleFavorite() {
     setActionError("");
+    const wasFavorite = Boolean(detail.is_favorite);
     // 未收藏 → main 打开分组选择框，确认后经 app:article-interaction 事件同步；
     // 已收藏 → main 直接取消，本地乐观翻转
-    if (detail.is_favorite) setDetail((current) => ({ ...current, is_favorite: 0 }));
+    if (wasFavorite) setDetail((current) => ({ ...current, is_favorite: 0 }));
     try {
-      await toggleFavorite(detail.id, detail);
+      const result = await toggleFavorite(detail.id, detail);
+      if (result?.ok) {
+        const next = { ...detail, is_favorite: result.is_favorite };
+        setDetail(next);
+        onArticleUpdated?.(next);
+      } else if (wasFavorite) {
+        setDetail((current) => ({ ...current, is_favorite: detail.is_favorite }));
+      }
     } catch (error) {
       setActionError(error.message);
-      setDetail((current) => ({ ...current, is_favorite: detail.is_favorite }));
+      if (wasFavorite) setDetail((current) => ({ ...current, is_favorite: detail.is_favorite }));
     }
   }
 
-  // 收藏分组确认后（picker 通道）同步弹窗内收藏态
+  // 收藏分组确认后（picker 通道）同步弹窗内收藏态 + 速览/文献库卡片徽章
   useEffect(() => {
     const handler = (event) => {
       const { id, is_favorite } = event.detail || {};
       if (id === detail.id && typeof is_favorite === "number") {
         setDetail((current) => ({ ...current, is_favorite }));
+        onArticleUpdated?.({ ...detail, is_favorite });
       }
     };
     window.addEventListener("app:article-interaction", handler);
     return () => window.removeEventListener("app:article-interaction", handler);
-  }, [detail.id]);
+  }, [detail.id, onArticleUpdated]);
 
   /** 管理员改判：置 manual 后 apply 脚本永不覆盖（与 RUNBOOK 约定一致）。 */
   async function saveDirection() {
@@ -295,6 +329,37 @@ function ArticleDialog({ article, close, markRead, toggleFavorite, onArticleUpda
               </span>
             )}
           </div>
+        )}
+
+        {/* 核心创新点（2026-10-16）：AI 基于 PDF 全文生成，可选附原文摘要图/技术路线图。
+            无分析数据的文献整块不渲染 —— 历史文献与新文献共用同一套布局。 */}
+        {deepInsight && (
+          <section className="deep-analysis" aria-label="核心创新点">
+            <h3><span className="deep-icon" aria-hidden="true">🎯</span>核心创新点</h3>
+            {deepFigureUrl && (
+              <figure className="deep-figure">
+                <img src={deepFigureUrl} alt="原文摘要图 / 技术路线图" loading="lazy" />
+                <figcaption>原文配图（自动从 PDF 提取）</figcaption>
+              </figure>
+            )}
+            {deepInsight.innovations.map((item, index) => (
+              <div className="deep-inn" key={`${detail.id}-inn-${index}`}>
+                <div className="deep-inn-head">
+                  <span className="deep-inn-n">{index + 1}</span>
+                  <span className="deep-inn-title">{item.title}</span>
+                </div>
+                {Array.isArray(item.points) && item.points.length > 0 && (
+                  <ul className="deep-inn-points">
+                    {item.points.map((point, i) => (
+                      // 论据中含 <b> 强调标记（AI 产出，来源可控），需按 HTML 渲染
+                      <li key={i} dangerouslySetInnerHTML={{ __html: point }} />
+                    ))}
+                  </ul>
+                )}
+                {item.value && <p className="deep-inn-value">{item.value}</p>}
+              </div>
+            ))}
+          </section>
         )}
 
         <div className={`abstract-region ${hasBothAbstracts ? "is-dual" : "is-single"}`}>

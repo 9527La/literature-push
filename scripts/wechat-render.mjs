@@ -27,13 +27,17 @@ import { DIRECTIONS } from "../server/directions.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BRAND = {
-  accent: "#3157d5",
-  ink: "#171b24",
-  body: "#525a68",
-  muted: "#7d8592",
-  line: "#e3e7ee",
-  soft: "#f4f5f7",
-  tint: "#eff3fa"
+  accent: "#c96442",
+  ink: "#191919",
+  body: "#252525",
+  muted: "#8f8b83",
+  line: "#d8d4c8",
+  page: "#f7f5f0",
+  card: "#ebe4d4",
+  head: "#f2eee3",
+  chipBg: "#fdfcfa",
+  chipBd: "#d1cfcc",
+  soft: "#fbfaf6"
 };
 const FONT = "'Microsoft YaHei','PingFang SC',Arial,sans-serif";
 const DIRECTION_LABELS = new Map(DIRECTIONS.filter((d) => d.key !== "other").map((d) => [d.key, d.label]));
@@ -161,33 +165,60 @@ const H2_STYLE = css({
   "font-size": "17px", "font-weight": "700", color: BRAND.ink, "line-height": "1.4"
 });
 
-function renderIntro(issue) {
-  if (!issue.intro) return "";
-  return `<section style="margin:0 0 22px;padding:12px 14px;background:${BRAND.tint};border-radius:8px">
-<p style="margin:0 0 6px;font-size:14px;font-weight:700;color:${BRAND.accent}">今日导读</p>
-<p style="margin:0;font-size:14px;color:${BRAND.body};line-height:1.8">${inlineBold(issue.intro)}</p>
+const CHIP = (no) => `<span style="color:${BRAND.accent};font-size:0.9em;line-height:1.8em;letter-spacing:0;background-color:${BRAND.chipBg};border:0.5px solid ${BRAND.chipBd};border-radius:6px;padding:2px 4px;margin:0 2px;vertical-align:baseline;transform:translateY(-4px)">#${no}</span>`;
+
+const GROUP_HEAD = (text) => `<p style="margin:16px 0 8px;text-align:center"><span style="display:inline-block;font-weight:700;font-size:15px;color:${BRAND.ink};border-bottom:2px solid ${BRAND.accent};padding:0 2px 3px">${text}</span></p>`;
+
+const HR_DASHED = `<hr style="border:0;border-top:1px dashed #b8b8b8;margin:18px 10px 14px" />`;
+
+function renderHeaderCard(issue) {
+  // 头部大卡：居中期号 + 今日导读（数量统计）+ 概览（分组条目清单 + #N 徽章），仿参考文式样。
+  const newsTotal = issue.news.policy.length + issue.news.general.length;
+  const listingTotal = issue.listing.reduce((sum, group) => sum + group.count, 0);
+  const statLine = (text) => `<p style="margin:5px 0;font-size:14px;color:${BRAND.ink};line-height:1.8em;letter-spacing:0.05em">• ${text}</p>`;
+  const stats = newsTotal || issue.briefs.length || listingTotal ? `${statLine(`新入库文献 ${listingTotal} 篇，精选速评 ${issue.briefs.length} 篇`)}
+${statLine(`每日资讯 ${newsTotal} 条（政策标准 ${issue.news.policy.length} · 重点新闻 ${issue.news.general.length}）`)}` : "";
+  let toc = "";
+  let no = 0;
+  if (newsTotal) {
+    if (issue.news.policy.length) {
+      toc += GROUP_HEAD("政策标准");
+      for (const card of issue.news.policy) toc += `<p style="margin:5px 0;font-size:14px;color:${BRAND.ink};line-height:1.8em;letter-spacing:0.05em">• ${escapeHtml(card.title)} ${CHIP(++no)}</p>`;
+    }
+    if (issue.news.general.length) {
+      toc += GROUP_HEAD("重点新闻");
+      for (const card of issue.news.general) toc += `<p style="margin:5px 0;font-size:14px;color:${BRAND.ink};line-height:1.8em;letter-spacing:0.05em">• ${escapeHtml(card.title)} ${CHIP(++no)}</p>`;
+    }
+  }
+  return `<section style="margin:0 0 8px;padding:16px 15px 12px;background:${BRAND.head};border-radius:12px">
+<p style="margin:0 0 4px;text-align:center"><span style="font-size:18px;font-weight:700;color:${BRAND.accent};letter-spacing:0.06em">电气前沿速递 日报 ${issue.date}</span></p>
+${stats ? `<p style="margin:14px 0 6px"><span style="font-weight:700;font-size:14px;color:${BRAND.ink};border-bottom:2px solid ${BRAND.accent};padding:0 2px 3px">今日导读</span></p>\n${stats}` : ""}
+${toc ? `<p style="margin:14px 0 6px"><span style="font-weight:700;font-size:14px;color:${BRAND.ink};border-bottom:2px solid ${BRAND.accent};padding:0 2px 3px">概览</span></p>\n${toc}` : ""}
 </section>`;
 }
 
-function renderNewsCard(card, last) {
-  return `<section style="margin:0 0 ${last ? 18 : 12}px;padding:11px 13px;background:${BRAND.soft};border-radius:8px">
-<p style="margin:0 0 4px;font-size:15px;font-weight:600;color:${BRAND.ink};line-height:1.6">${escapeHtml(card.title)}</p>
-<p style="margin:0 0 4px;font-size:14px;color:${BRAND.body};line-height:1.7">${inlineBold(card.summary)}</p>
-<p style="margin:0;font-size:12px;color:${BRAND.muted}">来源：${escapeHtml(card.source)}</p>
-</section>`;
+function renderNewsCard(card, no, last) {
+  return `<section style="margin:0 0 10px;padding:10px 14px;background:${BRAND.card};border-radius:10px">
+<p style="margin:0;font-size:15px;font-weight:700;color:${BRAND.ink};line-height:1.6">${escapeHtml(card.title)}${CHIP(no)}</p>
+</section>
+<section style="margin:0 0 6px;padding:0 6px">
+<p style="margin:0;font-size:14px;color:${BRAND.body};line-height:1.8em;letter-spacing:0.05em">${inlineBold(card.summary)}</p>
+<p style="margin:6px 0 0;font-size:12px;color:${BRAND.muted}">来源：${escapeHtml(card.source)}</p>
+</section>${last ? "" : `\n${HR_DASHED}`}`;
 }
 
 function renderNews(issue) {
   const { policy, general } = issue.news;
   if (!policy.length && !general.length) return "";
-  const policyCards = policy.map((card, i) => renderNewsCard(card, i === policy.length - 1 && !general.length));
-  const generalCards = general.map((card, i) => renderNewsCard(card, i === general.length - 1));
-  return `<h2 style="${H2_STYLE}">每日资讯</h2>
-${policyCards.join("\n")}${policyCards.length && generalCards.length ? "\n" : ""}${generalCards.join("\n")}`;
+  const items = [
+    ...policy.map((card) => ({ ...card, kind: "政策标准" })),
+    ...general.map((card) => ({ ...card, kind: "重点新闻" }))
+  ];
+  return items.map((card, i) => renderNewsCard(card, i + 1, i === items.length - 1)).join("\n");
 }
 
 function renderBriefField(label, text, last) {
-  return `<section style="margin:0 0 ${last ? 0 : 6}px;padding:8px 11px;background:${BRAND.soft};border-radius:6px">
+  return `<section style="margin:0 0 ${last ? 0 : 6}px;padding:8px 11px;background:${BRAND.chipBg};border:0.5px solid ${BRAND.chipBd};border-radius:6px">
 <p style="margin:0;font-size:14px;color:${BRAND.body};line-height:1.75"><span style="color:${BRAND.accent};font-weight:700">${label}</span>｜${escapeHtml(text)}</p>
 </section>`;
 }
@@ -195,18 +226,18 @@ function renderBriefField(label, text, last) {
 function renderBrief(brief, last) {
   const meta = [brief.journal, brief.direction ? DIRECTION_LABELS.get(brief.direction) : ""]
     .filter(Boolean).join(" · ");
-  return `<section style="margin:0 0 ${last ? 18 : 14}px;padding:13px 14px;border:1px solid ${BRAND.line};border-radius:8px">
-<p style="margin:0 0 6px;font-size:15px;font-weight:700;color:${BRAND.ink};line-height:1.6">${escapeHtml(brief.title)}</p>
-<p style="margin:0 0 10px;font-size:12px;color:${BRAND.muted}">${escapeHtml(meta)}</p>
+  return `<section style="margin:0 0 ${last ? 0 : 10}px;padding:10px 14px;background:${BRAND.card};border-radius:10px">
+<p style="margin:0;font-size:15px;font-weight:700;color:${BRAND.ink};line-height:1.6">${escapeHtml(brief.title)}</p>
+<p style="margin:2px 0 8px;font-size:12px;color:${BRAND.muted}">${escapeHtml(meta)}</p>
 ${renderBriefField("研究对象", brief.object, false)}
 ${renderBriefField("研究方法", brief.method, false)}
 ${renderBriefField("核心结论", brief.finding, true)}
-</section>`;
+</section>${last ? "" : `\n${HR_DASHED}`}`;
 }
 
 function renderBriefs(issue) {
   if (!issue.briefs.length) return "";
-  return `<h2 style="${H2_STYLE}">今日文献速评</h2>
+  return `${GROUP_HEAD("今日文献速评")}
 ${issue.briefs.map((brief, i) => renderBrief(brief, i === issue.briefs.length - 1)).join("\n")}`;
 }
 
@@ -218,10 +249,10 @@ function renderListing(issue) {
   // （实测 2026-10-08），改用文字圆点 + 段落自绘，行为确定。
   const body = groups.map((group, index) => {
     const paras = group.items.map((item) => `<p style="margin:0 0 6px;font-size:14px;color:${BRAND.body};line-height:1.7">• ${escapeHtml(item.title)} — <span style="color:${BRAND.muted}">${escapeHtml(item.journal)}</span></p>`);
-    return `<h3 style="margin:${index === 0 ? 0 : 14}px 0 8px;font-size:14px;font-weight:700;color:${BRAND.accent}">${escapeHtml(group.label)} · ${group.count} 篇</h3>
+    return `<p style="margin:${index === 0 ? 0 : 14}px 0 8px;font-size:14px;font-weight:700;color:${BRAND.accent}">${escapeHtml(group.label)} · ${group.count} 篇</p>
 ${paras.join("\n")}`;
   }).join("\n");
-  return `<h2 style="${H2_STYLE}">今日新入库文献（${total} 篇）</h2>
+  return `${GROUP_HEAD(`今日新入库文献（${total} 篇）`)}
 ${body}`;
 }
 
@@ -229,7 +260,7 @@ function renderFooter(issue) {
   const site = issue.siteUrl
     ? `<p style="margin:0 0 6px;font-size:12px;color:${BRAND.muted};line-height:1.7">今日资讯完整版（含全部原文链接）与文献库请访问：<span style="color:${BRAND.accent};font-weight:600">${escapeHtml(issue.siteUrl)}</span>，或点击「阅读原文」直达。</p>`
     : "";
-  return `<hr style="border:0;border-top:1px solid ${BRAND.line};margin:20px 0" />
+  return `<hr style="border:0;border-top:1px dashed ${BRAND.line};margin:20px 0 10px" />
 <p style="margin:0 0 6px;font-size:12px;color:${BRAND.muted};line-height:1.7">本文由 AI 辅助创作，速评与摘要可能存在错误或幻觉，重要信息请以论文原文及官方发布为准。</p>
 <p style="margin:0;font-size:12px;color:${BRAND.muted};line-height:1.7">内容基于公开学术论文整理，仅用于学习交流。</p>${site ? `\n${site}` : ""}`;
 }
@@ -238,8 +269,8 @@ function renderArticle(issue) {
   // 正文不含 H1/账号行：微信文章页自动渲染标题与作者（重复会双标题，实测 2026-10-08）。
   // 末尾紧凑化：去除标签间所有换行/空白——微信对空白节点的解析在列表等场景会产生
   // 幽灵元素（实测 2026-10-08），纯块级内联样式的 HTML 压成单行最稳。
-  const raw = `<section style="padding:20px 18px 28px;font-family:${FONT}">
-${renderIntro(issue)}
+  const raw = `<section style="padding:20px 18px 28px;background:${BRAND.page};font-family:${FONT}">
+${renderHeaderCard(issue)}
 ${renderNews(issue)}
 ${renderBriefs(issue)}
 ${renderListing(issue)}
@@ -264,7 +295,7 @@ function main() {
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="wechat-issue-digest" content="${escapeHtml(issue.digest)}" />
-<title>电研新视界 日报｜${escapeHtml(issue.date)}</title>
+<title>${escapeHtml(issue.title || `电研新视界 日报｜${issue.date}`)}</title>
 <!-- 正文即发布内容：L0 全选复制 <body> 内标记之间的部分；摘要见 meta 与 issue JSON -->
 <style>body { margin: 0; background: #ffffff; }</style>
 </head>

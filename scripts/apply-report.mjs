@@ -20,6 +20,9 @@
  *     three-field briefs covering EVERY article in the batch; overview reports
  *     may attach briefs for highlightIds only. Fields: object <= 30 chars,
  *     method <= 40, finding <= 50, optional topic <= 12; ids ⊆ export batch.
+ *   - kind='daily'（PLAN-DAILY-DIGEST.md）: paperBriefs 同样必须覆盖批次每篇；
+ *     额外接受 focusIds（「重点关注」，<= 5 条，⊆ export batch）——与永久下线的
+ *     highlightIds 保留字段分开，避免两套语义挤同一字段。
  *
  * Idempotent: UNIQUE(kind, period_start) upsert — rerunning the same period
  * overwrites the previous generation of the same report.
@@ -37,6 +40,8 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const KEY_SET = new Set(DIRECTIONS.map((d) => d.key).filter((key) => key !== "other"));
 const CONTENT_MAX_CHARS = 20_000;
 const HIGHLIGHT_MAX = 8;
+// 「当日新增」（kind=daily）的重点关注条目上限（PLAN-DAILY-DIGEST.md）。
+const FOCUS_MAX = 5;
 const TOPICS_MAX = 12;
 const TOPIC_MAX_CHARS = 30;
 // 研究速览 v2：三字段结构化速评（paperBriefs）字数上限（PLAN-AI-REPORTS-V2.md §2.1）。
@@ -69,7 +74,8 @@ function recomputeStats(batch) {
     directionCounts,
     directionDelta,
     highlightIds: [],
-    topTopics: []
+    topTopics: [],
+    focusIds: []
   };
 }
 
@@ -111,21 +117,40 @@ function validate(result, batch) {
     }
   }
 
+  // ── focusIds（kind=daily 的「重点关注」条目）──────────────────────────────
+  // 与 highlightIds 分开：highlightIds 是 2026-10-13 起永久下线的保留字段（恒填 []），
+  // 当日新增的重点关注语义不同，单独用 focusIds 承载，避免两套语义挤同一字段。
+  const focusIds = Array.isArray(result.focusIds) ? result.focusIds : [];
+  if (batch.kind !== "daily" && focusIds.length) {
+    errors.push("focusIds is only meaningful for kind=daily");
+  }
+  if (focusIds.length > FOCUS_MAX) errors.push(`focusIds exceeds ${FOCUS_MAX} items`);
+  const focusSeen = new Set();
+  for (const id of focusIds) {
+    if (!Number.isInteger(id) || id <= 0) { errors.push(`focusId is not a positive integer: ${id}`); break; }
+    if (focusSeen.has(id)) { errors.push(`focusId duplicated: ${id}`); break; }
+    focusSeen.add(id);
+    if (!exportIds.has(id)) { errors.push(`focusId not in export batch (hallucinated reference): ${id}`); break; }
+  }
+
   // ── paperBriefs（研究速览 v2 三字段速评）───────────────────────────────────
-  // 方向专报：必须提供且覆盖批次内每一篇文献（全量契约，决策点 1）；
-  // 总览报告：可选，仅精选条目（ids ⊆ highlightIds）。
+  // 方向专报 / 当日新增：必须提供且覆盖批次内每一篇文献（全量契约）；
+  // 总览周报/月报：可选，仅精选条目（ids ⊆ highlightIds）。
+  const requiresFullBriefs = resultDirection !== null || batch.kind === "daily";
   if (result.paperBriefs != null && !Array.isArray(result.paperBriefs)) {
     errors.push("paperBriefs must be an array when present");
-  } else if (resultDirection !== null && result.paperBriefs == null) {
-    errors.push("paperBriefs is required for direction reports (v2 contract: full three-field briefs)");
+  } else if (requiresFullBriefs && result.paperBriefs == null) {
+    errors.push(batch.kind === "daily"
+      ? "paperBriefs is required for daily reports (v2 contract: full three-field briefs for every article)"
+      : "paperBriefs is required for direction reports (v2 contract: full three-field briefs)");
   } else if (Array.isArray(result.paperBriefs)) {
     const briefErrors = validatePaperBriefs(result.paperBriefs, exportIds);
     errors.push(...briefErrors);
     if (!briefErrors.length) {
-      if (resultDirection !== null) {
+      if (requiresFullBriefs) {
         const missing = batch.articles.map((a) => a.id).filter((id) => !briefIdSet.has(id));
         if (missing.length) {
-          errors.push(`paperBriefs must cover every article in a direction batch (missing ${missing.length}): ${missing.slice(0, 5).join(",")}${missing.length > 5 ? " ..." : ""}`);
+          errors.push(`paperBriefs must cover every article in the batch (missing ${missing.length}): ${missing.slice(0, 5).join(",")}${missing.length > 5 ? " ..." : ""}`);
         }
       } else {
         const highlightSet = new Set(highlightIds.filter((id) => exportIds.has(id)));
@@ -213,6 +238,9 @@ function main() {
   const stats = recomputeStats(batch);
   stats.highlightIds = (raw.highlightIds || []).slice(0, HIGHLIGHT_MAX);
   stats.topTopics = (raw.topTopics || []).map((topic) => String(topic).trim()).slice(0, TOPICS_MAX);
+  if (batch.kind === "daily") {
+    stats.focusIds = [...new Set((raw.focusIds || []).filter((id) => Number.isInteger(id) && id > 0))].slice(0, FOCUS_MAX);
+  }
   if (Array.isArray(raw.paperBriefs)) stats.paperBriefs = normalizePaperBriefs(raw.paperBriefs);
   const direction = raw.direction == null ? null : String(raw.direction).trim();
 
@@ -251,6 +279,7 @@ function main() {
       direction: direction ?? "(overview)",
       total: stats.total,
       highlightCount: stats.highlightIds.length,
+      focusCount: stats.focusIds.length,
       briefCount: stats.paperBriefs ? stats.paperBriefs.length : 0,
       coverage: coverage.map((row) => `${row.kind}${row.isOverview ? "" : "*"}:${row.n}`).join(" ")
     }, null, 1));
@@ -259,12 +288,12 @@ function main() {
   }
 }
 
-/** 建表 + 旧表（无 direction 列）就地重建迁移。服务端 db.js 有同构逻辑。 */
+/** 建表 + 旧表就地重建迁移（无 direction 列 / kind 约束缺 daily）。服务端 db.js 有同构逻辑。 */
 function ensureSchema(db) {
   db.prepare(`
     CREATE TABLE IF NOT EXISTS ai_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly')),
+      kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly','daily')),
       period_start TEXT NOT NULL,
       period_end TEXT NOT NULL,
       direction TEXT,
@@ -276,13 +305,18 @@ function ensureSchema(db) {
       UNIQUE(kind, period_start, direction)
     )
   `).run();
-  const hasDirection = db.prepare("PRAGMA table_info(ai_reports)").all().some((column) => column.name === "direction");
-  if (!hasDirection) {
+  const columns = db.prepare("PRAGMA table_info(ai_reports)").all();
+  const hasDirection = columns.some((column) => column.name === "direction");
+  const tableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ai_reports'").get()?.sql || "";
+  const hasDailyKind = tableSql.includes("'daily'");
+  if (!hasDirection || !hasDailyKind) {
+    // 两个维度共用同一次重建：direction 缺失时按 NULL 回填（旧表无该列），
+    // kind 约束顺带升级为含 'daily'（2026-10-15，PLAN-DAILY-DIGEST.md）。
     db.exec(`
       BEGIN;
       CREATE TABLE ai_reports_migrated (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly')),
+        kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly','daily')),
         period_start TEXT NOT NULL,
         period_end TEXT NOT NULL,
         direction TEXT,
@@ -294,7 +328,7 @@ function ensureSchema(db) {
         UNIQUE(kind, period_start, direction)
       );
       INSERT INTO ai_reports_migrated (id, kind, period_start, period_end, direction, status, content_md, stats_json, generated_at, generator)
-        SELECT id, kind, period_start, period_end, NULL, status, content_md, stats_json, generated_at, generator FROM ai_reports;
+        SELECT id, kind, period_start, period_end, ${hasDirection ? "direction" : "NULL"}, status, content_md, stats_json, generated_at, generator FROM ai_reports;
       DROP TABLE ai_reports;
       ALTER TABLE ai_reports_migrated RENAME TO ai_reports;
       CREATE INDEX IF NOT EXISTS idx_ai_reports_kind_period ON ai_reports(kind, period_start);

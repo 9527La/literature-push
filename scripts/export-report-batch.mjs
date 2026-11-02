@@ -16,18 +16,20 @@
  * Usage:
  *   node scripts/export-report-batch.mjs --kind weekly [--days 7] [--out <path>]
  *   node scripts/export-report-batch.mjs --kind monthly [--month 2026-08] [--out <path>]
+ *   node scripts/export-report-batch.mjs --kind daily [--date 2026-10-15] [--out <path>]
  */
 import { DatabaseSync } from "node:sqlite";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { businessWindow, shiftBusinessDate } from "../server/date/normalize.js";
+import { businessToday, businessWindow, shiftBusinessDate } from "../server/date/normalize.js";
 import { DIRECTIONS, isDirectionKey } from "../server/directions.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-// 研究速览 v2：三字段速评（对象/方法/结论）的「核心结论」需要更长摘要支撑，800 字。
-const abstractClip = 800;
-const VALID_KINDS = new Set(["weekly", "monthly"]);
+// 2026-10-16 用户要求：摘要不做任何截断，AI 读取完整摘要。
+// 依据：本地库摘要中位数 1572 字，此前 800 字截断会丢掉「核心结论」所在的后半段，
+// 导致速评的「核心结论」字段频繁退化为"摘要未给量化收益"这类空话。
+const VALID_KINDS = new Set(["weekly", "monthly", "daily"]);
 
 function parseArgs(argv) {
   const args = {
@@ -35,6 +37,7 @@ function parseArgs(argv) {
     kind: "weekly",
     days: 7,
     month: "",
+    date: "",
     start: "",
     end: "",
     direction: "",
@@ -45,6 +48,7 @@ function parseArgs(argv) {
     else if (argv[i] === "--kind") args.kind = String(argv[i += 1]).toLowerCase();
     else if (argv[i] === "--days") args.days = Number(argv[i += 1]);
     else if (argv[i] === "--month") args.month = String(argv[i += 1]).trim();
+    else if (argv[i] === "--date") args.date = String(argv[i += 1]).trim();
     else if (argv[i] === "--start") args.start = String(argv[i += 1]).trim();
     else if (argv[i] === "--end") args.end = String(argv[i += 1]).trim();
     else if (argv[i] === "--direction") args.direction = String(argv[i += 1]).trim();
@@ -55,7 +59,13 @@ function parseArgs(argv) {
   if (args.direction && !isDirectionKey(args.direction)) {
     throw new Error(`--direction must be a whitelisted key from server/directions.js, got: ${args.direction}`);
   }
-  if (args.start || args.end) {
+  if (args.kind === "daily") {
+    // 当日新增（PLAN-DAILY-DIGEST.md）：窗口恒为单个北京业务日，不做近 N 日近似。
+    // 默认今天——抓取作业 05:00 已跑完，06:30 的日报作业取「今天」即为当日新增全量。
+    if (args.date && !/^\d{4}-\d{2}-\d{2}$/.test(args.date)) throw new Error(`--date must be YYYY-MM-DD, got: ${args.date}`);
+    if (!args.date) args.date = businessToday();
+    if (args.direction) throw new Error("--kind daily does not take --direction (单日总览报告)");
+  } else if (args.start || args.end) {
     // 回填模式：显式窗口（YYYY-MM-DD）。上期 = 同宽窗口紧贴其前。
     for (const [label, value] of [["--start", args.start], ["--end", args.end]]) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error(`${label} must be YYYY-MM-DD, got: ${value}`);
@@ -73,9 +83,11 @@ function parseArgs(argv) {
     }
   }
   if (!args.out) {
-    const suffix = args.start
-      ? `${args.start}_${args.end}`
-      : (args.kind === "weekly" ? "weekly" : args.month);
+    const suffix = args.kind === "daily"
+      ? `daily-${args.date}`
+      : (args.start
+        ? `${args.start}_${args.end}`
+        : (args.kind === "weekly" ? "weekly" : args.month));
     args.out = resolve(root, `data/report-batch-${args.kind === "weekly" && !args.start ? "weekly" : suffix}${args.direction ? `-${args.direction}` : ""}.json`);
   }
   return args;
@@ -177,7 +189,13 @@ function main() {
   let periodEnd;
   let prevStart;
   let prevEnd;
-  if (args.start) {
+  if (args.kind === "daily") {
+    // 单日窗口：periodStart == periodEnd == 当日；上期 = 紧邻的前一日（环比用）。
+    periodStart = args.date;
+    periodEnd = args.date;
+    prevStart = shiftBusinessDate(args.date, -1);
+    prevEnd = prevStart;
+  } else if (args.start) {
     periodStart = args.start;
     periodEnd = args.end;
     const width = Math.round((Date.parse(`${args.end}T12:00:00Z`) - Date.parse(`${args.start}T12:00:00Z`)) / 86400000) + 1;
@@ -209,7 +227,7 @@ function main() {
       : "AND (a.research_direction IS NULL OR a.research_direction != 'other')";
     const rows = db.prepare(`
       SELECT a.id, a.title, a.journal, a.doi, a.research_direction, a.keywords,
-        substr(a.abstract, 1, ${abstractClip + 1}) AS abstract,
+        a.abstract AS abstract,
         ${DISPLAY_DATE_SQL} AS display_date
       FROM articles a
       WHERE ${windowFilter(periodStart, periodEnd)}
@@ -226,7 +244,7 @@ function main() {
       doi: row.doi || "",
       displayDate: row.display_date,
       keywords: row.keywords || "",
-      abstract: String(row.abstract || "").slice(0, abstractClip),
+      abstract: String(row.abstract || ""),
       ...(briefIndex.has(row.id) ? { priorBrief: briefIndex.get(row.id) } : {})
     }));
     const total = db.prepare(`

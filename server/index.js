@@ -74,6 +74,9 @@ import {
   updateRefreshRunSummary,
   getDirectionStats,
   listRelatedArticles,
+  getDailyDigest,
+  getUserInteractionsMap,
+  getBriefsByIds,
   setArticleDirectionManually
 } from "./db.js";
 import {
@@ -216,15 +219,21 @@ app.get("/api/directions", (req, res) => {
   res.json(getDirectionStats({ windowDays, withMatrix: req.query.matrix === "1" }));
 });
 
-// ── AI 研究速览：周报/月报（PLAN-AI-REPORTS.md，服务端纯读）──────────────────
+// ── AI 研究速览：周报/月报/日报（PLAN-AI-REPORTS.md、PLAN-DAILY-DIGEST.md，服务端纯读）─
 // 报告由 WorkBuddy 智能体离线生成、apply-report.mjs 写库；这里零 LLM、零联网。
+// kind 白名单：weekly=一周速览 / monthly=月度趋势 / daily=当日新增（2026-10-15）。
+function parseReportKind(value) {
+  const kind = String(value || "").trim().toLowerCase();
+  return ["weekly", "monthly", "daily"].includes(kind) ? kind : "weekly";
+}
+
 app.get("/api/reports/latest", (req, res) => {
-  const kind = req.query.kind === "monthly" ? "monthly" : "weekly";
+  const kind = parseReportKind(req.query.kind);
   res.json({ report: getLatestReadyReport(kind) });
 });
 
 app.get("/api/reports", (req, res) => {
-  const kind = req.query.kind === "monthly" ? "monthly" : "weekly";
+  const kind = parseReportKind(req.query.kind);
   const limit = Math.min(Math.max(Math.floor(Number(req.query.limit)) || 60, 1), 200);
   // direction：缺省 = 总览与专报全部返回（前端自行分组）；"overview"/空串 = 仅总览；
   // 方向 key = 仅该方向专报（非法 key 自然返回空列表）。
@@ -246,7 +255,7 @@ app.get("/api/reports", (req, res) => {
 app.get("/api/reports/detail", (req, res) => {
   const { id, period_start: periodStart, direction, directions } = req.query;
   if (directions !== undefined) {
-    const kind = req.query.kind === "monthly" ? "monthly" : "weekly";
+    const kind = parseReportKind(req.query.kind);
     if (!periodStart) {
       res.status(400).json({ error: "period_start is required when using directions" });
       return;
@@ -257,11 +266,53 @@ app.get("/api/reports/detail", (req, res) => {
   }
   const report = getAiReportDetail({
     id: id !== undefined ? id : undefined,
-    kind: req.query.kind === "monthly" ? "monthly" : "weekly",
+    kind: parseReportKind(req.query.kind),
     periodStart,
     direction: direction === undefined ? undefined : String(direction)
   });
   res.json({ report });
+});
+
+// ── 按文章 ID 批量取速评（2026-10-16）──────────────────────────────────────
+// 供「文献库 → 自定义范围 → 卡片阅读」使用：该入口的文章清单来自 /api/articles，
+// 不携带报告上下文，需要另行把速评补齐，否则速评版永远为空。
+// 入参 ids 逗号分隔（上限 500，避免超长 URL）；返回 { briefs: [...] }，顺序与入参一致。
+app.get("/api/briefs", (req, res) => {
+  const ids = String(req.query.ids || "")
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .slice(0, 500);
+  res.json({ briefs: getBriefsByIds(ids) });
+});
+
+// ── 研究速览「当日新增」（PLAN-DAILY-DIGEST.md，2026-10-15）─────────────────
+// 单次响应同时给出两块内容，前端一次请求即可渲染整页：
+//   digest —— 实时统计（数量 / 来源分布 / 分类情况 / 文献清单），纯 SQL 零 LLM；
+//   report —— 当日 AI 日报（kind='daily'，可选）。未生成时恒为 null，前端据此
+//             整段隐藏「分析摘要 / 重点关注」，只保留统计与清单（降级不空白）。
+// date 缺省 = 北京业务日今天；非法格式回退今天（与 getDailyDigest 同规则）。
+app.get("/api/reports/daily", (req, res) => {
+  const requested = String(req.query.date || "").trim();
+  if (requested && !/^\d{4}-\d{2}-\d{2}$/.test(requested)) {
+    res.status(400).json({ error: "date must be YYYY-MM-DD" });
+    return;
+  }
+  const digest = getDailyDigest(requested || undefined);
+  // 已读 / 收藏是账号维度状态：/api/reports/daily 原本只回文献元数据，
+  // 卡片上的状态徽章永远是空。这里补一次批量查询（≤500 篇，一条 SQL）。
+  const userId = getPrincipalId(req);
+  if (digest.articles.length) {
+    const statusMap = userId
+      ? getUserInteractionsMap(userId, digest.articles.map((article) => article.id))
+      : new Map();
+    digest.articles = digest.articles.map((article) => {
+      const status = statusMap.get(article.id);
+      return { ...article, is_read: status?.is_read || 0, is_favorite: status?.is_favorite || 0 };
+    });
+  }
+  const report = getAiReportDetail({ kind: "daily", periodStart: digest.date });
+  res.json({ date: digest.date, digest, report });
 });
 
 // ── 每日资讯（PLAN-DAILY-NEWS.md，文件式存储 data/daily-news/YYYY-MM-DD.md）──
@@ -1297,6 +1348,23 @@ app.get("/version.json", (req, res) => {
 });
 
 const distPath = path.resolve(__dirname, "../dist");
+
+// 文献摘要图 / 技术路线图（2026-10-16 新增）：AI 全文分析作业从 PDF 里提取的配图，
+// 落盘在 <数据目录>/figures/<article_id>.png，前端详情页用 /figures/xxx.png 引用。
+// ⚠️ 必须注册在下面的 SPA fallback 之前，否则请求会被 index.html 吞掉（返回 HTML 而非图片）。
+// ⚠️ 图文件会被 AI 作业原位替换，且站点经 Cloudflare 橙云代理——源站若发
+//    max-age 强缓存，CF 会按它缓存旧图 7 天（2026-10-26 事故）。显式 no-cache：
+//    CF 尊重源站 no-cache 不做边缘缓存，浏览器每次协商验证（ETag 304 便宜）。
+//    URL 版本化兜底见 db.js stampFigureVersion（figure_path 带 ?v=<mtime>）。
+app.use("/figures", express.static(path.join(resolveDataDirectory(), "figures"), {
+  etag: true,
+  lastModified: true,
+  setHeaders(res) {
+    res.setHeader("Cache-Control", "no-cache");
+  },
+  index: false,
+}));
+
 app.use(express.static(distPath, {
   maxAge: "1y",
   immutable: true,

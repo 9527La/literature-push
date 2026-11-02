@@ -17,7 +17,7 @@
 3. 登录 `mp.weixin.qq.com` → 首页「新的创作」→ **图文消息** → 新建图文。
 4. 正文编辑区 `Ctrl+V` 粘贴；检查：标题区/卡片底色/加粗数字是否保留。
 5. 填写：
-   - 标题：`电研新视界 日报｜<期号日>`（与正文 H1 一致，≤64 字节）
+   - 标题：从 issue JSON 的 `title` 字段复制（每期不同；**不要**用「电研新视界 日报｜日期」，会被平台判定模板化限流）
    - 摘要：从 `data/wechat-drafts/<期号日>.json` 的 `digest` 字段复制（≤60 字）
    - 封面：`assets/wechat-cover.png`（含当日日期；可 `node scripts/make-wechat-cover.mjs <期号日>` 重新生成）
    - 原文链接：`https://lhmktz.top`（「阅读原文」位）

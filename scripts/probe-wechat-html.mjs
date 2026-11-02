@@ -98,16 +98,34 @@ function countOccurrences(haystack, needle) {
 function probeM2(body, html, issue, violations) {
   if (!issue) return;
   const date = String(issue.date || "");
-  // 标题由微信文章页自动渲染：正文不得重复（否则双标题），正确性看 <title>。
+  // 标题由微信文章页自动渲染：正文不得重复（否则双标题）。
+  // 2026-10-28 起标题改为每天自拟（平台会判定固定模板为低质内容并限流），
+  // 因此这里反过来校验：必须有标题，且**不能**是「电研新视界 日报｜日期」这类模板。
   const titleTag = html.match(/<title>([^<]*)<\/title>/);
-  if (!titleTag || decodeEntities(titleTag[1]) !== `电研新视界 日报｜${date}`) {
-    violations.push(`M2 <title> 应为「电研新视界 日报｜${date}」，got: ${titleTag ? decodeEntities(titleTag[1]) : "缺失"}`);
-  }
-  if (body.includes(`电研新视界 日报｜${date}`)) {
-    violations.push("M2 正文重复了文章标题（微信会自动渲染标题，正文应从「今日导读」开始）");
+  const titleText = titleTag ? decodeEntities(titleTag[1]).trim() : "";
+  if (!titleText) {
+    violations.push("M2 <title> 缺失");
+  } else {
+    if (titleText.length > 64) violations.push(`M2 标题超 64 字：${titleText.length}`);
+    if (/^电研新视界\s*日报｜\d{4}-\d{2}-\d{2}$/.test(titleText) || titleText === `电研新视界 日报｜${date}`) {
+      violations.push(`M2 标题仍是模板「${titleText}」——每天只差日期会被平台判定低质并限流，须改成当天内容钩子`);
+    }
+    if (/^\d{4}-\d{2}-\d{2}/.test(titleText)) {
+      violations.push("M2 标题以日期开头，模板化特征明显");
+    }
+    // 2026-10-29 v16 起：标题须为「内容钩子【日报 YYYY-MM-DD】」，日期后缀必带（用户定版格式）
+    if (date && !titleText.endsWith(`【日报 ${date}】`)) {
+      violations.push(`M2 标题缺少日期后缀「【日报 ${date}】」（§8.5.0 v16：钩子+【日报 日期】）`);
+    }
+    if (body.includes(titleText)) {
+      violations.push("M2 正文重复了文章标题（微信会自动渲染标题，正文应从「今日导读」开始）");
+    }
   }
   if (!body.includes("今日导读") && (issue.news?.policy?.length || issue.news?.general?.length || issue.briefs?.length)) {
     violations.push("M2 正文缺少「今日导读」起始块");
+  }
+  if (!body.includes("概览") && (issue.news?.policy?.length || issue.news?.general?.length || issue.briefs?.length)) {
+    violations.push("M2 缺少「概览」板块");
   }
   if (!body.includes("本文由 AI 辅助创作")) violations.push("M2 缺少 AI 辅助创作声明");
   if (!body.includes("幻觉")) violations.push("M2 缺少幻觉免责声明");
@@ -131,7 +149,7 @@ function probeM2(body, html, issue, violations) {
   if (renderedNews !== newsTotal) {
     violations.push(`M2 资讯卡（来源：）出现 ${renderedNews} 次，与 news 数量 ${newsTotal} 不一致`);
   }
-  if (newsTotal && !body.includes("每日资讯")) violations.push("M2 有资讯但缺少「每日资讯」板块标题");
+  if (newsTotal && !body.includes("重点新闻")) violations.push("M2 有资讯但缺少「重点新闻」分组");
 
   const listingTotal = (issue.listing || []).reduce((sum, group) => sum + (group.items?.length || 0), 0);
   if (listingTotal > 0) {

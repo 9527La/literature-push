@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>设计预览 · 研究速览「当日新增」板块</title>
+<style>
+/* ═══════════ 设计令牌（逐字取自 src/styles/00-tokens.css）═══════════ */
+:root{
+  --bg-primary:#f2f4f7; --bg-secondary:rgba(248,249,251,.96); --bg-tertiary:#e8ebf0;
+  --surface:rgba(255,255,255,.96); --surface-hover:#f7f8fa; --surface-raised:#fff; --surface-subtle:#f4f5f7;
+  --topbar-h:96px;
+  --font-serif:"Noto Serif SC","Source Han Serif SC","Songti SC","STSong","SimSun","PingFang SC","Microsoft YaHei",sans-serif;
+  --text-primary:#171b24; --text-secondary:#525a68; --text-tertiary:#6b7280;
+  --accent-primary:#3157d5; --accent-secondary:#3157d5; --accent-hover:#2848b8;
+  --accent-light:rgba(49,87,213,.09); --accent-glow:rgba(49,87,213,.18);
+  --border-color:#d8dce3; --border-light:rgba(23,27,36,.09);
+  --success:#15803d; --warning:#b45309; --error:#b91c1c;
+  --dir-distributed_gen:#8A6238; --dir-storage:#3D6E66; --dir-market:#5F6773;
+  --dir-transmission:#34547A; --dir-distribution:#3F5D93; --dir-microgrid:#4E7D3B;
+  --dir-forecasting:#7D5BA6; --dir-stability:#9C4A4A; --dir-protection:#8C3E5F;
+  --dir-power_quality:#8F6E22; --dir-hv:#2E7D8F; --dir-power_electronics:#B5486F;
+  --dir-transport:#A85D29; --dir-ies:#767222; --dir-other:#6E737C;
+  --shadow-xs:0 1px 2px rgba(23,27,36,.04); --shadow-sm:0 4px 12px rgba(23,27,36,.055);
+  --shadow-md:0 10px 28px rgba(23,27,36,.07); --shadow-lg:0 18px 44px rgba(23,27,36,.10);
+  --radius-sm:6px; --radius-md:8px; --radius-lg:10px; --radius-xl:14px; --radius-2xl:18px; --radius-full:999px;
+  --ease-out:cubic-bezier(.16,1,.3,1); --transition-fast:150ms var(--ease-out); --transition:200ms var(--ease-out);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  min-height:100dvh;
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+  background:linear-gradient(180deg,#f8f9fb 0,var(--bg-primary) 240px) fixed;
+  background-attachment:fixed; color:var(--text-primary); line-height:1.55; font-size:17px;
+  -webkit-font-smoothing:antialiased;
+}
+button,input,select{font:inherit}
+button{cursor:pointer}
+a{color:var(--accent-primary);text-decoration:none}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-thumb{background:rgba(23,27,36,.14);border-radius:3px}
+
+/* ═══════════ 预览外壳 ═══════════ */
+.mock-frame{max-width:1560px;margin:0 auto;padding:22px 28px 90px}
+.mock-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#fff;border:1px solid var(--border-color);border-left:4px solid var(--accent-primary);border-radius:12px;padding:12px 16px;margin-bottom:18px;box-shadow:var(--shadow-xs)}
+.mock-banner h1{font-size:15px;margin:0}
+.mock-banner p{font-size:12.5px;color:var(--text-tertiary);margin:0}
+.mock-banner code{background:var(--surface-subtle);border-radius:5px;padding:1px 6px;font-size:12px;color:var(--text-secondary)}
+.state-switch{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.state-switch button{border:1px solid var(--border-color);background:var(--surface);color:var(--text-secondary);border-radius:999px;padding:5px 14px;font-size:12.5px;transition:border-color .15s,color .15s,background .15s}
+.state-switch button:hover{border-color:var(--accent-primary);color:var(--accent-primary)}
+.state-switch button.on{background:var(--accent-primary);border-color:var(--accent-primary);color:#fff;font-weight:600}
+.mock-note{font-size:12px;color:var(--text-tertiary);background:var(--surface-subtle);border:1px dashed var(--border-color);border-radius:10px;padding:10px 14px;margin:16px 0 0;line-height:1.75}
+.mock-note b{color:var(--text-secondary)}
+.mock-panel{display:none}
+.mock-panel.on{display:block}
+[data-state]{display:none}
+[data-state].on{display:block}
+
+/* ═══════════ 研究速览 · 头部 / 标签（取自 99-tail.css）═══════════ */
+.reports-view{display:flex;flex-direction:column;gap:4px}
+.reports-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.reports-head-main{min-width:0}
+.reports-head h1{display:flex;align-items:center;gap:10px;margin:0 0 2px;font-size:26px}
+.reports-head-badge{display:inline-flex;align-items:center;gap:4px;background:color-mix(in srgb,var(--accent-primary) 10%,transparent);color:var(--accent-primary);border-radius:999px;padding:2px 10px;font-size:12px;font-weight:600}
+.reports-head-hint{margin:0;color:var(--text-tertiary);font-size:12.5px}
+.reports-head .reports-tabs{margin:0}
+.reports-tabs{display:flex;gap:8px;margin:14px 0 18px}
+.reports-tab{border:1px solid var(--border-color);background:var(--surface);color:var(--text-secondary);border-radius:999px;padding:6px 18px;font-size:13.5px;transition:border-color .15s,color .15s}
+.reports-tab:hover{border-color:var(--accent-primary);color:var(--accent-primary)}
+.reports-tab.on{background:var(--accent-primary);border-color:var(--accent-primary);color:#fff;font-weight:600}
+.reports-tab .tab-new{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;background:color-mix(in srgb,var(--accent-primary) 12%,transparent);color:var(--accent-primary);border-radius:999px;padding:0 6px;vertical-align:1px}
+.reports-tab.on .tab-new{background:rgba(255,255,255,.22);color:#fff}
+
+/* ═══════════ 信息条 / 分区标题 / 条形图 ═══════════ */
+.reports-meta{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--text-secondary);font-size:13px;background:var(--surface);border:1px solid var(--border-color);border-radius:8px;padding:10px 14px;margin-bottom:16px;align-items:center}
+.reports-meta strong{color:var(--text-primary);font-weight:600}
+.reports-meta-direction{display:inline-flex;align-items:center;padding:1px 10px;border-radius:999px;font-size:12px;font-weight:600;background:var(--dir-key,var(--accent-primary));color:#fff}
+.reports-meta-direction.overview{background:color-mix(in srgb,var(--accent-primary) 12%,transparent);color:var(--accent-primary)}
+.reports-sect{font-size:15px;margin:22px 0 10px;padding-left:10px;border-left:3px solid var(--accent-primary);line-height:1.4}
+.reports-sect-hint{margin-left:8px;font-size:12px;font-weight:400;color:var(--text-tertiary)}
+.reports-bars{display:grid;gap:6px}
+.reports-bar-row{display:grid;grid-template-columns:128px minmax(0,1fr) 96px;align-items:center;gap:10px;font-size:12.5px}
+.reports-bar-name{color:var(--text-secondary);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reports-bar-track{height:14px;background:var(--surface);border:1px solid var(--border-color);border-radius:7px;overflow:hidden}
+.reports-bar-fill{height:100%;border-radius:7px;background:var(--dir-key,var(--accent-primary))}
+.reports-bar-val{color:var(--text-tertiary);white-space:nowrap}
+.reports-bars--journals .reports-bar-row{grid-template-columns:250px minmax(0,1fr) 72px}
+
+/* ═══════════ KPI 统计卡（本次新增）═══════════ */
+.reports-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.reports-kpi{position:relative;border:1px solid var(--border-color);border-radius:10px;background:var(--surface);padding:13px 16px 14px;overflow:hidden}
+.reports-kpi::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dir-key,var(--accent-primary))}
+.reports-kpi-val{display:flex;align-items:baseline;gap:5px;font-size:26px;font-weight:700;color:var(--text-primary);line-height:1.2;font-variant-numeric:tabular-nums}
+.reports-kpi-val small{font-size:12.5px;font-weight:600;color:var(--text-tertiary)}
+.reports-kpi-label{font-size:12.5px;color:var(--text-secondary);margin-top:2px}
+.reports-kpi-sub{font-size:11.5px;color:var(--text-tertiary);margin-top:5px}
+.reports-kpi-sub em{font-style:normal;color:#b04a3a;font-weight:600}
+.reports-kpi-sub em.down{color:#2e7d4f}
+
+/* ═══════════ 文本卡 / 三字段速评卡 ═══════════ */
+.reports-text-card{border:1px solid var(--border-color);border-radius:10px;background:var(--surface);padding:12px 16px;margin-bottom:14px}
+.reports-text-card-title{margin:0 0 6px;font-size:13.5px;font-weight:600;color:var(--text-primary)}
+.reports-text-card-body{margin:0;font-size:13.5px;color:var(--text-secondary);line-height:1.85}
+.reports-text-card-body b{color:var(--text-primary)}
+.reports-md{font-size:13.5px;color:var(--text-secondary);line-height:1.85}
+.reports-brief-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:10px}
+.reports-brief-card{--tone-ink:var(--text-secondary);--tone-soft:color-mix(in srgb,var(--text-tertiary) 6%,var(--surface));--tone-line:var(--border-color);position:relative;display:flex;flex-direction:column;width:100%;text-align:left;border:1px solid var(--border-color);border-left:3px solid var(--tone-line);border-radius:10px;background:var(--surface);padding:0;overflow:hidden;transition:border-color .15s,box-shadow .15s;font-family:inherit}
+.reports-brief-card:hover{border-color:color-mix(in srgb,var(--tone-ink) 38%,var(--border-color));box-shadow:var(--shadow-sm)}
+.reports-brief-card.tone-ieee{--tone-ink:#3f5d93;--tone-soft:#edf1f8;--tone-line:#d5deec}
+.reports-brief-card.tone-elsevier{--tone-ink:#8a6238;--tone-soft:#f8f2e9;--tone-line:#e8dbc6}
+.reports-brief-card.tone-cn{--tone-ink:#3d6e66;--tone-soft:#ecf4f2;--tone-line:#cfe0dc}
+.reports-brief-card.tone-other{--tone-ink:#5f6773;--tone-soft:#f1f3f5;--tone-line:#dce0e5}
+.reports-brief-head{display:flex;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--tone-line);background:var(--tone-soft)}
+.reports-brief-mark{min-width:38px;text-align:center;background:var(--tone-ink);color:#fff;border-radius:6px;font-size:11px;padding:2px 6px;font-weight:600;flex:none}
+.reports-brief-journal{flex:1;min-width:0;font-size:12.5px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reports-brief-date{flex:none;font-size:12px;color:var(--text-tertiary)}
+.reports-brief-body{display:flex;flex-direction:column;gap:3px;padding:10px 14px 26px}
+.reports-brief-title{font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.5}
+.reports-brief-title-en{font-size:11.5px;color:var(--text-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reports-brief-fields{display:grid;gap:4px;margin-top:4px}
+.reports-brief-field{display:grid;grid-template-columns:62px minmax(0,1fr);gap:8px;font-size:12.5px;line-height:1.55}
+.reports-brief-field .k{color:var(--tone-ink);font-weight:600;font-size:12px;white-space:nowrap}
+.reports-brief-field .v{color:var(--text-secondary)}
+.reports-brief-open{position:absolute;right:12px;bottom:8px;font-size:12px;color:var(--accent-primary);opacity:0;transition:opacity .15s}
+.reports-brief-card:hover .reports-brief-open{opacity:1}
+.reports-badge-focus{position:absolute;left:0;top:0;z-index:2;background:#b45309;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.3px;padding:2px 8px;border-bottom-right-radius:8px}
+
+/* ═══════════ 清单行（复用 journal-article-row 视觉）═══════════ */
+.reports-list{display:flex;flex-direction:column;gap:8px}
+.journal-article-row{display:flex;flex-direction:column;gap:4px;text-align:left;border:1px solid var(--border-color);border-radius:10px;background:var(--surface);padding:10px 14px;transition:border-color .15s,box-shadow .15s;font-family:inherit}
+.journal-article-row:hover{border-color:color-mix(in srgb,var(--accent-primary) 42%,var(--border-color));box-shadow:var(--shadow-sm)}
+.journal-article-title{font-size:13.5px;font-weight:600;color:var(--text-primary);line-height:1.5}
+.journal-article-title .journal-article-journal{display:inline-block;margin-right:8px;font-size:11.5px;font-weight:600;border-radius:5px;padding:1px 7px;color:#fff;background:var(--tone-ink,var(--accent-primary))}
+.journal-article-journal.tone-ieee{--tone-ink:#3f5d93}.journal-article-journal.tone-elsevier{--tone-ink:#8a6238}
+.journal-article-journal.tone-cn{--tone-ink:#3d6e66}.journal-article-journal.tone-other{--tone-ink:#5f6773}
+.journal-article-meta{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-tertiary)}
+.journal-article-dot{width:8px;height:8px;border-radius:50%;background:var(--dir-key,var(--text-tertiary))}
+.reports-list-foot{display:flex;justify-content:center;margin-top:12px;gap:10px;flex-wrap:wrap}
+.reports-group-more{border:1px dashed color-mix(in srgb,var(--accent-primary) 45%,var(--border-color));background:color-mix(in srgb,var(--accent-primary) 4%,var(--surface));color:var(--text-secondary);border-radius:8px;padding:5px 22px;font-size:12.5px;transition:color .15s,border-color .15s,background .15s;font-family:inherit}
+.reports-group-more:hover{color:var(--text-primary);border-color:var(--accent-primary);background:color-mix(in srgb,var(--accent-primary) 9%,var(--surface))}
+.reports-group-cardread{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--accent-primary);background:var(--accent-primary);color:#fff;border-radius:999px;padding:5px 16px;font-size:12.5px;font-weight:600;font-family:inherit}
+.reports-group-cardread:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+
+/* 来源分布切换（方向 / 期刊 双视图） */
+.reports-switch{display:inline-flex;border:1px solid var(--border-color);border-radius:999px;background:var(--surface);padding:2px;gap:2px}
+.reports-switch button{border:0;background:transparent;color:var(--text-secondary);border-radius:999px;padding:3px 14px;font-size:12.5px}
+.reports-switch button.on{background:color-mix(in srgb,var(--accent-primary) 12%,transparent);color:var(--accent-primary);font-weight:600}
+.reports-sect-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+
+/* ═══════════ 空状态（取自 30-feed.css）═══════════ */
+.empty{display:grid;justify-items:center;gap:6px;padding:48px 24px;text-align:center;color:var(--text-tertiary);font-size:15px;background:var(--surface-raised);border:1px solid var(--border-color);border-radius:var(--radius-2xl)}
+.empty-state-title{color:var(--text-primary);font-size:17px;font-weight:700}
+.empty-state-description{max-width:46ch;font-size:14px;line-height:1.6}
+.empty-state-action{margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.empty-art{width:120px;height:100px;margin-bottom:10px}
+.empty.has-art{padding:40px 24px}
+.btn{border:1px solid var(--border-color);background:var(--surface);color:var(--text-secondary);border-radius:8px;padding:7px 18px;font-size:13px;transition:border-color .15s,color .15s}
+.btn:hover{border-color:var(--accent-primary);color:var(--accent-primary)}
+.btn.primary{background:var(--accent-primary);border-color:var(--accent-primary);color:#fff;font-weight:600}
+.btn.primary:hover{background:var(--accent-hover);color:#fff}
+
+/* 加载态 */
+.reports-loading{color:var(--text-tertiary);font-size:13px;padding:24px 0}
+.skeleton{display:block;background:linear-gradient(90deg,var(--surface-subtle) 25%,#eceef2 37%,var(--surface-subtle) 63%);background-size:400% 100%;animation:sk 1.4s ease infinite;border-radius:6px}
+@keyframes sk{0%{background-position:100% 50%}100%{background-position:0 50%}}
+.sk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:18px}
+.sk-card{border:1px solid var(--border-color);border-radius:10px;background:var(--surface);padding:13px 16px}
+</style>
+</head>
+<body>
+<div class="mock-frame">
+
+  <div class="mock-banner">
+    <div>
+      <h1>设计预览 · 研究速览「当日新增」板块</h1>
+      <p>与现有「一周速览 / 月度趋势」同构的第三个标签页 · 全部配色 / 圆角 / 间距逐字取自站内既有令牌</p>
+    </div>
+    <div class="state-switch" id="sw">
+      <button data-go="normal" class="on">① 正常（有新增）</button>
+      <button data-go="empty">② 当日无新增</button>
+      <button data-go="error">③ 加载失败</button>
+      <button data-go="loading">④ 加载中</button>
+    </div>
+  </div>
+
+  <section class="reports-view">
+
+    <!-- ══════════ 头部：三个标签 ══════════ -->
+    <div class="reports-head">
+      <div class="reports-head-main">
+        <h1>研究速览 <span class="reports-head-badge">✦ AI 生成</span></h1>
+        <p class="reports-head-hint">智能体基于当期入库文献自动生成 · 数字取自数据库统计 · 三字段速评卡 / 期刊名 / 主题词均可点击交互</p>
+      </div>
+      <div class="reports-tabs" role="tablist">
+        <button class="reports-tab">一周速览</button>
+        <button class="reports-tab">月度趋势</button>
+        <button class="reports-tab on">当日新增<span class="tab-new">NEW</span></button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ ① 正常（有新增） ═══════════════════ -->
+    <div data-state="normal" class="on">
+
+      <div class="reports-meta">
+        <span class="reports-meta-direction overview">当日新增</span>
+        <span>统计窗口 <strong>2026-10-15 00:00 ~ 24:00</strong>（北京时间业务日）</span>
+        <span>新增 <strong>47</strong> 篇</span>
+        <span>来源 <strong>12</strong> 种期刊</span>
+        <span>覆盖 <strong>9</strong> 个方向</span>
+        <span>其中 <strong>3</strong> 篇待方向标注</span>
+        <span>更新于 今日 06:32</span>
+        <button class="reports-group-cardread" style="margin-left:auto">▤ 卡片阅读 · 47 篇</button>
+      </div>
+
+      <h2 class="reports-sect">当日概览<span class="reports-sect-hint">数字实时取自数据库，每 5 分钟随刷新更新</span></h2>
+      <div class="reports-kpis">
+        <div class="reports-kpi">
+          <div class="reports-kpi-val">47<small>篇</small></div>
+          <div class="reports-kpi-label">当日新增文献</div>
+          <div class="reports-kpi-sub">较昨日 39 篇 <em>+8</em></div>
+        </div>
+        <div class="reports-kpi" style="--dir-key:#3F5D93">
+          <div class="reports-kpi-val">12<small>种</small></div>
+          <div class="reports-kpi-label">来源期刊</div>
+          <div class="reports-kpi-sub">IEEE 7 种 · Elsevier 3 种 · 中文 2 种</div>
+        </div>
+        <div class="reports-kpi" style="--dir-key:#3D6E66">
+          <div class="reports-kpi-val">9<small>个</small></div>
+          <div class="reports-kpi-label">覆盖研究方向</div>
+          <div class="reports-kpi-sub">最集中：储能系统 12 篇</div>
+        </div>
+        <div class="reports-kpi" style="--dir-key:#B45309">
+          <div class="reports-kpi-val">3<small>篇</small></div>
+          <div class="reports-kpi-label">待方向标注</div>
+          <div class="reports-kpi-sub">占当日 6.4%</div>
+        </div>
+      </div>
+
+      <div class="reports-sect-row">
+        <h2 class="reports-sect">来源与分类分布<span class="reports-sect-hint">点条形可下钻到该期刊 / 该方向的当日文献</span></h2>
+        <div class="reports-switch">
+          <button class="on">按方向</button>
+          <button>按期刊</button>
+        </div>
+      </div>
+      <div class="reports-bars">
+        <div class="reports-bar-row"><span class="reports-bar-name">储能系统</span><div class="reports-bar-track"><div class="reports-bar-fill" style="width:100%;--dir-key:#3D6E66"></div></div><span class="reports-bar-val">12</span></div>
+        <div class="reports-bar-row"><span class="reports-bar-name">配电网运行与规划</span><div class="reports-bar-track"><div class="reports-bar-fill" style="width:75%;--dir-key:#3F5D93"></div></div><span class="reports-bar-val">9</span></div>
+        <div class="reports-bar-row"><span class="reports-bar-name">电力电子装备</span><div class="reports-bar-track"><div class="reports-bar-fill" style="width:58%;--dir-key:#B5486F"></div></div><span class="reports-bar-val">7</span></div>
+        <div class="reports-bar-row"><span class="reports-bar-name">预测与数据驱动</span><div class="reports-bar-track"><div class="reports-bar-fill" style="width:50%;--dir-key:#7D5BA6"></div></div><span class="reports-bar-val">6</span></div>
+        <div class="reports-bar-row"><span class="reports-bar-name">综合能源系统</span><div class="reports-bar-track"><div class="reports-bar-fill" style="width:33%;--dir-key:#767222"></div></div><span class="reports-bar-val">4</span></div>
+        <div class="reports-bar-row"><span class="reports-bar-name">微电网与虚拟电厂</span><div class="reports-bar-track"><div class="reports-bar-fill" style="width:25%;--dir-key:#4E7D3B"></div></div><span class="reports-bar-val">3</span></div>
+        <div class="reports-bar-row"><span class="reports-bar-name">其余 4 个方向</span><div class="reports-bar-track"><div class="reports-bar-fill" style="width:50%"></div></div><span class="reports-bar-val">6</span></div>
+      </div>
+
+      <h2 class="reports-sect">当日分析摘要<span class="reports-sect-hint">AI 基于当日全部文献摘要归纳 · 数字与上方统计一致</span></h2>
+      <div class="reports-text-card">
+        <p class="reports-text-card-body">
+          今日新增 47 篇文献，整体聚焦于 <b>储能容量配置与状态估计</b>、<b>配电网重构与电压治理</b> 两条主线，两者合计 21 篇，占当日 44.7%。
+          方法层面，<b>数据驱动与优化耦合</b>成为共同取向：储能侧以 SOC/寿命联合估计与滚动优化为主，配网侧以混合整数二阶锥与深度强化学习重构并行；
+          电力电子方向 7 篇集中在 MMC 子模块均压与宽禁带器件驱动，属延续性工作。
+          结论层面，多篇给出可量化的工程指标（网损下降 8%~14%、储能循环寿命提升 20%+），少数为仿真验证阶段的初步结果。
+          与近 7 日均值（41 篇/日）相比，今日总量略高，储能方向占比由 19% 升至 26%，为近期最高。
+        </p>
+      </div>
+
+      <h2 class="reports-sect">重点关注<span class="reports-sect-hint">AI 依据新颖性 / 期刊层级 / 结论强度筛出，最多 5 条</span></h2>
+      <div class="reports-brief-grid">
+        <button class="reports-brief-card tone-ieee">
+          <span class="reports-badge-focus">重点关注</span>
+          <span class="reports-brief-head"><span class="reports-brief-mark">TSG</span><span class="reports-brief-journal">IEEE Transactions on Smart Grid</span><span class="reports-brief-date">今天</span></span>
+          <span class="reports-brief-body">
+            <span class="reports-brief-title">面向配电网电压治理的深度强化学习有载调压与储能协同控制</span>
+            <span class="reports-brief-title-en">Coordinated OLTC and BESS Control for Distribution Voltage Regulation via Deep RL</span>
+            <span class="reports-brief-fields">
+              <span class="reports-brief-field"><span class="k">研究对象</span><span class="v">含高比例光伏的 10kV 配电网馈线</span></span>
+              <span class="reports-brief-field"><span class="k">研究方法</span><span class="v">SAC 深度强化学习 + 日前-实时两阶段协同</span></span>
+              <span class="reports-brief-field"><span class="k">核心结论</span><span class="v">IEEE 33 节点仿真：电压越限时长降 92%，网损降 11.3%</span></span>
+            </span>
+          </span>
+          <span class="reports-brief-open">详情 ›</span>
+        </button>
+        <button class="reports-brief-card tone-elsevier">
+          <span class="reports-badge-focus">重点关注</span>
+          <span class="reports-brief-head"><span class="reports-brief-mark">AE</span><span class="reports-brief-journal">Applied Energy</span><span class="reports-brief-date">今天</span></span>
+          <span class="reports-brief-body">
+            <span class="reports-brief-title">计及循环寿命衰减的共享储能容量配置与套利策略联合优化</span>
+            <span class="reports-brief-fields">
+              <span class="reports-brief-field"><span class="k">研究对象</span><span class="v">园区级共享储能电站（锂电，10MW/40MWh）</span></span>
+              <span class="reports-brief-field"><span class="k">研究方法</span><span class="v">雨流计数寿命模型 + 双层混合整数规划</span></span>
+              <span class="reports-brief-field"><span class="k">核心结论</span><span class="v">容量利用率提升 17%，全周期净收益提高 23.6%</span></span>
+            </span>
+          </span>
+          <span class="reports-brief-open">详情 ›</span>
+        </button>
+        <button class="reports-brief-card tone-cn">
+          <span class="reports-badge-focus">重点关注</span>
+          <span class="reports-brief-head"><span class="reports-brief-mark">电机</span><span class="reports-brief-journal">中国电机工程学报</span><span class="reports-brief-date">今天</span></span>
+          <span class="reports-brief-body">
+            <span class="reports-brief-title">基于多尺度时空图神经网络的短期风电功率概率预测</span>
+            <span class="reports-brief-fields">
+              <span class="reports-brief-field"><span class="k">研究对象</span><span class="v">区域风电场群（6 场站，装机 900MW）</span></span>
+              <span class="reports-brief-field"><span class="k">研究方法</span><span class="v">时空图卷积 + 分位数回归概率预测</span></span>
+              <span class="reports-brief-field"><span class="k">核心结论</span><span class="v">实测数据：RMSE 降 12.4%，PICP 达 94.1%</span></span>
+            </span>
+          </span>
+          <span class="reports-brief-open">详情 ›</span>
+        </button>
+      </div>
+
+      <h2 class="reports-sect">当日新增文献<span class="reports-sect-hint">按首次公开时间倒序 · 点击任意一条查看详情</span></h2>
+      <div class="reports-list">
+        <button class="journal-article-row">
+          <span class="journal-article-title"><span class="journal-article-journal tone-ieee">IEEE Transactions on Smart Grid</span>面向配电网电压治理的深度强化学习有载调压与储能协同控制</span>
+          <span class="journal-article-meta"><span class="journal-article-dot" style="--dir-key:#3F5D93"></span><span>配电网运行与规划</span><span>今天 08:41</span></span>
+        </button>
+        <button class="journal-article-row">
+          <span class="journal-article-title"><span class="journal-article-journal tone-elsevier">Applied Energy</span>计及循环寿命衰减的共享储能容量配置与套利策略联合优化</span>
+          <span class="journal-article-meta"><span class="journal-article-dot" style="--dir-key:#3D6E66"></span><span>储能系统</span><span>今天 08:12</span></span>
+        </button>
+        <button class="journal-article-row">
+          <span class="journal-article-title"><span class="journal-article-journal tone-cn">中国电机工程学报</span>基于多尺度时空图神经网络的短期风电功率概率预测</span>
+          <span class="journal-article-meta"><span class="journal-article-dot" style="--dir-key:#7D5BA6"></span><span>预测与数据驱动</span><span>今天 07:55</span></span>
+        </button>
+        <button class="journal-article-row">
+          <span class="journal-article-title"><span class="journal-article-journal tone-ieee">IEEE Trans. Power Electronics</span>模块化多电平换流器子模块电容电压均衡的模型预测控制</span>
+          <span class="journal-article-meta"><span class="journal-article-dot" style="--dir-key:#B5486F"></span><span>电力电子装备</span><span>今天 07:30</span></span>
+        </button>
+        <button class="journal-article-row">
+          <span class="journal-article-title"><span class="journal-article-journal tone-other">Journal of Modern Power Systems and Clean Energy</span>电-热-氢耦合园区综合能源系统日前优化调度</span>
+          <span class="journal-article-meta"><span class="journal-article-dot" style="--dir-key:#767222"></span><span>综合能源系统</span><span>今天 06:58</span></span>
+        </button>
+      </div>
+      <div class="reports-list-foot">
+        <button class="reports-group-more">查看当日全部 47 篇 ›</button>
+        <button class="reports-group-cardread">▤ 卡片阅读 · 47 篇</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ ② 当日无新增 ═══════════════════ -->
+    <div data-state="empty">
+      <div class="empty has-art">
+        <svg class="empty-art" viewBox="0 0 120 100" role="presentation" aria-hidden="true">
+          <circle cx="60" cy="50" r="38" fill="none" stroke="#c9d2e0" stroke-width="1" stroke-dasharray="5 5"></circle>
+          <g>
+            <rect x="44" y="22" width="38" height="50" rx="4" fill="#ffffff" stroke="#85b7eb" stroke-width="1.4"></rect>
+            <rect x="34" y="28" width="42" height="50" rx="4" fill="#ffffff" stroke="#378add" stroke-width="1.6"></rect>
+            <line x1="42" y1="40" x2="62" y2="40" stroke="#378add" stroke-width="2.2" stroke-linecap="round"></line>
+            <line x1="42" y1="50" x2="68" y2="50" stroke="#85b7eb" stroke-width="1.6"></line>
+            <line x1="42" y1="58" x2="68" y2="58" stroke="#85b7eb" stroke-width="1.6"></line>
+            <line x1="42" y1="66" x2="58" y2="66" stroke="#85b7eb" stroke-width="1.6"></line>
+          </g>
+        </svg>
+        <p class="empty-state-title">今日暂无新增文献</p>
+        <p class="empty-state-description">统计窗口为北京时间业务日 2026-10-15 00:00 ~ 24:00，入库后自动纳入本板块。抓取作业通常在凌晨完成，若今日尚未入库可稍后再看，或切换到「一周速览」浏览近期文献。</p>
+        <div class="empty-state-action">
+          <button class="btn">查看昨日（10-14 · 39 篇）</button>
+          <button class="btn primary">切到「一周速览」</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ ③ 加载失败 ═══════════════════ -->
+    <div data-state="error">
+      <div class="empty">
+        <span style="display:grid;place-items:center;width:44px;height:44px;margin-bottom:6px;color:var(--accent-primary);background:var(--accent-light);border-radius:999px">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </span>
+        <p class="empty-state-title">当日新增分析加载失败</p>
+        <p class="empty-state-description">网络请求超时，未能取到当日统计与文献列表。统计数据来自数据库实时查询，稍后重试即可；也可先浏览「一周速览 / 月度趋势」。</p>
+        <div class="empty-state-action">
+          <button class="btn primary">重新加载</button>
+          <button class="btn">切到「一周速览」</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════ ④ 加载中 ═══════════════════ -->
+    <div data-state="loading">
+      <div class="reports-meta" style="color:var(--text-tertiary)">
+        <span class="reports-meta-direction overview">当日新增</span>
+        <span>统计窗口 <strong>2026-10-15</strong>（北京时间业务日）</span>
+        <span>正在统计…</span>
+      </div>
+      <h2 class="reports-sect">当日概览</h2>
+      <div class="sk-grid">
+        <div class="sk-card"><span class="skeleton" style="height:24px;width:60%"></span><span class="skeleton" style="height:12px;width:80%;margin-top:10px"></span></div>
+        <div class="sk-card"><span class="skeleton" style="height:24px;width:50%"></span><span class="skeleton" style="height:12px;width:70%;margin-top:10px"></span></div>
+        <div class="sk-card"><span class="skeleton" style="height:24px;width:55%"></span><span class="skeleton" style="height:12px;width:75%;margin-top:10px"></span></div>
+        <div class="sk-card"><span class="skeleton" style="height:24px;width:45%"></span><span class="skeleton" style="height:12px;width:65%;margin-top:10px"></span></div>
+      </div>
+      <h2 class="reports-sect">来源与分类分布</h2>
+      <div class="reports-bars">
+        <div class="reports-bar-row"><span class="reports-bar-name"><span class="skeleton" style="height:12px;width:80%"></span></span><div class="reports-bar-track"><div class="reports-bar-fill" style="width:100%"></div></div><span class="reports-bar-val">—</span></div>
+        <div class="reports-bar-row"><span class="reports-bar-name"><span class="skeleton" style="height:12px;width:70%"></span></span><div class="reports-bar-track"><div class="reports-bar-fill" style="width:72%"></div></div><span class="reports-bar-val">—</span></div>
+        <div class="reports-bar-row"><span class="reports-bar-name"><span class="skeleton" style="height:12px;width:60%"></span></span><div class="reports-bar-track"><div class="reports-bar-fill" style="width:48%"></div></div><span class="reports-bar-val">—</span></div>
+      </div>
+      <p class="reports-loading">正在加载当日新增文献…</p>
+    </div>
+
+    <p class="mock-note">
+      <b>说明：</b>「当日新增」为研究速览第三个标签页，与「一周速览 / 月度趋势」共用头部、标签、信息条、分区标题、三字段速评卡与空状态组件。
+      统计与清单部分<b>实时查询数据库</b>（无 AI 依赖，页面打开即有数）；「当日分析摘要」与「重点关注」为 <b>AI 生成内容</b>，
+      由每日 06:30 定时作业产出并入库，未生成时该两块整段隐藏（只保留统计与清单），不出现空白骨架。
+      空状态与失败态均给出明确出路（查看昨日 / 切回一周速览 / 重新加载）。
+    </p>
+  </section>
+</div>
+
+<script>
+document.getElementById('sw').addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-go]');
+  if (!button) return;
+  document.querySelectorAll('#sw button').forEach((item) => item.classList.toggle('on', item === button));
+  document.querySelectorAll('[data-state]').forEach((panel) => panel.classList.toggle('on', panel.dataset.state === button.dataset.go));
+});
+</script>
+</body>
+</html>

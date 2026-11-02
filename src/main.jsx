@@ -402,12 +402,14 @@ function App() {
     if (!account.authenticated) {
       notify("游客模式只能浏览，请先登录个人账户保存阅读状态。", { type: "info" });
       setActiveView("account");
-      return;
+      return { ok: false, reason: "guest" };
     }
     // 弹窗场景（速览/统计等）文献可能不在主列表：用调用方传入的完整对象兜底
     const article = articles.find((item) => item.id === id) || articleOverride || null;
     const pendingKey = `${id}:read`;
-    if (!article || interactionPendingRef.current.has(pendingKey)) return;
+    if (!article || interactionPendingRef.current.has(pendingKey)) {
+      return { ok: false, reason: article ? "pending" : "missing" };
+    }
 
     interactionPendingRef.current.add(pendingKey);
     const previous = Boolean(article.is_read);
@@ -427,12 +429,14 @@ function App() {
         });
       }
       void refreshStatusOnly();
+      return { ok: true, is_read: Number(confirmed) };
     } catch (error) {
       updateLocalArticleInteraction(id, { is_read: Number(previous) }, {
         unreadCount: previous ? -1 : 1,
         readCount: previous ? 1 : -1
       });
       notify(`阅读状态保存失败：${error.message}`, { type: "error" });
+      return { ok: false, reason: "error", error: error.message };
     } finally {
       interactionPendingRef.current.delete(pendingKey);
     }
@@ -442,12 +446,14 @@ function App() {
     if (!account.authenticated) {
       notify("游客模式不能收藏文献，请先登录个人账户。", { type: "info" });
       setActiveView("account");
-      return;
+      return { ok: false, reason: "guest" };
     }
     // 同 markRead：弹窗场景用完整对象兜底，收藏分组选择框（picker）照常弹出
     const article = articles.find((item) => item.id === id) || articleOverride || null;
     const pendingKey = `${id}:favorite`;
-    if (!article || interactionPendingRef.current.has(pendingKey)) return;
+    if (!article || interactionPendingRef.current.has(pendingKey)) {
+      return { ok: false, reason: article ? "pending" : "missing" };
+    }
 
     interactionPendingRef.current.add(pendingKey);
     const previous = Boolean(article.is_favorite);
@@ -460,7 +466,7 @@ function App() {
       } finally {
         interactionPendingRef.current.delete(pendingKey);
       }
-      return;
+      return { ok: false, reason: "picker" };
     }
     const optimistic = !previous;
     updateLocalArticleInteraction(id, { is_favorite: Number(optimistic) }, {
@@ -476,11 +482,13 @@ function App() {
         });
       }
       void refreshStatusOnly();
+      return { ok: true, is_favorite: Number(confirmed) };
     } catch (error) {
       updateLocalArticleInteraction(id, { is_favorite: Number(previous) }, {
         favoriteCount: previous ? 1 : -1
       });
       notify(`收藏状态保存失败：${error.message}`, { type: "error" });
+      return { ok: false, reason: "error", error: error.message };
     } finally {
       interactionPendingRef.current.delete(pendingKey);
     }

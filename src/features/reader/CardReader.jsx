@@ -220,6 +220,18 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
   const currentId = list[cursor];
   const article = currentId ? articleMap.get(currentId) || null : null;
   const brief = currentId ? briefMap.get(currentId) || null : null;
+  // 全文深度分析（2026-10-16）：随 /api/articles?ids=...&full=1 一同返回的 JSON 字符串。
+  // 解析失败 / 结构不符 / 无数据 → null，速评版退化为原样（历史文献不受影响）。
+  const deepInsight = useMemo(() => {
+    const raw = article?.deep_analysis;
+    if (!raw) return null;
+    try {
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+      return Array.isArray(parsed?.innovations) && parsed.innovations.length ? parsed : null;
+    } catch {
+      return null;
+    }
+  }, [article?.deep_analysis]);
   const total = list.length;
 
   function flashHint(text) {
@@ -247,6 +259,14 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
       applyArticlePatch(id, { is_read: 0 });
     }
   }
+
+  // 读即标记：当前卡片一显示就标记已读（包括打开阅读器后的第一篇）。
+  // 旧逻辑只在向后翻页时标记「目标篇」，第一篇永远不会被标记（2026-10-28 用户反馈）。
+  useEffect(() => {
+    if (!open || !canPersonalize || !readOnFlip || !currentId || !article) return;
+    if (!article.is_read) markReadById(currentId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentId, article?.is_read, readOnFlip, canPersonalize]);
   async function toggleRead() {
     if (!article || !canPersonalize) return;
     const next = article.is_read ? 0 : 1;
@@ -504,14 +524,47 @@ export default function CardReader({ open, onClose, title = "", ids = [], briefs
   let body = null;
   if (article) {
     if (view === "brief") {
-      body = brief ? (
-        <div className="cr-brief">
-          <div className="cr-brief-row"><span className="cr-brief-label">研究对象</span><span className="cr-brief-value">{brief.object || "—"}</span></div>
-          <div className="cr-brief-row"><span className="cr-brief-label">研究方法</span><span className="cr-brief-value">{brief.method || "—"}</span></div>
-          <div className="cr-brief-row"><span className="cr-brief-label">核心结论</span><span className="cr-brief-value">{brief.finding || "—"}</span></div>
-        </div>
-      ) : (
-        <p className="cr-empty-note">该文献本期暂无速评（速评随周报生成）。可按「2」切换到中文摘要版查看完整摘要。</p>
+      body = (
+        <>
+          {brief ? (
+            <div className="cr-brief">
+              <div className="cr-brief-row"><span className="cr-brief-label">研究对象</span><span className="cr-brief-value">{brief.object || "—"}</span></div>
+              <div className="cr-brief-row"><span className="cr-brief-label">研究方法</span><span className="cr-brief-value">{brief.method || "—"}</span></div>
+              <div className="cr-brief-row"><span className="cr-brief-label">核心结论</span><span className="cr-brief-value">{brief.finding || "—"}</span></div>
+            </div>
+          ) : (
+            <p className="cr-empty-note">该文献本期暂无速评（速评随周报生成）。可按「2」切换到中文摘要版查看完整摘要。</p>
+          )}
+
+          {/* 核心创新点（2026-10-16）：deep_analysis 随 full=1 一起返回；
+              无分析数据时不渲染，速评版保持原样。 */}
+          {deepInsight && (
+            <section className="cr-deep" aria-label="核心创新点">
+              <h4 className="cr-deep-title"><span aria-hidden="true">🎯</span> 核心创新点</h4>
+              {article.figure_path && (
+                <figure className="cr-deep-fig">
+                  <img src={`/${String(article.figure_path).replace(/^\/+/, "")}`} alt="原文配图" loading="lazy" />
+                </figure>
+              )}
+              {deepInsight.innovations.map((item, index) => (
+                <div className="cr-deep-inn" key={`${article.id}-d-${index}`}>
+                  <div className="cr-deep-head">
+                    <span className="cr-deep-n">{index + 1}</span>
+                    <span className="cr-deep-t">{item.title}</span>
+                  </div>
+                  {Array.isArray(item.points) && item.points.length > 0 && (
+                    <ul className="cr-deep-points">
+                      {item.points.map((point, i) => (
+                        <li key={i} dangerouslySetInnerHTML={{ __html: point }} />
+                      ))}
+                    </ul>
+                  )}
+                  {item.value && <p className="cr-deep-v">{item.value}</p>}
+                </div>
+              ))}
+            </section>
+          )}
+        </>
       );
     } else if (view === "zh") {
       const keywords = splitKeywords(article.keywords).slice(0, 8);

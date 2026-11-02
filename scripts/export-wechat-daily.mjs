@@ -29,8 +29,8 @@ import { businessToday, shiftBusinessDate } from "../server/date/normalize.js";
 import { DIRECTIONS, isDirectionKey } from "../server/directions.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-// 「核心结论」一句话与写作会话的取材都需要较长的摘要支撑，与周报导出同宽（800 字）。
-const abstractClip = 800;
+// 2026-10-16 用户要求：摘要不做任何截断，AI 读取完整摘要。
+// 依据：本地库摘要中位数 1572 字，此前 800 字截断会丢掉「核心结论」所在的后半段。
 
 function parseArgs(argv) {
   const args = { db: resolve(root, "data/literature.sqlite"), date: "", out: "" };
@@ -125,7 +125,7 @@ function main() {
   try {
     const rows = db.prepare(`
       SELECT a.id, a.title, a.journal, a.doi, a.url, a.research_direction, a.keywords,
-        substr(a.abstract, 1, ${abstractClip + 1}) AS abstract,
+        a.abstract AS abstract,
         zh.title AS translated_title,
         zh.abstract AS translated_abstract,
         ${DISPLAY_DATE_SQL} AS display_date

@@ -366,3 +366,140 @@ test("ai reports v2: paperBriefs apply contract, meta list and detail queries", 
     rmSync(workingDirectory, { recursive: true, force: true });
   }
 });
+
+// 当日新增（PLAN-DAILY-DIGEST.md，2026-10-15）：kind='daily' 全链路——
+// ① CHECK 约束由 ('weekly','monthly') 扩到含 'daily' 的幂等重建迁移（旧数据保留）；
+// ② listAiReports / getAiReportDetail / getLatestReadyReport 接受 daily；
+// ③ 损坏的 stats_json 在 meta 模式与 brief_count 上都不得抛 malformed JSON；
+// ④ apply-report.mjs 的 daily 契约：paperBriefs 全覆盖 + focusIds ≤5 / ⊆ 批次 / 仅 daily 可用。
+test("ai reports daily kind: kind migration, daily read paths and focusIds contract", async () => {
+  const workingDirectory = mkdtempSync(path.join(tmpdir(), "literature-ai-reports-daily-"));
+  const dbUrl = new URL("./db.js", import.meta.url).href;
+  const applyScript = fileURLToPath(new URL("../scripts/apply-report.mjs", import.meta.url));
+  const dbPath = path.join(workingDirectory, "literature.sqlite");
+  const script = `
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const { writeFileSync } = await import("node:fs");
+    const pathModule = await import("node:path");
+    const { DatabaseSync } = await import("node:sqlite");
+    const execFileAsync = promisify(execFile);
+    const applyScript = ${JSON.stringify(applyScript)};
+    const dbPath = ${JSON.stringify(dbPath)};
+    const fail = (code, detail) => { console.error(code, detail || ""); process.exit(typeof code === "number" ? code : 1); };
+
+    // ── 伪造「旧版」表：CHECK 只认 weekly/monthly，且已有一行周报 ─────────────
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec(\`
+      CREATE TABLE ai_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly')),
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        direction TEXT,
+        status TEXT NOT NULL DEFAULT 'ready',
+        content_md TEXT NOT NULL,
+        stats_json TEXT,
+        generated_at TEXT,
+        generator TEXT NOT NULL DEFAULT 'workbuddy-agent',
+        UNIQUE(kind, period_start, direction)
+      );
+      INSERT INTO ai_reports (kind, period_start, period_end, status, content_md, stats_json, generated_at)
+        VALUES ('weekly','2026-10-06','2026-10-12','ready','# 旧周报','{"total":1,"directionCounts":{"storage":1},"directionDelta":{}}',datetime('now'));
+    \`);
+    legacy.close();
+
+    // ── ① 迁移：约束含 daily、旧行保留 ────────────────────────────────────────
+    const { listAiReports, getAiReportDetail, getLatestReadyReport } = await import(${JSON.stringify(dbUrl)});
+    const tableSql = new DatabaseSync(dbPath, { readOnly: true })
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ai_reports'").get().sql;
+    if (!tableSql.includes("'daily'")) fail(10, "kind migration must widen CHECK to daily");
+    if (listAiReports({ kind: "weekly", limit: 10 }).length !== 1) fail(11, "legacy weekly row must survive migration");
+
+    // ── ② daily 写入 → 三个读接口都能取到；坏 JSON 行不得抛错 ────────────────
+    const writer = new DatabaseSync(dbPath);
+    writer.prepare(\`INSERT INTO ai_reports (kind, period_start, period_end, direction, status, content_md, stats_json, generated_at)
+      VALUES ('daily','2026-10-15','2026-10-15',NULL,'ready','# 当日新增','{"total":2,"paperBriefs":[],"focusIds":[]}',datetime('now'))\`).run();
+    writer.prepare(\`INSERT INTO ai_reports (kind, period_start, period_end, direction, status, content_md, stats_json, generated_at)
+      VALUES ('daily','2026-10-14','2026-10-14',NULL,'ready','# 坏 JSON','not-json{',datetime('now'))\`).run();
+    writer.close();
+
+    const daily = listAiReports({ kind: "daily", limit: 10 });
+    if (daily.length !== 2) fail(12, "daily list rows, got " + daily.length);
+    if (daily.find((row) => row.period_start === "2026-10-14").stats !== null) fail(13, "bad stats_json degrades to null");
+    const dailyMeta = listAiReports({ kind: "daily", limit: 10, meta: true });
+    if (dailyMeta.length !== 2) fail(14, "meta list must tolerate bad stats_json");
+    if (dailyMeta.some((row) => row.content_md !== null)) fail(15, "meta list strips content_md");
+    if (!dailyMeta.every((row) => Number.isInteger(row.briefCount))) fail(16, "briefCount must be an integer even for bad JSON");
+    const dailyDetail = getAiReportDetail({ kind: "daily", periodStart: "2026-10-15" });
+    if (!dailyDetail || dailyDetail.kind !== "daily" || dailyDetail.direction !== null) fail(17, "daily detail");
+    const latestDaily = getLatestReadyReport("daily");
+    if (!latestDaily || latestDaily.period_start !== "2026-10-15") fail(18, "latest daily");
+    if (listAiReports({ kind: "bogus" }).length !== 0) fail(19, "unknown kind still empty");
+
+    // ── ③ apply-report.mjs：daily 契约 ────────────────────────────────────────
+    const runApply = async (batchFile, payload) => {
+      const resultFile = pathModule.join(process.env.LITERATURE_DATA_DIR, "result-" + Math.random().toString(36).slice(2) + ".json");
+      writeFileSync(resultFile, JSON.stringify(payload), "utf8");
+      try {
+        const { stdout } = await execFileAsync(process.execPath, [applyScript, "--export", batchFile, "--file", resultFile, "--db", dbPath], { encoding: "utf8" });
+        return { status: 0, body: JSON.parse(stdout) };
+      } catch (error) {
+        return { status: Number.isInteger(error.code) ? error.code : 1, body: error.stdout ? JSON.parse(error.stdout) : null };
+      }
+    };
+    const dayBatch = {
+      exportedAt: "2026-10-15T06:30:00.000Z", kind: "daily",
+      periodStart: "2026-10-16", periodEnd: "2026-10-16", direction: null,
+      stats: { total: 2, directionCounts: { storage: 1, market: 1 }, previous: { total: 0, directionCounts: {} } },
+      articles: [
+        { id: 901, title: "Paper A", direction: "storage", journal: "J A", doi: "", displayDate: "2026-10-16", keywords: "", abstract: "A." },
+        { id: 902, title: "Paper B", direction: "market", journal: "J B", doi: "", displayDate: "2026-10-16", keywords: "", abstract: "B." }
+      ]
+    };
+    const dayBatchFile = pathModule.join(process.env.LITERATURE_DATA_DIR, "batch-daily-2026-10-16.json");
+    writeFileSync(dayBatchFile, JSON.stringify(dayBatch), "utf8");
+    const dayHead = { exportedAt: dayBatch.exportedAt, kind: "daily", periodStart: dayBatch.periodStart, periodEnd: dayBatch.periodEnd, direction: null };
+    const dayBriefs = [
+      { id: 901, object: "对象A", method: "方法A", finding: "结论A" },
+      { id: 902, object: "对象B", method: "方法B", finding: "结论B" }
+    ];
+    // ④ 合规：全覆盖 briefs + focusIds → 通过，focusCount 落库
+    const dayOk = await runApply(dayBatchFile, { ...dayHead, contentMd: "# 当日新增\\n正文", focusIds: [901], topTopics: ["主题"], paperBriefs: dayBriefs });
+    if (dayOk.status !== 0 || dayOk.body.focusCount !== 1 || dayOk.body.briefCount !== 2) fail(30, JSON.stringify(dayOk.body));
+    const stored = listAiReports({ kind: "daily", limit: 50 }).find((row) => row.period_start === "2026-10-16");
+    if (!stored || !Array.isArray(stored.stats.focusIds) || stored.stats.focusIds[0] !== 901) fail(31, "focusIds persisted into stats");
+    // ⑤ 缺 paperBriefs → 拒收（daily 与方向专报同门槛）
+    const dayNoBriefs = await runApply(dayBatchFile, { ...dayHead, contentMd: "# 当日新增", focusIds: [], topTopics: [] });
+    if (dayNoBriefs.status !== 1 || !JSON.stringify(dayNoBriefs.body?.errors || []).includes("required for daily reports")) fail(32, JSON.stringify(dayNoBriefs.body));
+    // ⑥ 覆盖不全（缺 902）→ 拒收
+    const dayPartial = await runApply(dayBatchFile, { ...dayHead, contentMd: "# 当日新增", focusIds: [], topTopics: [], paperBriefs: [dayBriefs[0]] });
+    if (dayPartial.status !== 1 || !JSON.stringify(dayPartial.body?.errors || []).includes("must cover every article")) fail(33, JSON.stringify(dayPartial.body));
+    // ⑦ focusIds 超 5 条 → 拒收
+    const dayTooMany = await runApply(dayBatchFile, { ...dayHead, contentMd: "# 当日新增", focusIds: [1, 2, 3, 4, 5, 6], topTopics: [], paperBriefs: dayBriefs });
+    if (dayTooMany.status !== 1 || !JSON.stringify(dayTooMany.body?.errors || []).includes("focusIds exceeds")) fail(34, JSON.stringify(dayTooMany.body));
+    // ⑧ focusIds 越界（幻觉 id）→ 拒收
+    const dayHallucinated = await runApply(dayBatchFile, { ...dayHead, contentMd: "# 当日新增", focusIds: [999], topTopics: [], paperBriefs: dayBriefs });
+    if (dayHallucinated.status !== 1 || !JSON.stringify(dayHallucinated.body?.errors || []).includes("not in export batch")) fail(35, JSON.stringify(dayHallucinated.body));
+    // ⑨ 周报带 focusIds → 拒收（该字段仅 daily 有意义）
+    const weeklyBatch = { ...dayBatch, kind: "weekly", periodStart: "2026-10-10", periodEnd: "2026-10-16", exportedAt: "2026-10-15T07:00:00.000Z" };
+    const weeklyFile = pathModule.join(process.env.LITERATURE_DATA_DIR, "batch-weekly-focus.json");
+    writeFileSync(weeklyFile, JSON.stringify(weeklyBatch), "utf8");
+    const weeklyFocus = await runApply(weeklyFile, { exportedAt: weeklyBatch.exportedAt, kind: "weekly", periodStart: weeklyBatch.periodStart, periodEnd: weeklyBatch.periodEnd, direction: null, contentMd: "# 周报", focusIds: [901], topTopics: [] });
+    if (weeklyFocus.status !== 1 || !JSON.stringify(weeklyFocus.body?.errors || []).includes("only meaningful for kind=daily")) fail(36, JSON.stringify(weeklyFocus.body));
+    // ⑩ 幂等重跑：同期覆盖，不产生重复行
+    const dayRerun = await runApply(dayBatchFile, { ...dayHead, contentMd: "# 当日新增 v2", focusIds: [902, 901], topTopics: [], paperBriefs: dayBriefs });
+    const dailyRows = new DatabaseSync(dbPath, { readOnly: true })
+      .prepare("SELECT COUNT(*) AS n FROM ai_reports WHERE kind = 'daily' AND period_start = '2026-10-16'").get().n;
+    if (dayRerun.status !== 0 || dailyRows !== 1) fail(37, "rerun must overwrite, rows=" + dailyRows);
+  `;
+  try {
+    const result = await runNodeScript(script, {
+      cwd: workingDirectory,
+      env: { ...process.env, LITERATURE_DATA_DIR: workingDirectory }
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+  } finally {
+    rmSync(workingDirectory, { recursive: true, force: true });
+  }
+});

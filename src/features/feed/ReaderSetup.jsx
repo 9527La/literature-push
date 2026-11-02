@@ -177,13 +177,44 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
     setError("");
     try {
       if (mode === "period") {
-        if (!periodStart || !direction) throw new Error("请先选择期次与方向");
-        const matchesCurrent = reportDetail && reportDetail.period_start === periodStart && reportDetail.direction === direction;
-        const detailReport = matchesCurrent
-          ? reportDetail
-          : (await api.get(`/api/reports/detail?kind=${kind}&period_start=${periodStart}&direction=${direction}`)).report;
-        const briefs = detailReport?.stats?.paperBriefs || [];
-        if (!briefs.length) throw new Error("该方向本期没有可阅读的速评文献");
+        // 2026-10-26 用户需求：研究方向改为**可选**——不选任何一个方向＝全选该期次所有文章。
+        // 因此这里只强制要求期次；方向为空时改走「多方向合并」路径（后端 /api/reports/detail
+        // 支持 directions=a,b,c，返回各方向报告数组）。
+        if (!periodStart) throw new Error("请先选择期次");
+
+        let detailReport = null;
+        let briefs = [];
+        let titlePrefix = "";
+
+        if (direction) {
+          const matchesCurrent = reportDetail && reportDetail.period_start === periodStart && reportDetail.direction === direction;
+          detailReport = matchesCurrent
+            ? reportDetail
+            : (await api.get(`/api/reports/detail?kind=${kind}&period_start=${periodStart}&direction=${direction}`)).report;
+          briefs = detailReport?.stats?.paperBriefs || [];
+          if (!briefs.length) throw new Error("该方向本期没有可阅读的速评文献");
+          titlePrefix = directionLabel(direction);
+        } else {
+          // 全选：聚合该期次所有有速评的方向，按 id 去重（同一篇可能被多个方向收录）
+          const dirs = directionOptions
+            .filter((option) => option.briefCount === null || option.briefCount > 0)
+            .map((option) => option.key);
+          if (!dirs.length) throw new Error("该期次没有可阅读的速评文献");
+          const { reports } = await api.get(
+            `/api/reports/detail?kind=${kind}&period_start=${periodStart}&directions=${dirs.join(",")}`
+          );
+          const seen = new Set();
+          for (const report of reports || []) {
+            for (const brief of report?.stats?.paperBriefs || []) {
+              if (!brief?.id || seen.has(brief.id)) continue;
+              seen.add(brief.id);
+              briefs.push(brief);
+            }
+          }
+          if (!briefs.length) throw new Error("该期次没有可阅读的速评文献");
+          titlePrefix = "全部方向";
+        }
+
         let ids = briefs.map((brief) => brief.id);
         let briefsForSession = briefs;
         let topicLabel = "";
@@ -202,7 +233,7 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
         const articles = await fetchArticlesByIds(ids);
         if (!articles.length) throw new Error("文献元数据加载失败，请重试");
         const periodLabel = kind === "weekly" ? "周报" : "月报";
-        setCatalog({ title: `${directionLabel(direction)}${topicLabel} · ${periodLabel} ${periodStart}`, articles, briefs: briefsForSession });
+        setCatalog({ title: `${titlePrefix}${topicLabel} · ${periodLabel} ${periodStart}`, articles, briefs: briefsForSession });
       } else {
         // 无上限：翻页拉全（服务端单页上限 500，安全封顶 20000 篇）
         const effectiveLimit = limit === "all" ? Infinity : clampLimit(limit);
@@ -226,7 +257,20 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
           offset += batch.length;
         }
         if (!articles.length) throw new Error("当前条件下没有匹配的文献");
-        setCatalog({ title: `自定义范围 · ${articles.length} 篇`, articles, briefs: [] });
+        // 自定义范围的文章来自 /api/articles，不携带报告上下文，
+        // 需按文章 ID 反查速评（2026-10-16 修：此前 briefs 恒为空数组，
+        // 导致从文献库进入卡片阅读时速评版永远显示「本期暂无速评」）。
+        let briefs = [];
+        try {
+          const ids = articles.map((article) => article.id).filter(Boolean).slice(0, 500);
+          if (ids.length) {
+            const briefData = await api.get(`/api/briefs?ids=${ids.join(",")}`);
+            briefs = Array.isArray(briefData?.briefs) ? briefData.briefs : [];
+          }
+        } catch {
+          briefs = []; // 速评属增强内容，取不到不影响正常阅读
+        }
+        setCatalog({ title: `自定义范围 · ${articles.length} 篇`, articles, briefs });
       }
       setStep("catalog");
     } catch (buildError) {
@@ -360,8 +404,9 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
                       style={{ "--dir-key": directionVar(item.key) }}
                       aria-pressed={direction === item.key}
                       disabled={noBriefs}
-                      title={noBriefs ? `本期「${directionLabel(item.key)}」没有生成速评；卡片阅读按速评阅读，换一个有速评的方向即可` : undefined}
-                      onClick={() => setDirection(item.key)}
+                      title={noBriefs ? `本期「${directionLabel(item.key)}」没有生成速评；卡片阅读按速评阅读，换一个有速评的方向即可` : `点击选中；再点一次取消（取消后＝全选该期全部方向）`}
+                      // 2026-10-26：支持再次点击取消——回到「不选＝全选该期所有文章」的默认态
+                      onClick={() => setDirection(direction === item.key ? "" : item.key)}
                     >
                       <span className="direction-dot" aria-hidden="true" />
                       {directionLabel(item.key)}
@@ -371,6 +416,11 @@ export default function ReaderSetup({ journals = [], onStart, onExit = null }) {
                   );
                 })}
               </div>
+              <p className="reader-field-hint">
+                {direction
+                  ? `已选「${directionLabel(direction)}」；再点一次可取消，取消后＝全选该期全部文献`
+                  : "未选择方向＝全选该期所有文献（当前状态下生成目录即为全量）"}
+              </p>
             </div>
           )}
           {periodStart && direction && (

@@ -887,11 +887,12 @@ button.keyword-tag:hover { color: var(--accent-hover); background: #e7ecfa; bord
 
 /* ═══ 研究速览（PLAN-AI-REPORTS.md M4，DESIGN-MOCKUP-REPORTS-VIEW.html）═══ */
 .reports-view { display: flex; flex-direction: column; gap: 4px; }
-.reports-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
-.reports-head-main { min-width: 0; }
-.reports-head h1 { display: flex; align-items: center; gap: 10px; margin: 0 0 2px; }
+.reports-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
+.reports-head-main { min-width: 0; flex: 1 1 380px; }
+.reports-head h1 { display: flex; align-items: center; gap: 10px; margin: 0 0 4px; }
 .reports-head-badge { display: inline-flex; align-items: center; gap: 4px; background: color-mix(in srgb, var(--accent-primary) 10%, transparent); color: var(--accent-primary); border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
 .reports-head-hint { margin: 0; color: var(--text-tertiary); font-size: 12.5px; }
+.reports-head-controls { display: flex; align-items: center; gap: 12px; flex: none; margin-left: auto; flex-wrap: wrap; }
 .reports-head .reports-tabs { margin: 0; }
 .reports-view .eyebrow { display: inline-flex; align-items: center; gap: 5px; }
 .reports-tabs { display: flex; gap: 8px; margin: 14px 0 18px; }
@@ -3163,3 +3164,321 @@ button.keyword-articles-more:disabled { opacity: .6; cursor: default; }
   border-color: var(--border-color);
 }
 .cr-retry.is-ghost:hover { color: var(--accent-primary); background: var(--surface-raised); }
+
+/* ═══ 研究速览「当日新增」（PLAN-DAILY-DIGEST.md，2026-10-15）═══════════════════
+   本段保持在文件末尾：新类名独立，不与上方 .reports-* 历史层叠区冲突。 */
+
+/* ── 当日概览 KPI 卡 ── */
+.reports-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.reports-kpi { position: relative; border: 1px solid var(--border-color); border-radius: 10px; background: var(--surface); padding: 13px 16px 14px; overflow: hidden; }
+.reports-kpi::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--dir-key, var(--accent-primary)); }
+.reports-kpi-val { display: flex; align-items: baseline; gap: 5px; font-size: 26px; font-weight: 700; color: var(--text-primary); line-height: 1.2; font-variant-numeric: tabular-nums; }
+.reports-kpi-val small { font-size: 12.5px; font-weight: 600; color: var(--text-tertiary); }
+.reports-kpi-label { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; }
+.reports-kpi-sub { font-size: 11.5px; color: var(--text-tertiary); margin-top: 5px; }
+.reports-kpi-sub em { font-style: normal; color: #b04a3a; font-weight: 600; }
+.reports-kpi-sub em.down { color: #2e7d4f; }
+
+
+/* ── 分布条形整行可点（下钻到该方向 / 该期刊的当日文献）── */
+button.reports-bar-row { border: 0; background: transparent; padding: 2px 6px; border-radius: 8px; font-family: inherit; text-align: left; }
+button.reports-bar-row:disabled { cursor: default; }
+button.reports-bar-row.is-clickable { cursor: pointer; transition: background .15s; }
+button.reports-bar-row.is-clickable:hover { background: color-mix(in srgb, var(--accent-primary) 6%, transparent); }
+button.reports-bar-row.is-clickable:hover .reports-bar-name { color: var(--accent-primary); }
+
+/* ── 重点关注角标与理由行 ── */
+
+/* ── 说明行 / 空态与失败态按钮 / 清单 ── */
+.reports-daily-note { display: flex; align-items: center; gap: 7px; margin: 14px 0 0; padding: 9px 14px; font-size: 12.5px; line-height: 1.6; color: var(--text-tertiary); background: var(--surface-subtle); border: 1px dashed var(--border-color); border-radius: 8px; }
+.reports-daily-note svg { flex: none; color: var(--accent-primary); }
+.reports-daily-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border-color); background: var(--surface); color: var(--text-secondary); border-radius: 8px; padding: 7px 18px; font-size: 13px; font-family: inherit; cursor: pointer; transition: border-color .15s, color .15s, background .15s; }
+.reports-daily-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+.reports-daily-btn.primary { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; font-weight: 600; }
+.reports-daily-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+.reports-daily-has-brief { color: var(--accent-primary); border: 1px solid color-mix(in srgb, var(--accent-primary) 30%, var(--border-color)); border-radius: 999px; padding: 0 7px; font-size: 11px; }
+.reports-daily-skeleton .reports-kpi { min-height: 86px; }
+.reports-list { display: flex; flex-direction: column; gap: 8px; }
+.reports-list-foot { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+
+
+/* ── 当日新增：分布 chip 行（方向用 .reports-dir-chip，期刊用 .reports-group-jchip）── */
+.reports-daily-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+button.reports-group-jchip { font-family: inherit; }
+.reports-group-jchip.is-clickable { cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.reports-group-jchip.is-clickable:hover { border-color: var(--tone-ink, var(--accent-primary)); box-shadow: var(--shadow-sm); }
+.reports-daily-chips .reports-group-jchip:disabled { cursor: default; }
+.reports-daily-chips .reports-group-jchip.is-more { --tone-ink: var(--text-tertiary); --tone-soft: transparent; --tone-line: var(--border-color); border-style: dashed; font-weight: 500; }
+.reports-daily-chips .reports-dir-chip.is-more { border-style: dashed; background: transparent; color: var(--text-tertiary); }
+.reports-daily-chips .reports-dir-chip.is-more:disabled { opacity: 1; }
+
+/* ── 当日新增：分布两组标签同时展示（2026-10-16 用户调整，取消「按方向/按期刊」切换）── */
+.reports-daily-dist { display: flex; flex-direction: column; gap: 9px; }
+.reports-daily-dist-row { display: flex; align-items: flex-start; gap: 12px; }
+.reports-daily-dist-label { flex: none; width: 68px; padding-top: 5px; font-size: 12.5px; color: var(--text-tertiary); }
+.reports-daily-dist-empty { display: inline-block; padding-top: 5px; font-size: 12.5px; color: var(--text-tertiary); }
+/* 摘要正文：字号由 13.5 提到 15、行高放宽到 2，读起来更从容（用户反馈「文字需要大一点」） */
+.reports-daily-summary { padding: 16px 20px; }
+.reports-daily-summary .reports-md { margin-top: 0; }
+.reports-daily-summary .reports-md p { font-size: 15px; line-height: 2; color: var(--text-primary); }
+.reports-daily-summary .reports-md p:last-child { margin-bottom: 0; }
+
+/* ══ 研究速览整页字号「大一号」（2026-10-16 用户反馈：字体太小）══
+   集中放在文末统一覆盖，之后要再调只改这一块即可。
+   覆盖范围仅限研究速览相关类（.reports-* / .rgj-* / 速览内的文献行），
+   不影响文献库、资讯汇总、卡片阅读等其它页面。 */
+/* 页头 */
+.reports-head-badge { font-size: 13px; }
+.reports-head-hint { font-size: 13.5px; }
+.reports-tab { font-size: 14.5px; }
+.reports-period-select,
+.reports-period-select select { font-size: 14px; }
+/* 小节标题与说明 */
+.reports-sect { font-size: 16px; }
+.reports-sect-hint { font-size: 13px; }
+/* 正文：摘要卡 / 方向专报 / 月度趋势 */
+.reports-md h4 { font-size: 16px; }
+.reports-md h5 { font-size: 15px; }
+.reports-md p, .reports-md ul { font-size: 15px; }
+.reports-text-card-title { font-size: 15px; }
+.reports-review-text { font-size: 14px; }
+.reports-review-open { font-size: 13px; }
+/* 分布（条形 + 两组标签） */
+.reports-bar-row { font-size: 13.5px; }
+.reports-dir-chip { font-size: 13.5px; }
+.reports-dir-count { font-size: 12px; }
+.reports-group-jchip { font-size: 13.5px; }
+.rgj-count { font-size: 12.5px; }
+.reports-daily-dist-label, .reports-daily-dist-empty { font-size: 13.5px; }
+/* 三字段速评卡 */
+.reports-brief-title { font-size: 15px; }
+.reports-brief-title-en { font-size: 12.5px; }
+.reports-brief-journal { font-size: 13.5px; }
+.reports-brief-date { font-size: 13px; }
+.reports-brief-field { font-size: 13.5px; }
+.reports-brief-field .k { font-size: 13px; }
+.reports-brief-mark { font-size: 12px; }
+.reports-brief-legacy { font-size: 13.5px; }
+.reports-brief-open { font-size: 13px; }
+/* 方向分组 / 主题聚类 */
+.reports-group-name { font-size: 18px; }
+.reports-group-count { font-size: 14px; }
+.reports-group-topic, .reports-group-insight { font-size: 13.5px; }
+.reports-group-hint { font-size: 13px; }
+.reports-group-more, .reports-group-cardread, .reports-cardread-btn { font-size: 13.5px; }
+.reports-cluster-name { font-size: 14px; }
+.reports-cluster-head .reports-cluster-name { font-size: 15px; }
+.reports-cluster-meta { font-size: 13px; }
+.reports-cluster-head .reports-cluster-meta { font-size: 13px; }
+.reports-mini-title { font-size: 14px; }
+.reports-mini-journal, .reports-mini-comment, .reports-mini-sub { font-size: 12.5px; }
+.reports-mini-date { font-size: 12px; }
+.reviews-more, .reports-review-more { font-size: 13.5px; }
+/* 报告信息条 / 来源期刊筛选 */
+.reports-meta { font-size: 14px; }
+.reports-meta-direction { font-size: 13px; }
+.reports-meta-journals { font-size: 13.5px; }
+.reports-journal-chip { font-size: 13.5px; }
+.reports-journal-mark { font-size: 11.5px; }
+.reports-journal-count { font-size: 12px; }
+.reports-meta-journals-status, .reports-journal-reset { font-size: 13px; }
+.reports-filter-hint { font-size: 13.5px; }
+/* 速览内的文献清单行 */
+.journal-article-title { font-size: 14.5px; }
+.journal-article-meta { font-size: 13px; }
+.journal-article-journal { font-size: 12.5px; }
+/* 其它零散文字 */
+.reports-loading { font-size: 14px; }
+.reports-daily-note { font-size: 13.5px; }
+.reports-daily-btn { font-size: 14px; }
+.reports-insight-name { font-size: 14.5px; }
+.reports-insight-meta { font-size: 12.5px; }
+.reports-insight-text { font-size: 13.5px; }
+.reports-cluster-toolbar-hint { font-size: 13px; }
+.reports-cluster-toolbar .link-button { font-size: 13.5px; }
+.reports-dir-manage-toggle, .reports-dir-manage-label, .reports-dir-restore,
+.reports-dir-manage-empty, .reports-dir-reset { font-size: 13.5px; }
+.reports-dir-manage-head strong { font-size: 14.5px; }
+.reports-dir-manage-head span { font-size: 13px; }
+.reports-delta { font-size: 13px; }
+
+/* ══ 研究速览整页字号「大一号」（2026-10-16 用户反馈：字体太小）══
+   集中放在文末统一覆盖，之后要再调只改这一块即可。
+   覆盖范围仅限研究速览相关类（.reports-* / .rgj-* / 速览内的文献行），
+   不影响文献库、资讯汇总、卡片阅读等其它页面。 */
+/* 页头 */
+.reports-head-badge { font-size: 13px; }
+.reports-head-hint { font-size: 13.5px; }
+.reports-tab { font-size: 14.5px; }
+.reports-period-select,
+.reports-period-select select { font-size: 14px; }
+/* 小节标题与说明 */
+.reports-sect { font-size: 16px; }
+.reports-sect-hint { font-size: 13px; }
+/* 正文：摘要卡 / 方向专报 / 月度趋势 */
+.reports-md h4 { font-size: 16px; }
+.reports-md h5 { font-size: 15px; }
+.reports-md p, .reports-md ul { font-size: 15px; }
+.reports-text-card-title { font-size: 15px; }
+.reports-review-text { font-size: 14px; }
+.reports-review-open { font-size: 13px; }
+/* 分布（条形 + 两组标签） */
+.reports-bar-row { font-size: 13.5px; }
+.reports-dir-chip { font-size: 13.5px; }
+.reports-dir-count { font-size: 12px; }
+.reports-group-jchip { font-size: 13.5px; }
+.rgj-count { font-size: 12.5px; }
+.reports-daily-dist-label, .reports-daily-dist-empty { font-size: 13.5px; }
+/* 三字段速评卡 */
+.reports-brief-title { font-size: 15px; }
+.reports-brief-title-en { font-size: 12.5px; }
+.reports-brief-journal { font-size: 13.5px; }
+.reports-brief-date { font-size: 13px; }
+.reports-brief-field { font-size: 13.5px; }
+.reports-brief-field .k { font-size: 13px; }
+.reports-brief-mark { font-size: 12px; }
+.reports-brief-legacy { font-size: 13.5px; }
+.reports-brief-open { font-size: 13px; }
+/* 方向分组 / 主题聚类 */
+.reports-group-name { font-size: 18px; }
+.reports-group-count { font-size: 14px; }
+.reports-group-topic, .reports-group-insight { font-size: 13.5px; }
+.reports-group-hint { font-size: 13px; }
+.reports-group-more, .reports-group-cardread, .reports-cardread-btn { font-size: 13.5px; }
+.reports-cluster-name { font-size: 14px; }
+.reports-cluster-head .reports-cluster-name { font-size: 15px; }
+.reports-cluster-meta { font-size: 13px; }
+.reports-cluster-head .reports-cluster-meta { font-size: 13px; }
+.reports-mini-title { font-size: 14px; }
+.reports-mini-journal, .reports-mini-comment, .reports-mini-sub { font-size: 12.5px; }
+.reports-mini-date { font-size: 12px; }
+.reviews-more, .reports-review-more { font-size: 13.5px; }
+/* 报告信息条 / 来源期刊筛选 */
+.reports-meta { font-size: 14px; }
+.reports-meta-direction { font-size: 13px; }
+.reports-meta-journals { font-size: 13.5px; }
+.reports-journal-chip { font-size: 13.5px; }
+.reports-journal-mark { font-size: 11.5px; }
+.reports-journal-count { font-size: 12px; }
+.reports-meta-journals-status, .reports-journal-reset { font-size: 13px; }
+.reports-filter-hint { font-size: 13.5px; }
+/* 速览内的文献清单行 */
+.journal-article-title { font-size: 14.5px; }
+.journal-article-meta { font-size: 13px; }
+.journal-article-journal { font-size: 12.5px; }
+/* 其它零散文字 */
+.reports-loading { font-size: 14px; }
+.reports-daily-note { font-size: 13.5px; }
+.reports-daily-btn { font-size: 14px; }
+.reports-insight-name { font-size: 14.5px; }
+.reports-insight-meta { font-size: 12.5px; }
+.reports-insight-text { font-size: 13.5px; }
+.reports-cluster-toolbar-hint { font-size: 13px; }
+.reports-cluster-toolbar .link-button { font-size: 13.5px; }
+.reports-dir-manage-toggle, .reports-dir-manage-label, .reports-dir-restore,
+.reports-dir-manage-empty, .reports-dir-reset { font-size: 13.5px; }
+.reports-dir-manage-head strong { font-size: 14.5px; }
+.reports-dir-manage-head span { font-size: 13px; }
+.reports-delta { font-size: 13px; }
+
+
+/* ══ 核心创新点（文献详情弹窗，2026-10-16）═════════════════════════════════
+   AI 基于 PDF 全文生成，可选附「原文摘要图 / 技术路线图」（从 PDF 提取）。
+   无分析数据的文献整块不渲染，历史文献与数据齐全的文献共用同一套布局。 */
+.deep-analysis { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.deep-analysis h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 14px;
+  font-size: 15px; font-weight: 700; color: var(--ink); }
+.deep-icon { font-size: 15px; line-height: 1; }
+
+.deep-figure { margin: 0 0 14px; padding: 10px; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 12px; }
+.deep-figure img { width: 100%; display: block; border-radius: 7px; }
+.deep-figure figcaption { margin-top: 8px; font-size: 12px; color: var(--ink-3); text-align: center; }
+
+.deep-inn { position: relative; margin-bottom: 12px; padding: 13px 15px 13px 18px;
+  background: var(--tone-soft, #eef2fd); border: 1px solid var(--tone-line, #c9d5f7);
+  border-radius: 12px; }
+.deep-inn:last-child { margin-bottom: 0; }
+.deep-inn::before { content: ""; position: absolute; left: 0; top: 13px; bottom: 13px;
+  width: 3px; border-radius: 0 3px 3px 0; background: var(--tone, #3157d5); }
+.deep-inn-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 7px; }
+.deep-inn-n { flex: none; width: 21px; height: 21px; border-radius: 7px;
+  background: var(--tone, #3157d5); color: #fff; font-size: 12px; font-weight: 700;
+  display: grid; place-items: center; line-height: 1; transform: translateY(1px); }
+.deep-inn-title { font-size: 14.5px; font-weight: 700; line-height: 1.5; color: var(--ink); }
+.deep-inn-points { margin: 0; padding-left: 17px; }
+.deep-inn-points li { margin: 4px 0; font-size: 13.5px; line-height: 1.75; color: var(--ink-2); }
+.deep-inn-value { margin: 8px 0 0; padding: 6px 11px; font-size: 12.5px; line-height: 1.6;
+  color: var(--tone, #3157d5); background: #fff; border: 1px solid var(--tone-line, #c9d5f7);
+  border-radius: 8px; }
+
+
+/* ══ 卡片阅读器 · 核心创新点（速评版下方，2026-10-16）══════════════════════
+   数据随 /api/articles?ids=...&full=1 返回；无分析数据的文献不渲染。 */
+.cr-deep { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.cr-deep-title { display: flex; align-items: center; gap: 7px; margin: 0 0 13px;
+  font-size: 15px; font-weight: 700; color: var(--ink); }
+.cr-deep-fig { margin: 0 0 13px; padding: 9px; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 11px; }
+.cr-deep-fig img { width: 100%; display: block; border-radius: 6px; }
+.cr-deep-inn { position: relative; margin-bottom: 11px; padding: 12px 14px 12px 17px;
+  background: var(--tone-soft, #eef2fd); border: 1px solid var(--tone-line, #c9d5f7);
+  border-radius: 11px; }
+.cr-deep-inn:last-child { margin-bottom: 0; }
+.cr-deep-inn::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px;
+  width: 3px; border-radius: 0 3px 3px 0; background: var(--tone, #3157d5); }
+.cr-deep-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.cr-deep-n { flex: none; width: 20px; height: 20px; border-radius: 7px;
+  background: var(--tone, #3157d5); color: #fff; font-size: 11.5px; font-weight: 700;
+  display: grid; place-items: center; line-height: 1; transform: translateY(1px); }
+.cr-deep-t { font-size: 14px; font-weight: 700; line-height: 1.5; color: var(--ink); }
+.cr-deep-points { margin: 0; padding-left: 16px; }
+.cr-deep-points li { margin: 3px 0; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.cr-deep-v { margin: 7px 0 0; padding: 6px 10px; font-size: 12px; line-height: 1.55;
+  color: var(--tone, #3157d5); background: #fff; border: 1px solid var(--tone-line, #c9d5f7);
+  border-radius: 8px; }
+
+
+/* ══ 卡片阅读器 · 核心创新点（速评版下方，2026-10-16）══════════════════════
+   数据随 /api/articles?ids=...&full=1 返回；无分析数据的文献不渲染。 */
+.cr-deep { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.cr-deep-title { display: flex; align-items: center; gap: 7px; margin: 0 0 13px;
+  font-size: 15px; font-weight: 700; color: var(--ink); }
+.cr-deep-fig { margin: 0 0 13px; padding: 9px; background: var(--bg);
+  border: 1px solid var(--line); border-radius: 11px; }
+.cr-deep-fig img { width: 100%; display: block; border-radius: 6px; }
+.cr-deep-inn { position: relative; margin-bottom: 11px; padding: 12px 14px 12px 17px;
+  background: var(--tone-soft, #eef2fd); border: 1px solid var(--tone-line, #c9d5f7);
+  border-radius: 11px; }
+.cr-deep-inn:last-child { margin-bottom: 0; }
+.cr-deep-inn::before { content: ""; position: absolute; left: 0; top: 12px; bottom: 12px;
+  width: 3px; border-radius: 0 3px 3px 0; background: var(--tone, #3157d5); }
+.cr-deep-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.cr-deep-n { flex: none; width: 20px; height: 20px; border-radius: 7px;
+  background: var(--tone, #3157d5); color: #fff; font-size: 11.5px; font-weight: 700;
+  display: grid; place-items: center; line-height: 1; transform: translateY(1px); }
+.cr-deep-t { font-size: 14px; font-weight: 700; line-height: 1.5; color: var(--ink); }
+.cr-deep-points { margin: 0; padding-left: 16px; }
+.cr-deep-points li { margin: 3px 0; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.cr-deep-v { margin: 7px 0 0; padding: 6px 10px; font-size: 12px; line-height: 1.55;
+  color: var(--tone, #3157d5); background: #fff; border: 1px solid var(--tone-line, #c9d5f7);
+  border-radius: 8px; }
+
+
+/* 卡片阅读 · 研究方向提示（2026-10-26）：不选方向＝全选该期全部文献 */
+.reader-field-hint { margin: 8px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); }
+
+
+/* 卡片阅读 · 研究方向提示（2026-10-26）：不选方向＝全选该期全部文献 */
+.reader-field-hint { margin: 8px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-3); }
+
+/* 研究速览 ·「当日新增」列表头（2026-10-28）：卡片阅读入口固定在标题右侧，
+   长列表不用滚到底部才能点。 */
+.reports-daily-list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 22px 0 10px; }
+.reports-daily-list-head .reports-sect { flex: 1 1 420px; margin: 0; }
+.reports-daily-cardread { flex: none; }
+
+/* 研究速览 · 周报/月报页头「卡片阅读 · 本期全部」入口（2026-10-28）：
+   放在页头控件最前，实底主题色，总览态也能一键读完整期。 */
+.reports-period-reader { flex: none; padding: 7px 16px; font-size: 13px; background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; }
+.reports-period-reader:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }

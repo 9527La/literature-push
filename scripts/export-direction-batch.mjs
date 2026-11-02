@@ -31,7 +31,9 @@ function parseArgs(argv) {
   return args;
 }
 
-const abstractClip = 600;
+// 2026-10-16 用户要求：摘要不做任何截断，AI 读取完整摘要。
+// 依据：本地库摘要中位数 1572 字，此前 600 字截断会丢掉「核心结论」所在的后半段。
+// 若将来需要恢复截断，只在此处加常量并同步下方 map 即可。
 
 function main() {
   const args = parseArgs(process.argv);
@@ -50,7 +52,7 @@ function main() {
       id: row.id,
       title: row.title || "",
       keywords: row.keywords || "",
-      abstract: (row.abstract || "").slice(0, abstractClip)
+      abstract: row.abstract || ""
     }));
 
     const payload = { exportedAt: new Date().toISOString(), remaining, count: articles.length, articles };

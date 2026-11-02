@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { BookOpenCheck, CalendarRange, Check, ChevronDown, GripVertical, Plus, RotateCcw, Settings2, Sparkles, Star, X } from "lucide-react";
 import CardReader from "../reader/CardReader.jsx";
 import { api } from "../../lib/api.js";
 import { DIRECTIONS, directionLabel, directionVar } from "../../lib/directions.js";
 import { journalAbbr, journalGroup } from "../../lib/journal.js";
 import { hiddenIdsForJournals, journalEntriesFromIds } from "../../lib/report-journals.js";
+import { recentDates, weekdayLabel } from "../../lib/report-dates.js";
 import { parseReportContent } from "../../lib/report-content.js";
 import { renderInlineMarkdown, renderMarkdown } from "../../lib/markdown.jsx";
 import { formatRelativeDate } from "../../lib/format.js";
@@ -13,8 +14,11 @@ import Modal from "../../components/Modal.jsx";
 import EmptyState from "../../components/EmptyState.jsx";
 import useAsync from "../../hooks/useAsync.js";
 import useCollapsedGroups from "../../hooks/useCollapsedGroups.js";
+import BriefCard from "./BriefCard.jsx";
+import DailyDigestPanel from "./DailyDigestPanel.jsx";
 
 const KINDS = [
+  { key: "daily", label: "当日新增" },
   { key: "weekly", label: "一周速览" },
   { key: "monthly", label: "月度趋势" }
 ];
@@ -77,78 +81,8 @@ function linkifyJournals(markdown, journalNames) {
 // 「卡片阅读」的专题选择与速览页共用解析口径，抽公共模块避免主包静态
 // 引用本文件而破坏速览路由的懒加载（Vite chunk 警告 + 首包膨胀）。
 
-/** 三字段速评字段区（研究对象/研究方法/核心结论）。 */
-function BriefFields({ brief }) {
-  return (
-    <span className="reports-brief-fields">
-      <span className="reports-brief-field"><span className="k">研究对象</span><span className="v">{brief.object}</span></span>
-      <span className="reports-brief-field"><span className="k">研究方法</span><span className="v">{brief.method}</span></span>
-      <span className="reports-brief-field"><span className="k">核心结论</span><span className="v">{brief.finding}</span></span>
-    </span>
-  );
-}
-
-/**
- * 三字段结构化速评卡（研究速览 v2）。
- * 配色走期刊组色系（tone-ieee/elsevier/cn/other，与信息流卡片一致），
- * 不随研究方向变色；无 brief（旧格式期数）降级为一行速评 + 「旧格式」角标。
- */
-function BriefCard({ id, article, brief, fallbackText, onOpen }) {
-  const tone = article ? journalGroup(article.journal) : "";
-  const hasBrief = Boolean(brief && brief.object && brief.method && brief.finding);
-  const inner = (
-    <>
-      <span className="reports-brief-head">
-        {article ? (
-          <>
-            <span className="reports-brief-mark">{journalAbbr(article.journal) || (article.journal || "").slice(0, 4)}</span>
-            <span className="reports-brief-journal">{article.journal}</span>
-            {article.is_read ? <span className="article-status-badge read-badge"><Check size={11} /> 已读</span> : null}
-            {article.is_favorite ? <span className="article-status-badge fav-badge"><Star size={11} /> 收藏</span> : null}
-            <span className="reports-brief-date">{formatRelativeDate(article.display_date || article.published_at)}</span>
-          </>
-        ) : (
-          <span className="reports-brief-journal">文献 #{id}</span>
-        )}
-      </span>
-      <span className="reports-brief-body">
-        {article && (
-          <>
-            <span className="reports-brief-title">{article.translated_title || article.title}</span>
-            {article.title && article.translated_title && article.title !== article.translated_title && (
-              <span className="reports-brief-title-en">{article.title}</span>
-            )}
-          </>
-        )}
-        {hasBrief ? (
-          <BriefFields brief={brief} />
-        ) : (
-          <span className="reports-brief-legacy">
-            {fallbackText || (article ? "" : `文献 #${id}`)}
-            <span className="reports-legacy-badge">旧格式</span>
-          </span>
-        )}
-      </span>
-      <span className="reports-brief-open" aria-hidden="true">详情 ›</span>
-    </>
-  );
-  const clickable = Boolean(article);
-  const className = `reports-brief-card${tone ? ` tone-${tone}` : ""}`;
-  return clickable ? (
-    <button
-      type="button"
-      className={className}
-      data-article-id={id}
-      onClick={() => onOpen(id)}
-    >
-      {inner}
-    </button>
-  ) : (
-    <div className={`${className} is-fallback`} data-article-id={id}>
-      {inner}
-    </div>
-  );
-}
+// BriefCard（三字段速评卡）已抽至 ./BriefCard.jsx（2026-10-15）：
+// 「当日新增」面板与本视图共用同一张卡，抽独立模块避免反向 import 形成循环依赖。
 
 function DirectionBars({ report }) {
   const bars = directionBars(report.stats);
@@ -393,7 +327,12 @@ function JournalArticlesDialog({ journalName, onClose, onOpenArticle }) {
 }
 
 function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdated, canModerate = false }) {
-  const [kind, setKind] = useState("weekly");
+  // 标签顺序 = 当日新增 / 一周速览 / 月度趋势，首个即默认页（2026-10-15 用户调整）。
+  const [kind, setKind] = useState("daily");
+  // 「当日新增」的日期状态提升到这里：选择器渲染在页头（与标签页同一行），
+  // 数据仍由 DailyDigestPanel 拉取——面板通过 onDateResolved 回报业务今天作为锚点。
+  const [dailyDate, setDailyDate] = useState(null);
+  const [dailyAnchor, setDailyAnchor] = useState("");
   const [lists, setLists] = useState({ weekly: [], monthly: [] });
   const [selectedPeriod, setSelectedPeriod] = useState({ weekly: null, monthly: null });
   const [selectedDirection, setSelectedDirection] = useState({ weekly: null, monthly: null });
@@ -401,6 +340,7 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
   const [loadError, setLoadError] = useState("");
   const [articleMap, setArticleMap] = useState(new Map());
   const [dialogArticle, setDialogArticle] = useState(null);
+  const [statusOverrides, setStatusOverrides] = useState(() => new Map());
   const [loadingArticle, setLoadingArticle] = useState(false);
   const [journalName, setJournalName] = useState(null);
   const [journalNames, setJournalNames] = useState([]);
@@ -442,7 +382,9 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
     return () => { cancelled = true; };
   }, []);
 
-  const kindReports = lists[kind];
+  // daily 标签不走 ai_reports 列表（数据源是 /api/reports/daily），lists 里没有该键——
+  // 必须兜底成空数组，否则 `for (const report of undefined)` 会直接把整页打崩。
+  const kindReports = lists[kind] || [];
   const periods = useMemo(() => {
     const seen = new Map();
     for (const report of kindReports) {
@@ -453,6 +395,13 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
     }
     return [...seen.values()];
   }, [kindReports]);
+
+  // 「当日新增」的近 7 天日期列表：锚点由面板首次成功响应回报（= 服务端业务今天），
+  // 之后不再跟随用户选择移动，否则越切越远。
+  const dailyOptions = useMemo(() => recentDates(dailyAnchor, 7), [dailyAnchor]);
+  const handleDailyResolved = useCallback((resolved) => {
+    setDailyAnchor((previous) => previous || resolved);
+  }, []);
 
   const activePeriod = selectedPeriod[kind] ?? periods[0]?.periodStart ?? null;
   const activePeriodEnd = periods.find((period) => period.periodStart === activePeriod)?.periodEnd || "";
@@ -572,7 +521,10 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
   }, [activeDirection, visibleChips, periodDetails, parsed, articleMap]);
 
   // 当前报告引用的全部文献 id（精选 + 速评 + 聚类 + 分组预览 + 分组全部 briefs，
-  // 后者供总览「来源构成」微条聚合）→ 分批批量取元数据；上限 300 兜底。
+  // 后者供总览「来源构成」微条聚合）→ 分批批量取元数据。
+  // 上限 1200 兜底（2026-11-02）：原 300 在周报 566 briefs（13 方向全量速评）时不够，
+  // 超限方向拿不到元数据，BriefCard 降级为「文献 #id」且不可点；月报全量可达 1182，
+  // 故按月报规模 + 余量取 1200，客户端已按 100/批并行请求（服务端每批上限 100）。
   const refIds = useMemo(() => {
     const ids = new Set(current?.stats?.highlightIds || []);
     for (const review of parsed.reviews) ids.add(review.id);
@@ -581,7 +533,7 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
       for (const item of group.previewItems) ids.add(item.id);
       for (const brief of group.report?.stats?.paperBriefs || []) ids.add(brief.id);
     }
-    return [...ids].filter((id) => Number.isInteger(id) && id > 0).slice(0, 300);
+    return [...ids].filter((id) => Number.isInteger(id) && id > 0).slice(0, 1200);
   }, [current, parsed, groups]);
 
   useEffect(() => {
@@ -623,11 +575,14 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
       briefs
     });
   }
-  function openDirectionReader(report) {
-    const briefs = report?.stats?.paperBriefs || [];
+  function openPeriodReader(report = current) {
+    // 总览态 briefById 已聚合「总览 brief + 各方向专报 brief」，天然去重；
+    // 方向专报态只含该方向。这样顶部按钮在两种视图下都不会漏文献。
+    const briefs = [...briefById.values()];
     if (!briefs.length) return;
+    const scope = report?.direction ? directionLabel(report.direction) : "全方向总览";
     setCardReader({
-      title: `${directionLabel(report.direction)} · ${kind === "weekly" ? "周报" : "月报"} ${report.period_start}`,
+      title: `${scope} · ${kind === "weekly" ? "周报" : "月报"} ${report?.period_start || activePeriod}`,
       ids: briefs.map((brief) => brief.id),
       briefs
     });
@@ -662,6 +617,31 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
       setDialogArticle(article);
     }).catch(() => {}).finally(() => setLoadingArticle(false));
   }
+
+  // 详情弹窗里「标记已读 / 收藏」后，同步更新当前速览页的卡片状态：
+  //   · statusOverrides 给「当日新增」用（它直接持有 digest.articles）
+  //   · articleMap 给周报/月报的方向分组、聚类、速评卡用
+  const handleArticleUpdated = useCallback((updated) => {
+    if (updated?.id) {
+      const status = {
+        is_read: updated.is_read ? 1 : 0,
+        is_favorite: updated.is_favorite ? 1 : 0
+      };
+      setStatusOverrides((previous) => {
+        const next = new Map(previous);
+        next.set(updated.id, status);
+        return next;
+      });
+      setArticleMap((previous) => {
+        const current = previous.get(updated.id);
+        if (!current) return previous;
+        const next = new Map(previous);
+        next.set(updated.id, { ...current, ...status });
+        return next;
+      });
+    }
+    onArticleUpdated?.(updated);
+  }, [onArticleUpdated]);
 
   // 全部折叠/展开：只要有任一组打开就折叠全部，全关时才展开全部（避免手工折叠一组后按钮语义翻转）。
   const anyGroupOpen = groups.some((group) => !collapsedGroups.has(group.key));
@@ -815,8 +795,11 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
         ids={cardReader?.ids || []}
         briefs={cardReader?.briefs || []}
         canPersonalize={canPersonalize}
-        onArticleUpdated={onArticleUpdated}
+        onArticleUpdated={handleArticleUpdated}
       />
+      {/* 页头单行布局（2026-10-16 用户调整）：左侧标题 + 说明两行成块，右侧控件组
+          （期数/日期选择器 + 标签页）垂直居中——避免上一版「选择器在最左、标签在最右」
+          中间留出一大片空白。选择器仍在标签左侧。 */}
       <div className="reports-head">
         <div className="reports-head-main">
           <h1 id="reports-title">
@@ -825,23 +808,84 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
           </h1>
           <p className="reports-head-hint">智能体基于当期入库文献自动生成 · 数字取自数据库统计 · 三字段速评卡/期刊名/主题词均可点击交互</p>
         </div>
-        <div className="reports-tabs" role="tablist">
-          {KINDS.map((item) => (
+        <div className="reports-head-controls">
+          {/* 周报/月报：把「本期全部文献」的卡片阅读入口放到页头最前，
+              总览态也不用来回找各方向分组按钮（2026-10-28 用户反馈）。 */}
+          {kind !== "daily" && briefById.size > 0 && (
             <button
-              key={item.key}
               type="button"
-              role="tab"
-              aria-selected={kind === item.key}
-              className={`reports-tab${kind === item.key ? " on" : ""}`}
-              onClick={() => switchKind(item.key)}
+              className="reports-cardread-btn reports-period-reader"
+              onClick={() => openPeriodReader(current)}
             >
-              {item.label}
+              <BookOpenCheck size={13} aria-hidden="true" />
+              卡片阅读 · {isOverview ? `本期 ${briefById.size} 篇` : `${briefById.size} 篇`}
             </button>
-          ))}
+          )}
+          {kind === "daily" ? (
+            dailyOptions.length > 0 && (
+              <label className="reports-period-select">
+                <CalendarRange size={14} aria-hidden="true" />
+                <select
+                  value={dailyDate || dailyAnchor}
+                  onChange={(event) => setDailyDate(event.target.value)}
+                  aria-label="选择日期"
+                >
+                  {dailyOptions.map((day, index) => (
+                    <option key={day} value={day}>
+                      {day}（{weekdayLabel(day)}{index === 0 ? " · 今天" : ""}）
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={13} aria-hidden="true" />
+              </label>
+            )
+          ) : periods.length > 0 ? (
+            <label className="reports-period-select">
+              <CalendarRange size={14} aria-hidden="true" />
+              <select
+                value={activePeriod || ""}
+                onChange={(event) => setSelectedPeriod((currentValue) => ({ ...currentValue, [kind]: event.target.value }))}
+              >
+                {periods.map((period) => (
+                  <option key={period.periodStart} value={period.periodStart}>
+                    {period.periodStart} ~ {period.periodEnd}（{period.total} 份报告）
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={13} aria-hidden="true" />
+            </label>
+          ) : null}
+          <div className="reports-tabs" role="tablist">
+            {KINDS.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                role="tab"
+                aria-selected={kind === item.key}
+                className={`reports-tab${kind === item.key ? " on" : ""}`}
+                onClick={() => switchKind(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {loading ? (
+      {kind === "daily" ? (
+        // 「当日新增」自带数据源与三态（/api/reports/daily），不依赖周报/月报列表，
+        // 因此放在 loading / loadError 闸门之前——周报接口失败也不该拖垮当日页。
+        <DailyDigestPanel
+          date={dailyDate}
+          onDateChange={setDailyDate}
+          onDateResolved={handleDailyResolved}
+          onOpenArticle={openArticleById}
+          onOpenCardReader={setCardReader}
+          onOpenList={setListDialog}
+          onSwitchToWeekly={() => switchKind("weekly")}
+          statusOverrides={statusOverrides}
+        />
+      ) : loading ? (
         <p className="reports-loading">正在加载研究速览…</p>
       ) : loadError ? (
         <EmptyState icon={CalendarRange} title="研究速览加载失败" description={loadError} />
@@ -855,22 +899,6 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
       ) : (
         <>
           <div className="reports-toolbar">
-            <div className="reports-toolbar-row">
-              <label className="reports-period-select">
-                <CalendarRange size={14} aria-hidden="true" />
-                <select
-                  value={activePeriod || ""}
-                  onChange={(event) => setSelectedPeriod((currentValue) => ({ ...currentValue, [kind]: event.target.value }))}
-                >
-                  {periods.map((period) => (
-                    <option key={period.periodStart} value={period.periodStart}>
-                      {period.periodStart} ~ {period.periodEnd}（{period.total} 份报告）
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={13} aria-hidden="true" />
-              </label>
-            </div>
             <div className="reports-dir-row">
               <div className="reports-dir-chips" role="tablist" aria-label="研究方向切换">
                 <button
@@ -1003,11 +1031,6 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
                 )}
                 {!!current.stats?.unclassified && <span>其中 <strong>{current.stats.unclassified}</strong> 篇待方向标注</span>}
                 <span>生成时间 {String(current.generated_at || "").slice(0, 10)}</span>
-                {!isOverview && (current.stats?.paperBriefs?.length || 0) > 0 && (
-                  <button type="button" className="reports-cardread-btn" onClick={() => openDirectionReader(current)}>
-                    <BookOpenCheck size={13} aria-hidden="true" /> 卡片阅读 · {current.stats.paperBriefs.length} 篇
-                  </button>
-                )}
                 {!isOverview && journalEntries.length > 0 && (
                   <div className="reports-meta-journals" role="group" aria-label="来源期刊筛选">
                     <span className="reports-meta-journals-label">
@@ -1244,7 +1267,7 @@ function ReportsView({ canPersonalize, markRead, toggleFavorite, onArticleUpdate
           close={() => setDialogArticle(null)}
           markRead={markRead}
           toggleFavorite={toggleFavorite}
-          onArticleUpdated={onArticleUpdated}
+          onArticleUpdated={handleArticleUpdated}
           onOpenArticle={setDialogArticle}
           canModerate={canModerate}
         />

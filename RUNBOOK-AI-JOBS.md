@@ -10,7 +10,17 @@ description: 文献推送站（E:\SC\文献推送）全部 AI 批量作业的统
 # 文献推送 · AI 批量作业执行手册（唯一执行依据）
 
 > **本手册是所有文献 AI 作业的唯一执行依据**；执行会话动手前必须完整通读本文。
-> 版本：2026-10-13 v7（下线「本周/本期值得注意」「值得精读」板块：模板删除、highlightIds 降级为保留字段一律填 `[]`；前端同步不再展示）
+> 版本：2026-11-02 v17（§8 新增两行处置：① 总览速评卡降级为「文献 #id」且不可点 = 单期 briefs 总量超过前端元数据拉取上限（2026-11-02 已由 300 修至 1200，src/features/reports/ReportsView.jsx refIds），briefs 逼近 1200 时须同步上调并走部署；② 新入库文献因翻译额度用尽缺中文译名 → 经用户授权以 provider='manual' 手动翻译标题写 translations 表（只动该表、不消耗 API 额度，2026-11-02 已补 17 篇）。教训来源：2026-11-01 期周报 566 briefs 触发上限，输电网等靠后方向卡片全部降级）
+> 上一版：2026-10-29 v16（§8.5.0 标题定版：**自拟钩子 + 固定后缀【日报 YYYY-MM-DD】**；`probe-wechat-html.mjs` M2 与 `publish-wechat-draft.mjs` 均增加日期后缀硬校验。教训来源：v15 只定了自拟规则未定日期后缀，用户按「…【AI 早报 2026-10-29】」样式定版为【日报 日期】）
+> 上一版：2026-10-29 v15（§8.5.0 标题契约落地为硬闸门：`publish-wechat-draft.mjs` 在 daily 期 `issue.title` 缺失时**直接失败**、不再回退模板标题「电研新视界 日报｜日期」；步骤 4.5 自评补第⑥条 title 检查。教训来源：2026-10-29 期执行会话漏读 §8.5.0，草稿以模板标题写入草稿箱，事后删除重发）
+> 上一版：2026-10-28 v14（§8.5 契约澄清：**listing = 报道窗口内新入库文献的全量清单**，briefs = 精选子集——头部「新入库文献 N 篇」与 ④ 区块标题均取自 listing 条目合计，listing 只放精选子集会误显「N 篇=N 篇」。教训来源：2026-10-28 期入库 10 篇、速评 8 篇，头部曾误显 8/8）
+> 上一版：2026-10-24 v13（§8.6 覆盖规则变更：当日**全部**文献必须有核心创新点，全部下载全文逐篇完整阅读，废除「>30 篇只做前 N 篇重点」性能约束；下载失败者降级摘要并在 points 如实标注。教训来源：2026-10-24 当日 146 篇仅做 12 篇重点，用户要求全覆盖）
+> 上一版：2026-10-17 v12（§8.6 新增「步骤 2.6 — 写回核心创新点」：速评与创新点是**两条独立写库路径**——速评进 `ai_reports.paperBriefs`，创新点进 `articles.deep_analysis` + `figure_path`，新增 `scripts/apply-deep-analysis.mjs` 作为创新点的唯一写入口；附录 A 每日提示词同步补该步。教训来源：2026-10-17 首跑只读了全文并写了速评，未产出创新点，站上「核心创新点」区块全空）
+> 上一版：2026-10-16 v11（§8.6 新增「步骤 2.5 — 全文获取」：当日新增文献先用 `webvpn-paper-fetch` skill 下载全文再写分析，不再只依据摘要；附录 A 每日提示词同步加入该步骤。另：全部导出脚本的摘要截断已移除——分类 / 报告 / 公众号日报三处 `abstractClip` 常量删除，AI 读取完整摘要）
+> 上一版：2026-10-16 v10（§8.6 结构与附录 A 提示词：正文只写「当日分析摘要」一节，取消标题下的总述句——篇数/来源/方向已由页内标签承载，复述属重复；前端同步只渲染该小节）
+> 上一版：2026-10-15 v9（§8.6 下线「重点关注」板块：当日文献已按三字段速评卡全量展示，再单列子集只会重复同样的卡；§8.6 结构与附录 A 提示词同步去掉 focusIds / 「## 重点关注」小节，apply 侧保留该字段容错）
+> 上一版：2026-10-15 v8（新增 §8.6 job: daily-digest——研究速览「当日新增」标签页的 AI 日报，并入每日 06:30 作业；ai_reports.kind 白名单扩为 weekly/monthly/daily；§8.5.1 步骤 4.5 与附录 A 提示词补「资讯条目与网页昨日文件逐条对应」自查项）
+> 上一版：2026-10-13 v7（下线「本周/本期值得注意」「值得精读」板块：模板删除、highlightIds 降级为保留字段一律填 `[]`；前端同步不再展示）
 > 上一版：2026-10-08 v6（wechat-daily prompt 增加步骤 ④.5 交稿自评：三段/字数/数字一致/禁夸大措辞，§8.5.1 同步）
 > 上一版：2026-10-01 v4（速评复用 priorBrief：月报/专报逐字复用周报已写速评，只新写未覆盖文献；定时任务提示词对齐全流程）
 > 维护：方向体系增删须同步第 4.2 节与 `server/directions.js` + `src/lib/directions.js`
@@ -46,13 +56,48 @@ description: 文献推送站（E:\SC\文献推送）全部 AI 批量作业的统
 - ❌ 禁止在未通读本文档的情况下开始执行。
 - ❌ 素材文件禁止跳读——必须用 Read 分段（offset/limit）完整读完；大批次（>400 篇）可先用 `compact-report-batch.mjs` 生成压缩视图后通读压缩视图。
 
+**第 2.1 节是写作类 job 的强制步骤，与本节同等效力。**
+
+## 2.1 写作铁律 · 去 AI 味（所有写作类 job 必做）
+
+> 适用范围：凡产出中文正文的 job —— 总览周报、方向专报、月报、站内日报、公众号日报、文献专题栏目、每日资讯。
+> skill 位置（双层扫描，均已安装）：
+> ① `C:\Users\admin\.workbuddy\skills\humanizer-zh` —— 中文语感层（翻译腔、机械对照、标点密度、句式同构），权威规则在其 SKILL.md + references/patterns.md
+> ② `C:\Users\admin\.workbuddy\skills\humanizer` —— 统计痕迹层（同款句式复制、高频重复词、空泛大词、否定式排比、硬凑三连、泛泛收尾），规则在其 SKILL.md
+> （2026-10-29 起替代 qu-ai-wei；qu-ai-wei 保留在 skills 目录但不再被流程引用。）
+
+**执行时机**：成稿写完之后、`apply-*.mjs` 写回或渲染**之前**。两层依次各扫一遍，一轮完成，不反复迭代。
+
+| 步 | 动作 |
+|---|---|
+| 1 | 建**信息账本**：把成稿里的人物、事实、数字、时间、结论、限定词、来源、术语逐项列出 |
+| 2 | 第一层（humanizer-zh）：读其 SKILL.md（深度改写加读 references/patterns.md），扫翻译腔连接词、空泛大词、机械对照句、句式同构、破折号与冒号密度、引号样式（沿用原稿「」或""，全篇不混用） |
+| 3 | 第二层（humanizer）：按其 24 类清单扫，重点：同一素材是否被同款句式写两遍、同一词语是否高频复现（≥3 次须错开）、挂在句尾的浅层分析（「体现了…」「反映出…」）、模糊归因、否定式排比（「不仅…更是…」）、硬凑三连、泛泛正面收尾、抽象抬升词（「这件事」「本质上」「归根结底」） |
+| 4 | 两层命中合并去重后统一改写：允许改句子主干、拆并句、换主语、调段落顺序；不做同义换壳；**不为改而改**——指不出命中模式的改动一律撤销 |
+| 5 | 复扫信息账本：确认事实、数字、日期、归因、证据强度、不确定性均未变；受保护字段（论文标题、期刊、篇数、方向标注、创新点与技术路线等库内逐字内容）不得变动 |
+| 6 | 输出终稿直接替换成稿；改动清单存 `data/ai-tone/<job>-<date>.md` |
+
+**模式选择**：定时任务一律内嵌执行（流程内嵌步骤，直接出终稿）；人工交互场景可要求展示改动对照。
+
+**硬约束（违反即返工）**：
+
+- 事实优先：不改事实、数字、日期、归因、引用绑定、逻辑关系
+- 不编造：不补写因果、经历、例子、观点；不把不确定说成确定；不把相关性升级成因果
+- 不默认摘要：独立事实、限定、例子、反例、评价都要保留，除非明确要求精简
+- 受保护片段：真实引语、代码、公式、法律条款、标准定义、专名、引用标识，默认不动
+- 不为"人味"加错别字、emoji、网语、第一人称、幽默、个人经历
+- 每处改动要能对应到某个命中模式，指不出就撤销
+- 改动没有带来可验证改善时，原样返回并说明无需改写
+
+**汇报**：在 §8 汇报模板末尾加一行 `去 AI 味：改动 N 处，主要模式族 <族名>，打磨要点 data/ai-tone/<file>`。
+
 ## 3. 作业调度
 
 | 触发 | 作业序列 | 说明 |
 |---|---|---|
 | 每周日 23:00 / 「文献 AI 周作业」 | **classify → digest → 逐方向专报** | 专报依赖总览批次与分类完成，顺序不可颠倒 |
 | 每月 1 日 03:00 / 「文献 AI 月作业」 | **report → 逐方向专报** | 覆盖上一个完整自然月；速评优先复用周报（见 §6 复用规则），只新写未覆盖文献 |
-| 每日 06:30 / 「电气前沿速递公众号日报」 | **classify 增量 → wechat-daily** | 独立渠道不写库（§8.5）：classify 使素材带方向，产出 data\wechat-drafts\ 存档，草稿箱自动写入，发布由人工完成 |
+| 每日 06:30 / 「电气前沿速递公众号日报」 | **classify 增量 → daily-digest → wechat-daily** | 站内「当日新增」AI 日报（§8.6，写库）+ 公众号日报（§8.5，独立渠道不写库）；classify 使两份素材都带方向，daily-digest 先落库、wechat-daily 随后复用同一批素材 |
 | 会话说「跑一次方向分类」 | 仅 classify | 手动补跑 |
 
 - 逐方向专报 = **当期所有非零方向**（≥1 篇即做，无门槛），逐个 export → 写结果 → 统一 bulk 写回。
@@ -325,6 +370,8 @@ Set-Location 'E:\\SC\\文献推送'; & .runtime\node\node.exe scripts\apply-repo
 | apply 连续两批 invalid > 0 | 停止写回，保留已写部分，汇报已写入数与问题样本 |
 | `highlightId not in export batch` | 引用了批次外文献——改素材内 id 或删该条 |
 | `exportedAt mismatch` | 头字段与素材不一致——用 list-batch-headers 输出重新对齐 |
+| 总览速评卡显示「文献 #id」且不可点 | 前端元数据拉取上限 < 单期 briefs 总量（2026-11-02 起上限 1200，`src/features/reports/ReportsView.jsx` refIds）。处置：核对当期 briefs 总量，逼近 1200 时上调该 slice 上限并走 Git 部署流程；周作业汇报里附带本期 briefs 总量作为巡检数字 |
+| 新入库文献缺中文译名（翻译额度用尽） | 卡片与推送回退英文原题。兜底（需用户授权，不属越权直改库）：AI 翻译标题后以 `provider='manual'`、`target_language='zh'` upsert 进 translations 表——只动该表、只补缺译、不消耗翻译 API 额度；摘要译文留空待 API 额度恢复后由系统自动补齐。参照 `_tmp/manual-translate-remote.py`（2026-11-02 已补 17 篇） |
 | 会话中途被切断 | 无需补救——全链路幂等，下次自动续 |
 
 **红线重申**：禁直改库、禁外部 API、禁 sc_job_cancel、禁改 .env/服务代码。
@@ -345,6 +392,27 @@ Set-Location 'E:\\SC\\文献推送'; & .runtime\node\node.exe scripts\apply-repo
 > 产物只落 `data\wechat-drafts\`，不触碰 ai_reports / articles；发布由人工完成
 > （个人订阅号无 freepublish 权限，2025-07 微信政策）。
 
+### 8.5.0 标题契约（2026-10-28 起硬性；2026-10-29 v16 定版结构）
+
+**每期标题 = 自拟内容钩子 + 固定日期后缀，写进 issue JSON 的 `title` 字段**，形如
+「南方区域电力市场获准转入正式运行【日报 2026-10-29】」。禁止「电研新视界 日报｜YYYY-MM-DD」这类只差日期的旧模板——平台会判定为低质/营销内容并限流。
+
+| 项 | 要求 |
+|---|---|
+| 结构 | **内容钩子 + 固定后缀【日报 YYYY-MM-DD】**（后缀日期 = issue.date，一字不差） |
+| 长度 | 钩子 12–24 字，总长 ≤64（别顶格） |
+| 取材 | 当天最有传播力的 1–2 条（政策优先于新闻，数字优先于形容词） |
+| 数字 | 用阿拉伯数字，能给对比就给（「破 20 亿千瓦」优于「大幅增长」） |
+| 禁止 | 钩子以日期开头或含「速递 / 第 N 期」字样（【日报 日期】后缀除外）、重磅/突发/首次/速看等标题党词、旧模板「电研新视界 日报｜日期」 |
+| 句式轮换 | **写之前读上一期 `data\wechat-drafts\<昨日>.json` 的 `title`，钩子必须换一种结构**（昨天是「A，B」两段式，今天就用单句或带转折的） |
+| 校验 | `probe-wechat-html.mjs` M2 拦截旧模板、缺【日报 日期】后缀与「正文重复标题」；`publish-wechat-draft.mjs` 在 `title` 缺失或缺日期后缀时**直接失败**（2026-10-29 起不再回退模板） |
+
+示例（同一份真实内容的三种写法，任选其一，但相邻两期钩子不得同构）：
+
+- 光伏 12 项技术拟被列入出口管制【日报 2026-10-29】
+- 出口管制名单里的 12 项光伏技术，意味着什么【日报 2026-10-29】
+- 今天 4 条政策，光伏出口管制最要紧【日报 2026-10-29】
+
 ### 8.5.1 执行步骤
 
 **步骤 0**：`sc_status` 前置检查；不可用 → §8 汇报终止。
@@ -361,7 +429,7 @@ Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\export-wecha
 ```
 
 默认导出北京时间昨日业务日（`--date YYYY-MM-DD` 可显式指定）。空窗口（total=0）
-≠ 失败：清单板块如实写「今日无新入库文献」，继续步骤 2-5（只有导读与资讯的日报合法）。
+≠ 失败：清单板块如实写「今日无新入库文献」，继续步骤 2-5（只有头部卡与资讯的日报合法）。
 
 **步骤 2 — 下载素材**：`sc_download` 远端 `文献推送/data/wechat-daily-batch-<昨日>.json`
 → 本地 `_ai-jobs-work\wechat-daily\batch-<昨日>.json`，Read 分段完整读完（禁止跳读）。
@@ -379,12 +447,16 @@ Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\export-wecha
   来源与数字必须与每日资讯原文一致，不得编造。
 
 **步骤 4 — 写 issue JSON**：Write `data\wechat-drafts\<期号日>.json`（期号日 = 今天，
-报道窗口 = 昨日）。结构契约：`{version, date, digest≤60字, intro, news{policy、general（全量收录，与网页昨日文件逐条对应；渲染器防守上限 policy 10 / general 15）}, briefs 1-8 条, listing[], siteUrl}`；渲染器硬校验，违规清单见步骤 5。
+报道窗口 = 昨日）。结构契约：`{version, date, title, digest≤60字, news{policy、general（全量收录，与网页昨日文件逐条对应；渲染器防守上限 policy 10 / general 15）}, briefs 1-8 条, listing[], siteUrl}`（intro 字段已废弃——头部数量统计与概览由渲染器自动生成）；
+**`title` 必填且每期自拟**（内容钩子 12–24 字 + 固定后缀【日报 YYYY-MM-DD】——抓当天最有传播力的 1–2 条，钩子内禁「速递/第 N 期」与标题党词、禁「电研新视界 日报｜日期」旧模板；写之前先读上一期 JSON 的 title，钩子句式必须与上期不同。规则见 §8.5.0）；
+**listing = 报道窗口内新入库文献的全量清单**（含未入选速评的篇目，按方向分组，每篇 title+journal）——头部「新入库文献 N 篇」与 ④ 区块标题「今日新入库文献（N 篇）」均取自 listing 条目合计，briefs 才是精选子集；listing 误放精选子集会把头部错写成「N 篇=N 篇」（教训 2026-10-28）。渲染器硬校验，违规清单见步骤 5。
 
 **步骤 4.5 — 交稿自评（A1-3，2026-10-08）**：进入渲染前对照自查——①每篇速评三段
-齐全且逐条满足 §5.5 字数上限；②导读条目与正文一致；③所有数字与素材/资讯原文一致，
-不得编造；④无「首次 / 重大突破 / 国际领先 / 填补空白」等夸大措辞。发现不符先改
-JSON 再进步骤 5（探针管结构，本步管措辞，两道闸门互补）。
+  齐全且逐条满足 §5.5 字数上限；②不撰写导读文字（头部数量统计与概览由渲染器自动生成）；③资讯条目与网页昨日文件逐条
+  对应（政策标准与重点新闻条数须一一对齐、不得遗漏）；④所有数字与素材/资讯原文一致，
+  不得编造；⑤无「首次 / 重大突破 / 国际领先 / 填补空白」等夸大措辞；⑥`title` 已按 §8.5.0
+  自拟（钩子 12–24 字、无禁词、含【日报 日期】后缀、钩子句式与上期不同构）。发现不符先改
+  JSON 再进步骤 5（探针管结构，本步管措辞，两道闸门互补）。
 
 **步骤 5 — 渲染与探针**（本地）：
 
@@ -420,6 +492,274 @@ node scripts/publish-wechat-draft.mjs --in data/wechat-drafts/<期号日>.json
 - 异常与处理：无 / 描述
 ```
 
+## 8.6 job: daily-digest（研究速览「当日新增」AI 日报，写库）
+
+> 渠道设计真值 = `PLAN-DAILY-DIGEST.md`。与 §5/§6/§6.5 同一条写库链路，区别只有三点：
+> 窗口 = 单个北京业务日；`kind = 'daily'`；无方向维度（`direction` 恒为 `null`）。
+> **并入每日 06:30 作业**，排在 wechat-daily 之前——先落库站内日报，公众号日报随后复用
+> 同一批素材，两者互不干扰。
+
+**步骤 1 — 导出当日素材**（`sc_run`）：
+
+```
+Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\export-report-batch.mjs --kind daily
+```
+
+默认窗口 = 北京时间**今天**（`--date YYYY-MM-DD` 可显式指定，用于补跑历史某天）。输出摘要含
+`exported / kind / period / total / prev_total / top=[...]`，素材落 `data\report-batch-daily-<日期>.json`。
+抓取作业 05:00 已跑完，06:30 取「今天」即当日新增全量。**空窗口（total=0）跳过本 job**——
+无新增不写日报（前端「当日新增」页自然走空态），不要写一份空报告入库。
+
+**步骤 2 — 下载通读**：`sc_download` 素材 → 本地 `_ai-jobs-work\batch-daily-<日期>.json`，
+分段完整读完（日增量 4–60 篇，通常一轮读完，不必压缩视图）。
+
+**步骤 2.5 — 全文获取（2026-10-16 新增，用户要求：不再只依据摘要）**：
+
+当日新增文献**必须先下载全文再写分析**，用已打通的 `webvpn-paper-fetch` skill：
+
+```bash
+S="C:/Users/admin/.workbuddy/skills/webvpn-paper-fetch/scripts"
+# ① 会话检查（过期则登录；凭据见 user-level MEMORY.md，勿写入仓库）
+node "$S/wv.mjs" status || node "$S/wv.mjs" login
+# ② 批量下载：把素材里的 DOI 逐行写入 dois.txt
+node "$S/wv.mjs" batch dois.txt -o <工作目录>/papers
+# ③ 生成分析素材包（全文 + 分析要求 + 输出 JSON schema）
+node "$S/read.mjs" batch <工作目录>/papers -o <工作目录>/inputs
+# ④ 分析完成后清理 PDF（PDF 只是中间产物，不长期保存）
+node "$S/read.mjs" cleanup --days 0
+```
+
+**中文刊**（万方，无 DOI 或 DOI 不可下载者）改用 `node "$S/wanfang-fetch.mjs" --list titles.txt -o <工作目录>/papers`。
+
+**逐篇完整读完** `inputs/*.md`（内含全文，不截断），据此撰写分析与速评。
+下载失败的文献降级为摘要分析，并在正文中如实标注「该篇未获取全文」。
+
+> ⚠️ **覆盖要求（2026-10-24 用户规则，替代原「>30 篇只做重点」性能约束）**：
+> 当日**每一篇**文献都必须有「核心创新点」（`articles.deep_analysis`），**全部下载全文并逐篇完整阅读**，不做重点子集。
+> 篇数大时可分多轮会话完成，但当日 daily-digest 写库闭环（apply-report + apply-deep-analysis）以 deep_analysis 覆盖数 = 当日 total 为完成标准。
+> 个别下载失败的文献允许降级：基于摘要撰写创新点，并在该条 innovations 的 points 中如实标注「全文获取失败，基于摘要」。
+
+**步骤 2.6 — 写回「核心创新点」（2026-10-17 新增，必做）**：
+
+> ⚠️ **速评与创新点是两条独立的写库路径，只做其一站上就会缺内容**：
+> · 速评 → `ai_reports.stats_json.paperBriefs`（走步骤 4 的 `apply-report.mjs`）
+> · **创新点 → `articles.deep_analysis` + `articles.figure_path`（走本步骤的 `apply-deep-analysis.mjs`）**
+> 2026-10-17 的教训：作业按步骤 2.5 读了全文、也写了速评，但**没有写创新点**，
+> 结果站上「核心创新点」区块全空 —— 因为当时 RUNBOOK 只定义了「读全文」这个输入侧动作，
+> 没定义产出侧。**本步骤与步骤 4 必须都执行。**
+
+① **提取配图**（摘要图 / 技术路线图；无合适配图可跳过）：
+
+```bash
+# 必须用 skill 的 fig1.py（v4：图注栏区域生长，合并全部子图/矢量簇）。
+# ⚠️ 不要再用「第一张内嵌图的 bbox」——多面板/跨栏 Fig.1 只会截到一个子图，
+#    2026-10-27 用户反馈「24 号很多摘要图不全」的根因就是旧 v1–v3 只取局部图对象。
+python "$S/fig1.py" figs <id>=papers/x.pdf [<id2>=papers/y.pdf ...]
+# 输出 figs/<id>.png 与 figs/_fig1-report.json（status=ok/no-fig/bad-pdf + clip）
+```
+
+**配图自检（必做）**：抽 5–10 张查看，确认①没有只截到半张图/缺面板；②没有带入正文、标题、作者或邻栏表格。批量时生成 contact sheet 目检更快；发现 `clip` 贴边或尺寸异常（宽<120px / 高<80px）时人工复核。
+
+② **写分析结果 JSON**（数组，每篇一条），存 `data\deep-analysis-inbox.json`：
+
+```json
+[
+  { "id": 138789, "figure": "138789.png", "pages": 17, "chars": 86243,
+    "innovations": [ { "title": "一句话概括", "points": ["支撑论据（可用 <b> 强调）"], "value": "价值句" } ],
+    "method": { "object": "…", "theory": "…", "control": "…", "validation": "…" } }
+]
+```
+
+纪律：`innovations` **至少 1 条**（通常 2–3 条）；`points` 支持 `<b>` 强调（前端按富文本渲染）；
+**只写全文里有的内容，不得编造**；`figure` 无图时省略。
+
+③ **配图**放 `<工作目录>/figs/`，与 JSON 一并 `sc_upload` 到远端
+`data\deep-analysis-inbox.json` 与 `data\deep-analysis-figs\`，然后写库：
+
+```
+Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\apply-deep-analysis.mjs --in data\deep-analysis-inbox.json --figdir data\deep-analysis-figs
+```
+
+核对 **`updated` = 当日需写回篇数、`invalid` = 0**；配图缺失只会提示跳过配图、不阻塞分析落库。
+
+④ **自检**（必做）：写完后查一句确认落库成功：
+
+```
+Set-Location 'E:\SC\文献推送'; $py='E:\SC\.sc-remote-runner\python-env\Scripts\python.exe'; \
+  "import sqlite3;c=sqlite3.connect(r'data/literature.sqlite');\
+   print(c.execute(\"SELECT COUNT(*) FROM articles WHERE substr(COALESCE(first_public_at,published_at,first_seen_at),1,10)=date('now','+8 hours') AND deep_analysis IS NOT NULL AND deep_analysis<>''\").fetchone()[0])" | & $py -
+```
+
+**步骤 3 — 撰写**（正文结构即 UI：前端按小节渲染）：
+
+```markdown
+# 当日新增文献分析 · {periodStart}（{total} 篇）
+
+## 当日分析摘要
+<2–5 句：主题主线 / 方法取向 / 结论强度 / 与昨日对比（stats.previous 可用）>
+```
+
+> **正文只写「## 当日分析摘要」一节，不要写标题下的总述句。**（2026-10-16 用户需求）
+> 篇数、来源期刊、方向分布这些数字已由页内「来源与分类分布」的两组标签直接展示，
+> 正文再复述一遍属于重复信息；站上前端也只渲染"当日分析摘要"小节，标题外的段落会被丢弃。
+
+> 「重点关注」板块已于 2026-10-15 下线（用户需求）：当日文献在站上按三字段速评卡**全量**
+> 展示，再单列一份子集只会重复同样的卡。**不要再写 `## 重点关注` 小节，也不要提供 `focusIds`。**
+
+**步骤 4 — 写回**（`sc_upload` 结果到 `data\report-inbox.json`，**必须同时给 --export**）：
+
+```
+Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\apply-report.mjs --export data\report-batch-daily-<日期>.json --file data\report-inbox.json
+```
+
+**步骤 5 — 核对**：`updated=1 invalid=0`；`briefCount` = 当日篇数。
+`invalid` 的 errors 会说明原因（幻觉 id / 头字段不一致 / 速评漏篇 / 字段超长），修正重传；
+连续两次失败 → §8。
+
+**结果 JSON 契约**（同 §5.4，无 `focusIds`）：
+
+```json
+{
+  "exportedAt": "<原样带回素材顶层 exportedAt>",
+  "kind": "daily",
+  "periodStart": "<原样带回，与 periodEnd 相同>",
+  "periodEnd": "<原样带回>",
+  "direction": null,
+  "contentMd": "<步骤 3 全文>",
+  "topTopics": ["共享储能", "配电网重构"],
+  "paperBriefs": [ { "id": 12345, "object": "…", "method": "…", "finding": "…" } ]
+}
+```
+
+**纪律（硬性）**：
+1. `kind / periodStart / periodEnd / exportedAt` 四个头字段与素材逐字一致，`direction` 恒为 `null`。
+2. `paperBriefs` **必须覆盖当日批次每一篇**（缺一篇整批拒收），三字段按 §5.5 上限（对象 ≤30 / 方法 ≤40 / 结论 ≤50 字）。
+3. **不写「重点关注」**：`contentMd` 里不要出现 `## 重点关注` 小节，结果 JSON 也不要带 `focusIds`
+   （该字段与 highlightIds 一样已下线；apply 侧仍容错接受，写了不会拒收，但站上不再展示）。
+4. `highlightIds` 仍是保留字段，一律填 `[]`（2026-10-13 起永久下线）。
+5. `contentMd` 非空且 ≤20 000 字符；**标题下不写总述句**（数字重复），只写「当日分析摘要」小节；数字抄素材；**评语须依据步骤 2.5 下载的全文（未获取到全文的文献才退回摘要，并在其速评中如实标注）**，全文与摘要都没写的不得编造。
+6. 素材带 `priorBrief` 的文献三字段逐字复用（同日重跑、或该篇已在本周周报写过速评时）。
+7. 正文内所有 `[id]` 必须属于当日导出批次（写错会指向错误文献）。
+
+### 8.6.2 汇报
+
+```
+【站内当日新增】<日期>
+- 素材：当日新入库 N 篇（含待方向标注 M 篇），priorBrief 命中 R 篇
+- 写回：kind=daily period=<日期> briefCount=N invalid=0
+- 跳过：total=0（无新增，未写日报） / 未跳过
+- 异常与处理：无 / 描述
+```
+
+## 8.7 job: 文献专题选题（每天 10:00，只选题不制作）
+
+> 设计真值 = `DESIGN-WECHAT-TRANS-COLUMN.md` v4。与 §8.5/§8.6 的区别：**本 job 只产出选题单，不写库、不渲染、不发布**。
+> 制作是另一条链路（用户选定后手动触发，见 §8.7.2）。
+
+### 8.7.1 选题（每天 09:00 自动跑）
+
+**步骤 0 — 查队列积压**（本地）：
+
+```
+node scripts/topic-queue.mjs list
+```
+
+记下 `status=queued` 的条数 N，据此决定本次出几组：N ≥ 3 只出 2 组并提示先清队列；N = 1–2 正常出 4 组但注明积压；N = 0 正常出 4 组。
+
+**步骤 1 — 全库导出 + 主题聚簇**（`sc_run`，超时给 180 秒）：
+
+```
+Set-Location 'E:\SC\文献推送'; & .runtime\node\node.exe scripts\export-topic-candidates.mjs --days 0 --limit 5000 --cluster --cluster-limit 80
+```
+
+`--days 0` = **全库不设时间窗**（专题可能跨越数年，按月切会切断线索）。排序用 `first_seen_at`（`first_public_at` 对 TSE 有系统性偏差）；排除 5 个方向 + `other`；**不按 `deep_analysis` 过滤**。
+
+输出三个文件：`topic-candidates.json`（含摘要，约 1.4 MB）、`topic-candidates-compact.json`（标题级）、`topic-clusters.json`（约 115 KB）。
+
+**聚簇规则**（脚本内实现）：标题的英文 bigram 与中文 2-gram 建倒排；词频 ≥3 且单簇 ≤25 篇；领域泛词对（power system / distribution network / smart grid / electric vehicle 等）剔除，单复数归一；重叠 >60% 的簇去重；按「是否短语 → IEEE Trans 篇数 → 簇大小」排序，输出 80 个簇。
+
+`total < 200` 或 `clusterCount = 0` → 如实汇报异常并结束。
+
+**步骤 2 — 下载**：`sc_download` 到 `_ai-jobs-work\topics\`：
+· `topic-clusters.json` → **完整读完**，这是粗筛依据
+· `topic-candidates.json` → **不要读**，只供步骤 4 按 id 取摘要
+
+**步骤 3 — 粗筛**：从 80 个簇里挑 8–10 个能成专题的。判据：term 是「问题/技术路线」不是学科名；`transRatio` 高者优先；簇间主题不重叠（`state estimation` 与 `system state` 只取其一）；term 只是半个短语、看不出具体问题的剔除。
+
+**步骤 4 — 细选**（关键）：对每个候选簇按 id 读摘要——
+
+```
+node scripts\topic-lookup.mjs --ids <簇内全部 id，逗号分隔> --chars 320
+```
+
+逐篇判断是否真属于同一专题：优先 IEEE Transactions；同簇里只共享一个泛词的剔掉；**篇数不设上限，3–8 篇为宜**，超过 8 篇说明主题太宽（收窄主题或拆两组）；凑不成专题的簇放弃，从备选簇补。
+
+**步骤 5 — 组 4 组**：互不重叠、至少覆盖 3 个方向；`recommended.json` 里 `picked=true` 的不再推荐，推荐满 3 次未 picked 的沉底。
+
+**步骤 6 — 写选题单**：`data\wechat-topics\<日期>.json` + `.md`，再过 §2.1 去 AI 味（双层流程内嵌执行，只改评述，不动论文标题）。
+JSON 字段固定：`{ date, window:{days:0,total}, excluded:[], groups:[{ index, topic, directions:[], articleIds:[], why }] }` —— 队列脚本按这个结构读。
+
+**步骤 7 — 贴图文字兜底**（每次必跑）：
+
+```
+node scripts\wechat-poster.mjs --all
+```
+
+扫描 `data\wechat-topics\*-issue*.json`（正式期稿，自动排除 `.bak`/`.humanizer*` 等中间版本），为缺 `poster` 字段的期稿生成兜底 `.poster.txt`。脚本报「缺 poster 字段」或「字数超上限」时，在汇报里点名是哪一期。
+
+**步骤 8 — 汇报**：队列积压 N、全库总量、各方向数量、簇总数、各组专题名与篇数、贴图文字状态。
+
+### 8.7.2 制作（用户回复「选 ②」后手动跑）
+
+**多选与排队**：用户回「选 ② ④」时，第一个立即做，其余入队：
+
+```
+node scripts/topic-queue.mjs add --from data\wechat-topics\<日期>.json --groups 4
+```
+
+入队会把对应文章在 `recommended.json` 里标 `picked=true`，后续不再推荐。队列状态：`queued → building → drafted → published`。
+
+```
+① 选题来源二选一：
+   · 用户指定组号 → 读 data\wechat-topics\<日期>.json 取该组
+   · 用户说「做队列」→ node scripts/topic-queue.mjs take（取队首并标 building）
+② 3–4 篇逐篇：有 deep_analysis 直接用；没有的下载全文补做
+   （复用 §8.6 步骤 2.5/2.6 链路：wv.mjs batch → read.mjs → fig1.py → apply-deep-analysis.mjs）
+③ 写期稿 JSON：专题名 / 导语 / 每篇一句话判断 + 局限 + 可迁移
+   创新点与技路线从库里逐字复制，禁止手抄改写
+④ 去 AI 味（§2.1）：只改导语、一句话判断、局限、可迁移四处
+⑤ node scripts\wechat-topic-render.mjs --in <期稿.json>
+⑥ node scripts\probe-wechat-topic.mjs --in <期稿.html> --issue <期稿.json>
+⑦ node scripts\upload-wechat-image.mjs --in <期稿.json>   ← 摘要图换 mmbiz URL
+⑧ 重跑 ⑤（图片地址变了要重渲染）+ ⑥
+⑨ 贴图配套文字（每期必出）：图由系统生成（标题图 + 每篇摘要图），文字是图文对照说明：
+   期稿 JSON 写 poster 字段：lead 一句话 ≤40 字（这期讲什么）+ items 与 papers 一一对应（每条 ≤30 字，写结论不写主题）
+   node scripts\wechat-poster.mjs --in <期稿.json>
+   → <期稿>.poster.txt（总 ≤200 字）
+   编号 ①②③④ 与「配图 N」由脚本生成，手写会错位；配图 N = 第 N 篇的摘要图（不含标题图）
+⑩ node scripts\publish-wechat-draft.mjs --in <期稿.json>
+   → 单条 draft/add 写入专题草稿（脚本按 JSON 里有无 papers 自动识别类型与封面）
+   → **脚本到此为止，不群发**：发不发、用群发还是后台「发布」、要不要和日报合成
+     一条多图文（--extra），全部由人决定
+⑪ 若这一期来自队列：node scripts\topic-queue.mjs done --id <队列id> --issue <期稿.json>
+   → 标记 drafted 并回填期稿路径；人工发布后回填 status=published（可选）
+```
+
+**红线**：
+- ⑦ 不跑，⑨ 会直接报 `IMG` 错误拒绝发布（正文里是本地路径，手机上是白框）
+- 创新点/技术路线逐字复用，去 AI 味只作用于评述文字
+- 双图文重跑时脚本会先 `draft/delete` 再 `draft/add`（`draft/update` 无法追加条目），草稿未发布，删除无风险
+- 队列里 `picked=true` 的文章不得再出现在新选题单里
+
+### 8.7.3 汇报
+
+```
+【文献专题选题】<日期>
+- 池子：近 N 天 M 篇（扩窗：是/否），方向分布 …
+- 选题：4 组（各组专题名 + 篇数）
+- 去 AI 味：改动 K 处，主要模式族 …
+```
+
 ## 9. 附录 A · 定时任务配置与提示词
 
 | 项 | 周作业 | 月作业 | 公众号日报 |
@@ -442,10 +782,10 @@ node scripts/publish-wechat-draft.mjs --in data/wechat-drafts/<期号日>.json
 执行 literature-ai-jobs skill（若未加载，通读项目根目录 RUNBOOK-AI-JOBS.md），运行「月作业」两步：① report——按手册第 6 节导出上月完整自然月素材（--kind monthly --month 上月）生成全方向总览月报（含环比与新兴主题）；② 逐方向专报——按第 6.5 节为上月所有非零方向逐个生成月度方向专报（主题聚类形式）。素材中带 priorBrief 的文献，其三字段速评必须逐字复用、禁止改写，仅对无 priorBrief 的文献新写（手册第 5.5/6 节复用规则）。全部结果写入 _ai-jobs-work\direction-inbox\ 后整目录上传，用 apply-reports-bulk.mjs --dir data\direction-inbox 批量写回。写回前按第 7 节自检（含 priorBrief 复用一致性）。最后按第 8 节模板汇报。全程遵守第 2 节红线。sc-remote 不可用或脚本缺失时汇报终止，不做变通。
 ```
 
-**公众号日报提示词（原文粘贴，与定时任务「每日 06:30」逐字一致）：**
+**每日作业提示词（原文粘贴，与定时任务「每日 06:30」逐字一致；该任务同时产出站内「当日新增」日报与公众号日报）：**
 
 ```
-执行 literature-ai-jobs skill（若未加载，通读项目根目录 RUNBOOK-AI-JOBS.md），运行「job: wechat-daily」（第 8.5 节）：⓪ 先按第 4 节执行 classify 增量一轮（export-direction-batch.mjs --limit 400 只导未分类 → 会话按 4.2/4.3 分类 → apply-directions.mjs 写回，invalid 必须=0；exported=0 空跑属正常）——必须在导出日报素材之前完成，使素材带方向；① sc_run 远端跑 scripts\export-wechat-daily.mjs 导出昨日新入库文献素材（空窗口≠失败，如实写「今日无新入库文献」），sc_download 到 _ai-jobs-work\wechat-daily\ 并 Read 完整读完；② Read 本地 data\daily-news\<昨日>.md（不存在则资讯板块如实留空）；③ 精选 5-8 篇写三字段速评（契约同第 5.5 节：对象≤30/方法≤40/结论≤50 字，priorBrief 逐字复用禁止改写；精选优先级（期刊从高到低）：TSG > TPS > TSE > 电力系统自动化 > 中国电机工程学报 > Applied Energy > Energy，同级多篇按方向分散，高优先级不足 5 篇按序顺延），资讯收录当日全部政策标准与全部重点新闻（与网站同源同量，不得因条目多而省略），逐条概览式短句改写、**加粗**关键数字、不得编造；④ Write data\wechat-drafts\<期号日>.json（期号日=今天，报道窗口=昨日）；④.5 交稿自评：对照自查——每篇速评三段齐全且逐条满足 5.5 字数上限、导读与正文条目一致、所有数字与素材/资讯原文一致不得编造、无「首次/重大突破/国际领先/填补空白」等夸大措辞，发现不符先改 JSON 再进 ⑤；⑤ 本地跑 scripts\wechat-render.mjs 渲染 + scripts\probe-wechat-html.mjs 探针，0 违规才算完成，校验失败修正 JSON 重跑、禁止手改 HTML；⑤.5 若 .env 已配置 WECHAT_APPID/WECHAT_SECRET，本地跑 scripts\publish-wechat-draft.mjs --in data\wechat-drafts\<期号日>.json 自动写入公众号草稿箱（失败按脚本提示如实汇报、不影响产物已完成，未配置凭据则跳过）；⑥ 清理临时文件并按第 8.5.2 节模板汇报。本 job 不写数据库、不做最后群发（草稿写入见⑤.5，人工按 scripts\sop-wechat-publish.md 点发表）。全程遵守第 2 节红线。sc-remote 不可用或脚本缺失时汇报终止，不做变通。
+执行 literature-ai-jobs skill（若未加载，通读项目根目录 RUNBOOK-AI-JOBS.md），运行「每日作业」：⓪ 先按第 4 节执行 classify 增量一轮（export-direction-batch.mjs --limit 400 只导未分类 → 会话按 4.2/4.3 分类 → apply-directions.mjs 写回，invalid 必须=0；exported=0 空跑属正常）——必须在导出任何素材之前完成，使素材带方向；⓪.5 按第 8.6 节执行 job: daily-digest（站内研究速览「当日新增」AI 日报，写库）：sc_run 远端跑 scripts\export-report-batch.mjs --kind daily 导出当日素材（默认今天），sc_download 到 _ai-jobs-work\ 并完整读完；**再按 8.6 节步骤 2.5 用 webvpn-paper-fetch skill 下载当日文献全文**（node "$S/wv.mjs" batch dois.txt 下载 → node "$S/read.mjs" batch 生成分析素材包 → 逐篇完整读完全文；中文刊改用 wanfang-fetch.mjs；下载失败者降级用摘要并在正文如实标注；分析完成后 read.mjs cleanup 清理 PDF），按 8.6 节结构写 contentMd（**只写「## 当日分析摘要」小节，标题下不写总述句**——篇数/来源/方向分布页内标签已有，重复；也不写「重点关注」）与结果 JSON（paperBriefs 必须覆盖当日每一篇、三字段按第 5.5 节上限；不带 focusIds；highlightIds 仍填 []），sc_upload 后跑 scripts\apply-report.mjs --export data\report-batch-daily-<日期>.json --file data\report-inbox.json，核对 updated=1 invalid=0；**再按 8.6 节步骤 2.6 写回「核心创新点」（必做，漏做则站上创新点区块全空）**：从 PDF 提取配图（⚠️ 必须用 get_image_rects + get_pixmap(clip=...) 区域渲染，直接 extract_image 会得到品红底的 CMYK 图）→ 写 data\deep-analysis-inbox.json（每条含 id / figure / pages / chars / innovations[≥1 条，points 可用 <b> 强调] / method）→ sc_upload JSON 与配图到远端后跑 scripts\apply-deep-analysis.mjs --in data\deep-analysis-inbox.json --figdir data\deep-analysis-figs，核对 updated=当日篇数、invalid=0；**空窗口（total=0）跳过本步、不写空报告**；① sc_run 远端跑 scripts\export-wechat-daily.mjs 导出昨日新入库文献素材（空窗口≠失败，如实写「今日无新入库文献」），sc_download 到 _ai-jobs-work\wechat-daily\ 并 Read 完整读完；② Read 本地 data\daily-news\<昨日>.md（不存在则资讯板块如实留空）；③ 精选 5-8 篇写三字段速评（契约同第 5.5 节：对象≤30/方法≤40/结论≤50 字，priorBrief 逐字复用禁止改写；精选优先级（期刊从高到低）：TSG > TPS > TSE > 电力系统自动化 > 中国电机工程学报 > Applied Energy > Energy，同级多篇按方向分散，高优先级不足 5 篇按序顺延），资讯收录当日全部政策标准与全部重点新闻（与网站同源同量，不得因条目多而省略），逐条概览式短句改写、**加粗**关键数字、不得编造；④ Write data\wechat-drafts\<期号日>.json（期号日=今天，报道窗口=昨日；**intro 字段不再需要**——头部数量统计与概览由渲染器自动生成；**title 必填：自拟钩子+【日报 YYYY-MM-DD】后缀（8.5.0）**）；④.5 交稿自评：对照自查——每篇速评三段齐全且逐条满足 5.5 字数上限、不撰写导读文字（头部数量统计与概览由渲染器自动生成）、资讯条目与网页昨日文件逐条对应（政策标准与重点新闻条数须一一对齐、不得遗漏）、所有数字与素材/资讯原文一致不得编造、无「首次/重大突破/国际领先/填补空白」等夸大措辞、标题按 8.5.0 自拟含【日报 日期】后缀且钩子句式与上期不同构，发现不符先改 JSON 再进 ⑤；⑤ 本地跑 scripts\wechat-render.mjs 渲染 + scripts\probe-wechat-html.mjs 探针，0 违规才算完成，校验失败修正 JSON 重跑、禁止手改 HTML；⑤.5 若 .env 已配置 WECHAT_APPID/WECHAT_SECRET，本地跑 scripts\publish-wechat-draft.mjs --in data\wechat-drafts\<期号日>.json 自动写入公众号草稿箱（失败按脚本提示如实汇报、不影响产物已完成，未配置凭据则跳过）；⑥ 清理临时文件并按第 8.5.2 节模板汇报。本 job 不写数据库、不做最后群发（草稿写入见⑤.5，人工按 scripts\sop-wechat-publish.md 点发表）。全程遵守第 2 节红线。sc-remote 不可用或脚本缺失时汇报终止，不做变通。
 ```
 
 ## 10. 附录 B · 常见问题

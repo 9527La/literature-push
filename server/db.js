@@ -6,7 +6,7 @@ import path from "node:path";
 import { DEFAULT_JOURNAL_BY_NAME, DEFAULT_JOURNALS, config } from "./config.js";
 import { resolveDataDirectory } from "./paths.js";
 import { containsChineseText, escapeLike, decodeEntities, isNonResearchTitle, isUsableMetadataText } from "./utils.js";
-import { businessWindow } from "./date/normalize.js";
+import { businessToday, businessWindow, shiftBusinessDate } from "./date/normalize.js";
 import { mergeFirstPublic, resolveFirstPublicDate, resolveMergedFirstPublic } from "./date/resolve-first-public.js";
 import { DIRECTIONS, isDirectionKey } from "./directions.js";
 
@@ -52,7 +52,9 @@ for (const migration of [
   "ALTER TABLE articles ADD COLUMN direction_confidence REAL",
   "ALTER TABLE articles ADD COLUMN direction_source TEXT",
   "ALTER TABLE articles ADD COLUMN direction_reason TEXT",
-  "ALTER TABLE articles ADD COLUMN classified_at TEXT"
+  "ALTER TABLE articles ADD COLUMN classified_at TEXT",
+  "ALTER TABLE articles ADD COLUMN deep_analysis TEXT",
+  "ALTER TABLE articles ADD COLUMN figure_path TEXT"
 ]) {
   try { db.exec(migration); } catch (e) {
     if (!e.message?.includes("duplicate column") && !e.message?.includes("no such table")) throw e;
@@ -98,7 +100,13 @@ db.exec(`
     direction_confidence REAL,
     direction_source TEXT,
     direction_reason TEXT,
-    classified_at TEXT
+    classified_at TEXT,
+    -- 全文深度分析（2026-10-16 新增）：JSON 字符串，形如
+    -- {"innovations":[{"title":"","points":[],"value":""}],"method":{},"results":[],
+    --  "limitations":[],"futureWork":[],"provenance":{"pages":17,"chars":86243,"truncated":false}}
+    deep_analysis TEXT,
+    -- 摘要图/技术路线图相对路径（2026-10-16 新增）：相对 data/ 目录，如 figures/137603.png
+    figure_path TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_articles_journal ON articles(journal);
@@ -281,7 +289,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS ai_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly')),
+    kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly','daily')),
     period_start TEXT NOT NULL,
     period_end TEXT NOT NULL,
     direction TEXT,
@@ -303,7 +311,7 @@ if (!db.prepare("PRAGMA table_info(ai_reports)").all().some((column) => column.n
     BEGIN;
     CREATE TABLE ai_reports_migrated (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly')),
+      kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly','daily')),
       period_start TEXT NOT NULL,
       period_end TEXT NOT NULL,
       direction TEXT,
@@ -318,6 +326,36 @@ if (!db.prepare("PRAGMA table_info(ai_reports)").all().some((column) => column.n
       SELECT id, kind, period_start, period_end, NULL, status, content_md, stats_json, generated_at, generator FROM ai_reports;
     DROP TABLE ai_reports;
     ALTER TABLE ai_reports_migrated RENAME TO ai_reports;
+    CREATE INDEX IF NOT EXISTS idx_ai_reports_kind_period ON ai_reports(kind, period_start);
+    COMMIT;
+  `);
+}
+
+// ── ai_reports kind 维度迁移（2026-10-15，PLAN-DAILY-DIGEST.md）：CHECK 约束由
+// ('weekly','monthly') 扩展为含 'daily'（研究速览「当日新增」标签页）。SQLite 不能
+// 改约束 → 重建表搬运数据。幂等：建表语句里已含 'daily' 则跳过。与上一段 direction
+// 迁移互不干扰——先跑的那段会把 'daily' 一并写进新表，后跑的那段据此跳过。
+const aiReportsTableSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ai_reports'").get()?.sql || "";
+if (aiReportsTableSql && !aiReportsTableSql.includes("'daily'")) {
+  db.exec(`
+    BEGIN;
+    CREATE TABLE ai_reports_kind_migrated (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL CHECK (kind IN ('weekly','monthly','daily')),
+      period_start TEXT NOT NULL,
+      period_end TEXT NOT NULL,
+      direction TEXT,
+      status TEXT NOT NULL DEFAULT 'ready',
+      content_md TEXT NOT NULL,
+      stats_json TEXT,
+      generated_at TEXT,
+      generator TEXT NOT NULL DEFAULT 'workbuddy-agent',
+      UNIQUE(kind, period_start, direction)
+    );
+    INSERT INTO ai_reports_kind_migrated (id, kind, period_start, period_end, direction, status, content_md, stats_json, generated_at, generator)
+      SELECT id, kind, period_start, period_end, direction, status, content_md, stats_json, generated_at, generator FROM ai_reports;
+    DROP TABLE ai_reports;
+    ALTER TABLE ai_reports_kind_migrated RENAME TO ai_reports;
     CREATE INDEX IF NOT EXISTS idx_ai_reports_kind_period ON ai_reports(kind, period_start);
     COMMIT;
   `);
@@ -787,6 +825,10 @@ export function listArticlePage(filters = {}, userId) {
       a.issue,
       a.doi,
       ${filters.full === "1" ? "a.abstract" : "substr(a.abstract, 1, 320)"} AS abstract,
+      -- 全文深度分析只在 full=1（卡片阅读等全屏场景）带出：列表页不需要，
+      -- 且 deep_analysis 是 800+ 字符的 JSON，全量返回会明显增重。
+      ${filters.full === "1" ? "a.deep_analysis" : "NULL"} AS deep_analysis,
+      ${filters.full === "1" ? "a.figure_path" : "NULL"} AS figure_path,
       a.url,
       a.published_at,
       ${displayDateSql("a")} AS display_date,
@@ -815,8 +857,25 @@ export function listArticlePage(filters = {}, userId) {
 
   const hasMore = rows.length > limit;
   const total = rows.length ? Number(rows[0].total_count || 0) : 0;
-  const articles = rows.slice(0, limit).map(({ total_count, ...article }) => article);
+  const articles = rows.slice(0, limit).map(({ total_count, ...article }) => stampFigureVersion(article));
   return { articles, hasMore, total, limit, offset };
+}
+
+// ── 摘要图 URL 版本化（2026-10-26）─────────────────────────────────────
+// /figures 走 Cloudflare 橙云代理：CF 按 URL（含 query）做边缘缓存，图文件
+// 被 AI 作业原位替换后若 URL 不变，会继续命中 CF 里旧强缓存期留下的旧图
+// （历史上源站曾发 max-age=604800，CF 按此缓存 7 天）。在 URL 上拼
+// ?v=<图文件 mtime>，图一更新 URL 随之变化 → CF MISS 回源，双端根治。
+function stampFigureVersion(article) {
+  if (!article || typeof article.figure_path !== "string") return article;
+  const m = article.figure_path.match(/^(figures\/[^/]+\.png)$/i);
+  if (!m) return article;
+  try {
+    const v = Math.floor(fs.statSync(path.join(dataDir, m[1])).mtimeMs);
+    return { ...article, figure_path: `${m[1]}?v=${v}` };
+  } catch {
+    return article; // 图文件不存在：保持原样，交给静态路由 404
+  }
 }
 
 export function listRecentArticlesForDigest(days, limit, journals = [], directions = []) {
@@ -899,12 +958,12 @@ export function getArticleForUser(id, userId) {
     ? getUserInteraction(userId, id)
     : { is_read: 0, is_favorite: 0 };
 
-  return {
+  return stampFigureVersion({
     ...article,
     ...translation,
     is_read: interaction.is_read ? 1 : 0,
     is_favorite: interaction.is_favorite ? 1 : 0
-  };
+  });
 }
 
 // ── 相关文献推荐（摘要弹窗「相关文献」，纯 SQL+JS 打分，零 AI、零联网）──────
@@ -2752,6 +2811,9 @@ export function setArticleDirectionManually(id, direction, secondary = []) {
 // 报告内容由 WorkBuddy 智能体离线生成、经 scripts/apply-report.mjs 写入
 // ai_reports 表；服务端只读渲染，任何接口都不得在这里发起 LLM/联网调用。
 
+/** 报告类型白名单：weekly=一周速览 / monthly=月度趋势 / daily=当日新增（2026-10-15）。 */
+const REPORT_KINDS = new Set(["weekly", "monthly", "daily"]);
+
 function parseReportRow(row) {
   if (!row) return null;
   let stats = null;
@@ -2775,7 +2837,7 @@ function parseReportRow(row) {
  *   （json_remove 在 SQL 层完成，避免一次列表拉全量正文与速评数组）。
  */
 export function listAiReports({ kind = "weekly", limit = 12, direction, directions, periodStart, meta = false } = {}) {
-  if (!["weekly", "monthly"].includes(kind)) return [];
+  if (!REPORT_KINDS.has(kind)) return [];
   const maxRows = Math.min(Math.max(Math.floor(Number(limit)) || 12, 1), 200);
   const params = { kind, limit: maxRows };
   const clauses = [];
@@ -2802,10 +2864,15 @@ export function listAiReports({ kind = "weekly", limit = 12, direction, directio
     clauses.push("AND period_start = @periodStart");
     params.periodStart = String(periodStart);
   }
-  // meta 模式在 SQL 层剥 paperBriefs；json_remove 对坏 JSON 返回 NULL（parseReportRow 容错）。
-  // 同时带回 brief_count（速评条数），供「卡片阅读 · 按速览期」判断该方向本期有无速评可读。
-  const statsSelect = meta ? "json_remove(stats_json, '$.paperBriefs') AS stats_json" : "stats_json";
-  const briefCountSelect = "json_array_length(COALESCE(json_extract(stats_json, '$.paperBriefs'), '[]')) AS brief_count";
+  // meta 模式在 SQL 层剥 paperBriefs；同时带回 brief_count（速评条数），供「卡片阅读 ·
+  // 按速览期」判断该方向本期有无速评可读。
+  // json_valid 守卫（2026-10-15 修）：json_extract / json_remove 对**损坏的**
+  // stats_json 会直接抛 "malformed JSON"，把整张列表接口打成 500——而 parseReportRow
+  // 本就按「坏 JSON 降级为 null」设计（ai-reports.test.js 的 45 号断言）。用
+  // CASE WHEN json_valid(...) 把非法值转成 NULL 参与运算，容错才真正成立。
+  const validStats = "CASE WHEN json_valid(stats_json) THEN stats_json END";
+  const statsSelect = meta ? `json_remove(${validStats}, '$.paperBriefs') AS stats_json` : "stats_json";
+  const briefCountSelect = `json_array_length(COALESCE(json_extract(${validStats}, '$.paperBriefs'), '[]')) AS brief_count`;
   const contentSelect = meta ? "NULL AS content_md" : "content_md";
   return db.prepare(`
     SELECT id, kind, period_start, period_end, direction, status, ${contentSelect}, ${statsSelect}, ${briefCountSelect}, generated_at, generator
@@ -2831,7 +2898,7 @@ export function getAiReportDetail({ id, kind = "weekly", periodStart, direction 
       FROM ai_reports WHERE id = ?
     `).get(numeric));
   }
-  if (!["weekly", "monthly"].includes(kind) || !periodStart) return null;
+  if (!REPORT_KINDS.has(kind) || !periodStart) return null;
   if (direction === undefined || direction === null || direction === "") {
     return parseReportRow(db.prepare(`
       SELECT id, kind, period_start, period_end, direction, status, content_md, stats_json, generated_at, generator
@@ -2849,7 +2916,7 @@ export function getAiReportDetail({ id, kind = "weekly", periodStart, direction 
 
 /** 最新一期 ready 报告：digest 邮件置顶与 /api/reports/latest 共用（默认取总览，direction IS NULL）。 */
 export function getLatestReadyReport(kind = "weekly", direction = null) {
-  if (!["weekly", "monthly"].includes(kind)) return null;
+  if (!REPORT_KINDS.has(kind)) return null;
   return parseReportRow(db.prepare(`
     SELECT id, kind, period_start, period_end, direction, status, content_md, stats_json, generated_at, generator
     FROM ai_reports
@@ -2857,4 +2924,132 @@ export function getLatestReadyReport(kind = "weekly", direction = null) {
     ORDER BY period_start DESC, id DESC
     LIMIT 1
   `).get(kind, direction));
+}
+
+/**
+ * 按文章 ID 批量取速评（2026-10-16 新增）。
+ *
+ * 场景：卡片阅读的「文献库 → 自定义范围」入口——该路径的文章来自 /api/articles，
+ * 不携带任何报告上下文，此前 ReaderSetup 直接把 briefs 写成空数组，导致
+ * 速评版在该入口下永远显示「本期暂无速评」。研究速览侧（分组/聚类/方向/当日新增）
+ * 都是从周报 stats.paperBriefs 取的，不受影响。
+ *
+ * 做法：扫最近 limitReports 期 ready 报告（weekly / monthly / daily 全含），
+ * 从 stats_json.paperBriefs 里挑出命中目标 ID 的条目；同一 ID 取最新一期。
+ * json_valid 守卫：损坏的 stats_json 直接跳过，不影响其它报告。
+ * 返回顺序与传入 ids 一致，便于前端与文章列表对齐。
+ *
+ * ⚠️ limitReports 默认 500（2026-10-16 实测调整）：生产库现有 134 份报告，
+ * 默认值若只有 60 则只覆盖 815/2077 篇速评（漏 60%）。报告为按需查询，
+ * 500 期全扫实测在毫秒级，且「全部命中即 break」会提前退出。
+ */
+export function getBriefsByIds(ids = [], { limitReports = 500 } = {}) {
+  const list = Array.isArray(ids) ? ids : [];
+  const wanted = new Set(list.map(Number).filter((n) => Number.isFinite(n) && n > 0));
+  if (!wanted.size) return [];
+  const max = Math.min(Math.max(Math.floor(Number(limitReports)) || 500, 1), 2000);
+
+  const rows = db.prepare(`
+    SELECT stats_json
+    FROM ai_reports
+    WHERE status = 'ready' AND stats_json IS NOT NULL AND json_valid(stats_json)
+    ORDER BY period_start DESC, id DESC
+    LIMIT @limit
+  `).all({ limit: max });
+
+  const found = new Map();
+  for (const row of rows) {
+    let stats = null;
+    try { stats = JSON.parse(row.stats_json); } catch { continue; }
+    const briefs = Array.isArray(stats?.paperBriefs) ? stats.paperBriefs : [];
+    for (const brief of briefs) {
+      const id = Number(brief?.id);
+      if (id && wanted.has(id) && !found.has(id)) found.set(id, brief);
+    }
+    if (found.size >= wanted.size) break; // 目标全部命中，提前退出
+  }
+  return list.map(Number).map((id) => found.get(id)).filter(Boolean);
+}
+
+// ── 研究速览「当日新增」实时统计（PLAN-DAILY-DIGEST.md，2026-10-15）────────────
+// 口径与 export-wechat-daily.mjs / listRecentArticlesForDigest 逐条对齐，避免同一批
+// 数据在日报与网站算出两个「当日新增」：
+//   · 窗口 = 单个北京时间业务日（displayDateSql = date），不做近 N 日近似；
+//   · 排除 7 类垃圾标题（目录 / 封面 / 勘误等）；
+//   · 排除 research_direction='other'（其他方向不进任何用户可见面）；
+//   · 方向为 NULL 计为 unclassified，不归入任何方向（与 stats.unclassified 同义）。
+// 只读、零 LLM：前端打开「当日新增」即有数，不依赖 AI 日报作业是否跑过。
+const DAILY_JUNK_TITLE_CLAUSES = [
+  "lower(a.title) NOT LIKE '%information%'",
+  "lower(a.title) NOT LIKE '%table of contents%'",
+  "lower(a.title) NOT LIKE '%blank page%'",
+  "lower(a.title) NOT LIKE 'correction to%'",
+  "lower(a.title) NOT LIKE '%publication information%'",
+  "lower(a.title) NOT LIKE '%front cover%'",
+  "lower(a.title) NOT LIKE '%back cover%'"
+].join("\n      AND ");
+
+/** 单个业务日的入库篇数（与 getDailyDigest 同口径，供「较昨日」环比）。 */
+function countDailyArticles(day) {
+  if (!day) return 0;
+  const row = db.prepare(`
+    SELECT COUNT(*) AS n FROM articles a
+    WHERE ${displayDateSql("a")} = @date
+      AND ${DAILY_JUNK_TITLE_CLAUSES}
+      AND ${EXCLUDE_OTHER_CLAUSE}
+  `).get({ date: String(day) });
+  return Number(row?.n || 0);
+}
+
+/**
+ * 当日新增实时统计：数量 / 来源分布（按期刊）/ 分类情况（按方向）/ 文献清单。
+ * date 非法或缺省 → 北京业务日今天。articles 为轻量行（无摘要正文），
+ * 清单点击后仍走 /api/articles/:id 取详情，与其余页面同源。
+ */
+export function getDailyDigest(date) {
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(date || "")) ? String(date) : businessToday();
+  const rows = db.prepare(`
+    SELECT a.id, a.title, a.journal, a.research_direction,
+      ${displayDateSql("a")} AS display_date,
+      zh.title AS translated_title
+    FROM articles a
+    LEFT JOIN translations zh ON zh.article_id = a.id AND zh.target_language = 'zh'
+    WHERE ${displayDateSql("a")} = @date
+      AND ${DAILY_JUNK_TITLE_CLAUSES}
+      AND ${EXCLUDE_OTHER_CLAUSE}
+    ORDER BY a.research_direction ASC, ${displayDateSql("a")} DESC, a.id DESC
+    LIMIT 500
+  `).all({ date: day });
+
+  const directionCounts = {};
+  const journalCounts = new Map();
+  let unclassified = 0;
+  const articles = rows.map((row) => {
+    const direction = row.research_direction && isDirectionKey(row.research_direction) ? row.research_direction : null;
+    if (direction) directionCounts[direction] = (directionCounts[direction] || 0) + 1;
+    else unclassified += 1;
+    const journal = String(row.journal || "").trim();
+    if (journal) journalCounts.set(journal, (journalCounts.get(journal) || 0) + 1);
+    return {
+      id: row.id,
+      title: row.title,
+      translated_title: row.translated_title || "",
+      journal,
+      research_direction: direction,
+      display_date: row.display_date
+    };
+  });
+
+  const previousDate = shiftBusinessDate(day, -1);
+  return {
+    date: day,
+    total: articles.length,
+    unclassified,
+    directionCounts,
+    journalCounts: [...journalCounts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    previous: { date: previousDate, total: countDailyArticles(previousDate) },
+    articles
+  };
 }
